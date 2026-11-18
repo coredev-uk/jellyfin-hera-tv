@@ -41,6 +41,7 @@ The plugin restyles Jellyfin's own pages and adds sections of its own. Jellyfin'
 | Extras | Ratings, where to watch, quality badges, hidden titles, and Maintainerr's "Leaving Soon" |
 | Activity | Sonarr, Radarr and SABnzbd progress on the titles they're fetching |
 | Notifications | A bell in the header, and "New" on titles, for your own requests (approved, downloading, ready to watch, declined), new episodes of shows you've watched in the last 90 days, and a daily summary of what arrived. Only while Jellyfin is open. Each person picks which kinds they get |
+| Letterboxd | Each person links their own Letterboxd account in Settings, and the films they watch to the end in Jellyfin go into their diary, rewatches marked. They can switch it off, import earlier watches or disconnect. Needs a Letterboxd API key and secret, which an administrator adds on the Dashboard page |
 | Statistics | A Dashboard page for admins with what's playing now, history, top users and titles, playback methods, devices and peak hours, and a page for everyone with only their own watching. History comes from the Playback Reporting plugin when it's installed. Concurrent streams, resolution, bitrate and transcoding are recorded by Hera TV itself once a minute, so they build up from the day it's installed |
 | Dashboard | Jellyfin's admin pages in the same look, plus a settings page for the plugin |
 
@@ -100,6 +101,7 @@ Everything is on the plugin's page in the Dashboard. Environment variables take 
 | `HERATV_SONARR_URL`, `HERATV_SONARR_API_KEY`, `HERATV_SONARR_PUBLIC_URL` | Sonarr |
 | `HERATV_RADARR_URL`, `HERATV_RADARR_API_KEY`, `HERATV_RADARR_PUBLIC_URL` | Radarr |
 | `HERATV_SABNZBD_URL`, `HERATV_SABNZBD_API_KEY`, `HERATV_SABNZBD_PUBLIC_URL` | SABnzbd |
+| `HERATV_LETTERBOXD_API_KEY`, `HERATV_LETTERBOXD_API_SECRET` | Letterboxd's API key and secret, so people can link their own accounts. Letterboxd only issues them to partners |
 
 Requests go through the plugin's own endpoints, so no API key reaches the browser.
 

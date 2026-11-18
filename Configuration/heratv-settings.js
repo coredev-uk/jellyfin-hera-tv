@@ -99,11 +99,14 @@ export default function (view) {
   let server = null;
   let jellyfinUsers = [];
   let directory = null; // The Seerr accounts: { ok, message, users }
+  let profiles = null; // Seerr's Radarr and Sonarr servers with their profiles: { movie, tv }
   let links = new Map(); // Jellyfin username (lower case) -> Seerr id, as edited
   let refs = null;
   let dirty = false;
   let clearKey = false;
   const clearArrKeys = new Set(); // service ids whose saved key is removed on the next save
+  const clearLetterboxd = new Set(); // "apiKey" / "apiSecret": saved values removed on the next save
+  let letterboxdLinks = null; // The linked accounts: an array, or { error }
   let barTimer = 0;
   let compat = null; // The last /HeraTV/health answer, or { error }
 
@@ -198,6 +201,21 @@ export default function (view) {
       input,
     ]);
     return { row, input };
+  };
+
+  const selectRow = (id, iconName, label, description, options, value) => {
+    const select = el("select", { id, class: "hera-set-input hera-cfg-select" }, options.map(([key, text]) => el("option", { value: key, text })));
+    select.value = value;
+    select.addEventListener("change", markDirty);
+    const row = el("div", { class: "hera-set-row hera-set-row--static" }, [
+      el("span", { class: "hera-set-row__icon" }, icon(iconName)),
+      el("label", { class: "hera-set-row__text", for: id }, [
+        el("span", { class: "hera-set-row__label", text: label }),
+        el("span", { class: "hera-set-row__desc", text: description }),
+      ]),
+      select,
+    ]);
+    return { row, select };
   };
 
   // ---------- sections ------------------------------------------------------------------------
@@ -357,6 +375,94 @@ export default function (view) {
     sections.mapping = next;
   };
 
+  // ---------- requests --------------------------------------------------------------------------
+  // Which Radarr and Sonarr profiles a request's 1080p | 4K capsule uses. Seerr lists the servers
+  // and their profiles; until it answers (or without it), the saved choice stands on its own.
+
+  // [slot in /HeraTV/settings requests.profiles, kind in /seerr/profiles, label, description]
+  const PROFILE_SLOTS = [
+    ["movieHd", "movie", "Films in 1080p", "The Radarr profile a 1080p film request uses."],
+    ["movie4k", "movie", "Films in 4K", "The Radarr profile a 4K film request uses. One on a server Seerr marks 4K makes it a 4K request."],
+    ["tvHd", "tv", "Series in 1080p", "The Sonarr profile a 1080p series request uses."],
+    ["tv4k", "tv", "Series in 4K", "The Sonarr profile a 4K series request uses."],
+  ];
+
+  const profileOptions = (kind, saved) => {
+    const options = [["", "Automatic"]];
+    for (const host of (profiles && profiles[kind]) || []) {
+      for (const profile of host.profiles) options.push([`${host.id}:${profile.id}`, `${profile.name} · ${host.name}${host.is4k ? " (4K server)" : ""}`]);
+    }
+    if (saved && !options.some(([key]) => key === saved)) options.push([saved, profiles ? "A profile Seerr no longer lists" : "Saved profile"]);
+    return options;
+  };
+
+  const requestsSection = () => {
+    const r = server.requests;
+    const picker = selectRow(
+      "heraQualityPicker",
+      "high_quality",
+      "Quality choice",
+      "Who sees the 1080p | 4K capsule on a request. Seerr only honours a chosen profile from accounts with Advanced Requests, Manage Requests or Admin.",
+      [
+        ["seerr", "Everyone Seerr lets choose"],
+        ["admins", "Administrators only"],
+        ["off", "No one: use Seerr's defaults"],
+      ],
+      r.picker,
+    );
+    const preset = selectRow(
+      "heraDefaultQuality",
+      "radio_button_checked",
+      "Starts on",
+      "The quality the capsule picks before anyone changes it.",
+      [
+        ["server", "The server's default profile"],
+        ["1080p", "1080p"],
+        ["4K", "4K"],
+      ],
+      r.defaultQuality,
+    );
+    refs.qualityPicker = picker.select;
+    refs.defaultQuality = preset.select;
+    refs.profiles = {};
+    const rows = PROFILE_SLOTS.map(([slot, kind, label, description]) => {
+      const saved = r.profiles[slot] || "";
+      const row = selectRow(`heraProfile-${slot}`, kind === "tv" ? "tv" : "movie", label, description, profileOptions(kind, saved), saved);
+      refs.profiles[slot] = row.select;
+      return row.row;
+    });
+    return group(
+      "Requests",
+      el("div", { class: "hera-set-list" }, [picker.row, preset.row, ...rows]),
+      foot(
+        profiles
+          ? "Automatic picks each resolution from the default server's profile names (2160p or 4K, 1080p, 720p)."
+          : server.seerr.url.value && server.seerr.apiKey.set
+            ? "Loading Seerr's servers and profiles…"
+            : "Connect Seerr above to choose the profiles.",
+      ),
+    );
+  };
+
+  const renderRequests = () => {
+    if (!sections.requests) return;
+    const next = requestsSection();
+    sections.requests.replaceWith(next);
+    sections.requests = next;
+  };
+
+  const loadProfiles = async () => {
+    if (!(server.seerr.url.value && server.seerr.apiKey.set)) return;
+    try {
+      profiles = await send("GET", "/seerr/profiles");
+    } catch {
+      profiles = null;
+      return;
+    }
+    // A choice already being edited isn't thrown away.
+    if (refs && !dirty) renderRequests();
+  };
+
   const maintainerrSection = () => {
     const m = server.maintainerr;
     const url = field({
@@ -480,9 +586,19 @@ export default function (view) {
       refs.switches[key] = node;
       return node;
     });
+    const leaving = numberRow(
+      "heraLeavingDays",
+      "event_busy",
+      "Leaving Soon window",
+      "Only titles leaving within this many days, 0 to 365. 0 lists everything Maintainerr has queued.",
+      server.leavingSoonDays,
+      0,
+      365,
+    );
+    refs.leavingDays = leaving.input;
     return group(
       "Home and Discover",
-      el("div", { class: "hera-set-list" }, rows),
+      el("div", { class: "hera-set-list" }, [...rows, leaving.row]),
       foot("These apply to everyone on this server. Rows that need Seerr or Maintainerr stay hidden until it's connected."),
     );
   };
@@ -519,6 +635,122 @@ export default function (view) {
     const hour = numberRow("heraArrivalsHour", "schedule", "Daily summary hour", "The hour of the day, 0 to 23 in the server's time, from which the summary of new arrivals is written.", server.notifications.arrivalsHour, 0, 23);
     refs.arrivalsHour = hour.input;
     return group("Notifications", el("div", { class: "hera-set-list" }, [refs.notifySwitch, hour.row]), foot("These apply to everyone on this server."));
+  };
+
+  // ---------- Letterboxd ----------------------------------------------------------------------
+
+  /** A write-only Letterboxd credential: the page learns only whether one is set. */
+  const letterboxdCredential = (part, id, label, help) => {
+    const s = server.letterboxd[part];
+    const locked = s.source === "env";
+    const removed = clearLetterboxd.has(part);
+    const saved = s.set && !removed;
+    const remove = !locked && s.source === "config" && !removed
+      ? button("Remove", { onclick: () => { clearLetterboxd.add(part); markDirty(); renderLetterboxd(); } })
+      : null;
+    if (remove) remove.classList.add("hera-set-btn--small");
+    return field({
+      id,
+      label,
+      description: removed ? "The saved value is removed when you save." : `${help} It stays on the server and is never shown again once saved.`,
+      value: "",
+      placeholder: locked ? `Set by ${s.variable}` : saved ? "••••••••••••••••" : "Paste it here",
+      type: "password",
+      variable: s.variable,
+      locked,
+      pill: saved && !locked ? el("span", { class: "hera-cfg-pill" }, [icon("check"), el("span", { text: "Saved" })]) : null,
+      actions: remove,
+    });
+  };
+
+  const letterboxdSection = () => {
+    refs.letterboxdSwitch = switchRow(
+      "movie_filter",
+      "Letterboxd diary",
+      "Lets each person link their own Letterboxd account. Films they watch to the end here are added to their diary.",
+      refs.letterboxdSwitch ? refs.letterboxdSwitch.getAttribute("aria-checked") === "true" : server.letterboxd.enabled,
+    );
+    const key = letterboxdCredential("apiKey", "heraLetterboxdKey", "API key", "Letterboxd only issues API keys to partners. The pair that Jellyscribe ships works.");
+    const secret = letterboxdCredential("apiSecret", "heraLetterboxdSecret", "API secret", "The shared secret that goes with the key.");
+    refs.letterboxdKey = key.input;
+    refs.letterboxdSecret = secret.input;
+
+    const result = verdict();
+    const test = button("Test connection", {
+      iconName: "bolt",
+      onclick: async () => {
+        test.disabled = true;
+        showVerdict(result, "pending", "Testing…");
+        try {
+          const body = {};
+          if (!key.input.readOnly && key.input.value.trim()) body.apiKey = key.input.value.trim();
+          if (!secret.input.readOnly && secret.input.value.trim()) body.apiSecret = secret.input.value.trim();
+          const answer = await send("POST", "/test/letterboxd", body);
+          showVerdict(result, answer.ok, answer.message);
+        } catch (error) {
+          showVerdict(result, false, await reason(error));
+        } finally {
+          test.disabled = false;
+        }
+      },
+    });
+    return el("div", { class: "hera-set-list hera-cfg-card" }, [refs.letterboxdSwitch, key.node, secret.node, el("div", { class: "hera-cfg-test" }, [test, result])]);
+  };
+
+  const letterboxdFoot = () => foot("Each person links their own account under Settings > Profile. Their password is used once to sign in and is never stored.");
+
+  const renderLetterboxd = () => {
+    const next = group("Letterboxd", letterboxdSection(), letterboxdFoot());
+    sections.letterboxd.replaceWith(next);
+    sections.letterboxd = next;
+  };
+
+  /** What a linked account's diary is doing, in a few words. */
+  const letterboxdStatus = (link) => {
+    if (link.lastError) return link.lastError;
+    const parts = [link.lastLoggedAt ? `Last logged ${when(link.lastLoggedAt)}` : "Nothing logged yet"];
+    if (!link.logFinished) parts.push("logging is off");
+    if (link.pending) parts.push(`${link.pending} waiting`);
+    return parts.join(", ");
+  };
+
+  const letterboxdAccountsSection = () => {
+    let rows;
+    if (!letterboxdLinks) {
+      rows = [el("p", { class: "hera-set-status hera-cfg-empty", text: "Loading…" })];
+    } else if (letterboxdLinks.error) {
+      rows = [el("p", { class: "hera-set-status hera-cfg-empty is-error" }, [icon("error_outline"), el("span", { text: letterboxdLinks.error })])];
+    } else if (!letterboxdLinks.length) {
+      rows = [el("p", { class: "hera-set-status hera-cfg-empty", text: "No one has linked a Letterboxd account yet." })];
+    } else {
+      rows = letterboxdLinks.map((link) =>
+        el("div", { class: "hera-set-row hera-set-row--static" }, [
+          el("span", { class: "hera-set-row__icon" }, icon(link.lastError ? "error_outline" : "movie_filter")),
+          el("span", { class: "hera-set-row__text" }, [
+            el("span", { class: "hera-set-row__label", text: link.user || "Unknown user" }),
+            el("span", { class: "hera-set-row__desc", text: `Letterboxd: ${link.username}` }),
+          ]),
+          el("span", { class: "hera-set-row__value", text: letterboxdStatus(link) }),
+        ]),
+      );
+    }
+    return group("Letterboxd accounts", el("div", { class: "hera-set-list" }, rows), foot("Films are logged shortly after they finish, and a daily task (Scheduled Tasks > Hera TV) retries any that failed."));
+  };
+
+  const renderLetterboxdAccounts = () => {
+    if (!sections.letterboxdAccounts || !sections.letterboxdAccounts.isConnected) return;
+    const next = letterboxdAccountsSection();
+    sections.letterboxdAccounts.replaceWith(next);
+    sections.letterboxdAccounts = next;
+  };
+
+  const loadLetterboxd = async () => {
+    try {
+      letterboxdLinks = (await send("GET", "/letterboxd/links")).links || [];
+    } catch (error) {
+      letterboxdLinks = { error: await reason(error) };
+    }
+    renderLetterboxdAccounts();
   };
 
   // ---------- collections ---------------------------------------------------------------------
@@ -599,6 +831,17 @@ export default function (view) {
       el("div", { class: "hera-set-list" }, [refs.collectionsSwitch, refs.homeRowsSwitch, ...groupRows]),
       el("div", { class: "hera-cfg-compat" }, [el("div", { class: "hera-cfg-test" }, [run, result]), lastLine]),
     );
+  };
+
+  // Each seasonal set on its own, under the Seasonal switch above.
+  const seasonsSection = () => {
+    refs.seasons = {};
+    const rows = server.collections.seasons.map((season) => {
+      const node = switchRow("event", season.name, "While it's on, a collection of films and series for it.", season.on);
+      refs.seasons[season.key] = node;
+      return node;
+    });
+    return group("Seasons", el("div", { class: "hera-set-list" }, rows), foot("These apply only while Seasonal is on above. A season switched off loses its collection at the next build."));
   };
 
   // ---------- compatibility -------------------------------------------------------------------
@@ -749,7 +992,7 @@ export default function (view) {
   const render = () => {
     refs = {};
     links = new Map(server.seerr.users.links.map((l) => [lower(l.username), l.seerrId]));
-    const anyLocked = [server.seerr.url, server.seerr.publicUrl, server.seerr.apiKey, server.seerr.users, server.maintainerr.url]
+    const anyLocked = [server.seerr.url, server.seerr.publicUrl, server.seerr.apiKey, server.seerr.users, server.maintainerr.url, server.letterboxd.apiKey, server.letterboxd.apiSecret]
       .concat(ARR.flatMap(([id]) => [server[id].url, server[id].publicUrl, server[id].apiKey]))
       .some((f) => f.source === "env");
     refs.arr = {};
@@ -757,6 +1000,9 @@ export default function (view) {
 
     sections.seerr = group("Seerr", seerrSection());
     sections.mapping = mappingSection();
+    sections.requests = requestsSection();
+    sections.letterboxd = group("Letterboxd", letterboxdSection(), letterboxdFoot());
+    sections.letterboxdAccounts = letterboxdAccountsSection();
     sections.compat = compatSection();
     root.replaceChildren(
       ...[
@@ -767,12 +1013,16 @@ export default function (view) {
           : null,
         sections.seerr,
         sections.mapping,
+        sections.requests,
         group("Maintainerr", maintainerrSection()),
         ...ARR.map(([id]) => sections.arr[id]),
+        sections.letterboxd,
+        sections.letterboxdAccounts,
         homeSection(),
         rowsSection(),
         notifySection(),
         collectionsSection(),
+        seasonsSection(),
         titleSection(),
         sections.compat,
         bar,
@@ -783,6 +1033,8 @@ export default function (view) {
   async function load() {
     clearKey = false;
     clearArrKeys.clear();
+    clearLetterboxd.clear();
+    letterboxdLinks = null;
     dirty = false;
     bar.classList.remove("is-on");
     root.setAttribute("aria-busy", "true");
@@ -792,6 +1044,8 @@ export default function (view) {
       directory = null;
       render();
       loadCompat();
+      loadLetterboxd();
+      loadProfiles();
       root.removeAttribute("aria-busy");
       if (server.seerr.url.value && server.seerr.apiKey.set) {
         await loadDirectory({});
@@ -823,11 +1077,17 @@ export default function (view) {
       body[bodyKey] = refs.switches[key].getAttribute("aria-checked") === "true";
     }
     body.notificationsEnabled = refs.notifySwitch.getAttribute("aria-checked") === "true";
+    body.letterboxdEnabled = refs.letterboxdSwitch.getAttribute("aria-checked") === "true";
     body.collectionsEnabled = refs.collectionsSwitch.getAttribute("aria-checked") === "true";
     body.homeRowsEnabled = refs.homeRowsSwitch.getAttribute("aria-checked") === "true";
     body.collectionGroups = Object.fromEntries(Object.entries(refs.collectionGroups).map(([id, node]) => [id, node.getAttribute("aria-checked") === "true"]));
     body.arrivalsHour = refs.arrivalsHour.value === "" ? undefined : Number(refs.arrivalsHour.value);
     body.watchRegion = refs.region.value.trim();
+    body.leavingSoonDays = refs.leavingDays.value === "" ? undefined : Number(refs.leavingDays.value);
+    body.seasons = Object.fromEntries(Object.entries(refs.seasons).map(([key, node]) => [key, node.getAttribute("aria-checked") === "true"]));
+    body.requestQualityPicker = refs.qualityPicker.value;
+    body.requestDefaultQuality = refs.defaultQuality.value;
+    body.requestProfiles = Object.fromEntries(Object.entries(refs.profiles).map(([slot, select]) => [slot, select.value]));
     const open = (input) => !input.readOnly;
     if (open(refs.seerrUrl)) body.seerrUrl = refs.seerrUrl.value.trim();
     if (open(refs.seerrPublicUrl)) body.seerrPublicUrl = refs.seerrPublicUrl.value.trim();
@@ -848,6 +1108,13 @@ export default function (view) {
       if (refs.seerrApiKey.value.trim()) body.seerrApiKey = refs.seerrApiKey.value.trim();
       else if (clearKey) body.clearSeerrApiKey = true;
     }
+    for (const [part, bodyKey, clearField] of [["apiKey", "letterboxdApiKey", "clearLetterboxdApiKey"], ["apiSecret", "letterboxdApiSecret", "clearLetterboxdApiSecret"]]) {
+      const input = part === "apiKey" ? refs.letterboxdKey : refs.letterboxdSecret;
+      if (open(input)) {
+        if (input.value.trim()) body[bodyKey] = input.value.trim();
+        else if (clearLetterboxd.has(part)) body[clearField] = true;
+      }
+    }
     if (server.seerr.users.source !== "env") {
       body.seerrUsers = [...links]
         .map(([name, id]) => {
@@ -861,8 +1128,10 @@ export default function (view) {
       server = await send("POST", "", body);
       clearKey = false;
       clearArrKeys.clear();
+      clearLetterboxd.clear();
       render();
       settle("Saved");
+      loadLetterboxd();
       if (server.seerr.url.value && server.seerr.apiKey.set) {
         await loadDirectory({});
         if (refs && !dirty) renderMapping();

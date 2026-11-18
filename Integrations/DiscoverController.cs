@@ -138,7 +138,7 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         }
 
         var qualities = await QualitiesAsync(mediaType == "tv" ? "tv" : "movie", seerrUser.Value).ConfigureAwait(false);
-        return Ok(new { qualities = qualities.Select(q => new { profileId = q.ProfileId, label = q.Label, isDefault = q.IsDefault }) });
+        return Ok(new { qualities = qualities.Select(q => new { serverId = q.ServerId, profileId = q.ProfileId, label = q.Label, isDefault = q.IsDefault }) });
     }
 
     [HttpPost("discover/requests")]
@@ -167,15 +167,17 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         }
 
         // A chosen quality is one of the profiles this person was offered; Seerr takes the server's
-        // root folder and language profile as they are.
+        // root folder and language profile as they are. One on a server Seerr marks 4K is a 4K request.
         if (body.ProfileId is int profileId)
         {
-            var quality = (await QualitiesAsync(type, seerrUser.Value).ConfigureAwait(false)).Find(q => q.ProfileId == profileId);
+            var offered = await QualitiesAsync(type, seerrUser.Value).ConfigureAwait(false);
+            var quality = offered.Find(q => q.ProfileId == profileId && (body.ServerId is not int serverId || q.ServerId == serverId));
             if (quality is null)
             {
                 return BadRequest(new { message = "That quality isn't available for requests." });
             }
 
+            payload["is4k"] = quality.Is4k;
             payload["serverId"] = quality.ServerId;
             payload["profileId"] = quality.ProfileId;
         }
@@ -192,19 +194,30 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         });
     }
 
-    // Seerr's permission bits that let a request name its own server and profile.
+    // Seerr's permission bits: naming a server and profile, and requesting from a 4K server.
     private const long AdminPermission = 2;
     private const long ManageRequestsPermission = 16;
+    private const long Request4kPermission = 1024;
+    private const long Request4kMoviePermission = 2048;
+    private const long Request4kTvPermission = 4096;
     private const long AdvancedRequestPermission = 8192;
 
     /// <summary>
-    /// The qualities a request may pick: the default Radarr or Sonarr server's profiles, one per
-    /// resolution (720p, 1080p, 4K) in that order, the server's own default marked. Empty when there
-    /// is only one, or when the person's Seerr account may not choose: Seerr ignores a profile from
-    /// anyone without Advanced Requests, so offering it would be a lie.
+    /// The qualities a request may pick, in resolution order (720p, 1080p, 4K). By default they are
+    /// read off the default Radarr or Sonarr server's profile names, one per resolution; the admin
+    /// may name the 1080p and 4K profiles outright (Settings: Requests), a 4K one on a server of its
+    /// own. Empty when there is only one, when the setting hides the capsule from this person, or
+    /// when their Seerr account may not choose: Seerr ignores a profile from anyone without Advanced
+    /// Requests, so offering it would be a lie.
     /// </summary>
     private async Task<List<Quality>> QualitiesAsync(string type, int seerrUser)
     {
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        if (config.RequestQualityPicker == "off" || (config.RequestQualityPicker == "admins" && !User.IsInRole("Administrator")))
+        {
+            return [];
+        }
+
         var account = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}", TimeSpan.FromMinutes(5)).ConfigureAwait(false);
         var permissions = account?["permissions"]?.GetValue<long>() ?? 0;
         if ((permissions & (AdminPermission | ManageRequestsPermission | AdvancedRequestPermission)) == 0)
@@ -212,38 +225,86 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
             return [];
         }
 
+        var may4k = (permissions & (AdminPermission | Request4kPermission | (type == "tv" ? Request4kTvPermission : Request4kMoviePermission))) != 0;
         var service = type == "tv" ? "sonarr" : "radarr";
-        var servers = await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
-        var server = servers?.AsArray().FirstOrDefault(s => s?["isDefault"]?.GetValue<bool>() == true && s?["is4k"]?.GetValue<bool>() != true);
-        if (server?["id"]?.GetValue<int>() is not int serverId)
+        var servers = (await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(10)).ConfigureAwait(false))?.AsArray();
+        var byLabel = new Dictionary<string, Quality>(StringComparer.Ordinal);
+        var standard = servers?.FirstOrDefault(s => s?["isDefault"]?.GetValue<bool>() == true && s?["is4k"]?.GetValue<bool>() != true);
+        if (standard?["id"]?.GetValue<int>() is int serverId)
+        {
+            var activeProfile = standard["activeProfileId"]?.GetValue<int>();
+            foreach (var (id, name) in await ProfilesAsync(service, serverId).ConfigureAwait(false))
+            {
+                if (Resolution(name) is not { } label)
+                {
+                    continue;
+                }
+
+                var isDefault = id == activeProfile;
+                if (!byLabel.TryGetValue(label, out var known) || (isDefault && !known.IsDefault))
+                {
+                    byLabel[label] = new Quality(serverId, id, label, isDefault, false);
+                }
+            }
+        }
+
+        // Profiles the admin named outright replace the guesses for their resolution.
+        var (hd, uhd) = type == "tv" ? (config.RequestTvHdProfile, config.RequestTv4kProfile) : (config.RequestMovieHdProfile, config.RequestMovie4kProfile);
+        foreach (var (setting, label) in new[] { (hd, "1080p"), (uhd, "4K") })
+        {
+            if (await NamedAsync(service, servers, setting, label).ConfigureAwait(false) is { } named)
+            {
+                byLabel[label] = named with { IsDefault = byLabel.TryGetValue(label, out var guessed) && guessed.IsDefault };
+            }
+        }
+
+        var offered = byLabel.Values.Where(q => !q.Is4k || may4k).OrderBy(q => Array.IndexOf(Resolutions, q.Label)).ToList();
+        if (offered.Count < 2)
         {
             return [];
         }
 
-        var activeProfile = server["activeProfileId"]?.GetValue<int>();
-        var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{serverId}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
-        var byLabel = new Dictionary<string, Quality>(StringComparer.Ordinal);
-        foreach (var profile in detail?["profiles"]?.AsArray() ?? [])
+        // The capsule starts on the admin's choice, or else on the server's own default profile.
+        if (config.RequestDefaultQuality is "1080p" or "4K" && offered.Exists(q => q.Label == config.RequestDefaultQuality))
         {
-            if (profile?["id"]?.GetValue<int>() is not int id || Resolution((string?)profile["name"]) is not { } label)
-            {
-                continue;
-            }
-
-            var isDefault = id == activeProfile;
-            if (!byLabel.TryGetValue(label, out var known) || (isDefault && !known.IsDefault))
-            {
-                byLabel[label] = new Quality(serverId, id, label, isDefault);
-            }
+            offered = [.. offered.Select(q => q with { IsDefault = q.Label == config.RequestDefaultQuality })];
         }
 
-        return byLabel.Count < 2 ? [] : [.. byLabel.Values.OrderBy(q => Array.IndexOf(Resolutions, q.Label))];
+        return offered;
+    }
+
+    /// <summary>The profile a setting names ("serverId:profileId"), if it is still on that server.</summary>
+    private async Task<Quality?> NamedAsync(string service, JsonArray? servers, string? setting, string label)
+    {
+        var parts = setting?.Split(':');
+        if (parts is not { Length: 2 }
+            || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var serverId)
+            || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var profileId))
+        {
+            return null;
+        }
+
+        var server = servers?.FirstOrDefault(s => s?["id"]?.GetValue<int>() == serverId);
+        if (server is null || !(await ProfilesAsync(service, serverId).ConfigureAwait(false)).Exists(p => p.Id == profileId))
+        {
+            return null;
+        }
+
+        return new Quality(serverId, profileId, label, false, server["is4k"]?.GetValue<bool>() == true);
+    }
+
+    private async Task<List<(int Id, string? Name)>> ProfilesAsync(string service, int serverId)
+    {
+        var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{serverId}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+        return [.. (detail?["profiles"]?.AsArray() ?? [])
+            .Where(p => p?["id"]?.GetValue<int>() is not null)
+            .Select(p => (p!["id"]!.GetValue<int>(), (string?)p["name"]))];
     }
 
     private static readonly string[] Resolutions = ["720p", "1080p", "4K"];
 
     /// <summary>Reads a profile's resolution from its name ("[SQP] SQP-1 (2160p)" is 4K), or null for one that names none.</summary>
-    private static string? Resolution(string? name)
+    internal static string? Resolution(string? name)
     {
         if (string.IsNullOrEmpty(name))
         {
@@ -258,7 +319,7 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         return name.Contains("1080", StringComparison.Ordinal) ? "1080p" : name.Contains("720", StringComparison.Ordinal) ? "720p" : null;
     }
 
-    private sealed record Quality(int ServerId, int ProfileId, string Label, bool IsDefault);
+    private sealed record Quality(int ServerId, int ProfileId, string Label, bool IsDefault, bool Is4k);
 
     [HttpGet("leaving")]
     public async Task<IActionResult> GetLeaving()
@@ -275,6 +336,9 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         }
 
         var collections = await upstream.MaintainerrGetAsync("api/collections", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+        // Settings: Leaving Soon looks this many days ahead; 0 lists everything Maintainerr has queued.
+        var window = Math.Max(0, Plugin.Instance?.Configuration.LeavingSoonDays ?? 0);
+        var horizon = DateTime.UtcNow.Date.AddDays(window);
         var leaving = new List<object>();
         foreach (var collection in collections?.AsArray() ?? [])
         {
@@ -290,7 +354,8 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
                 var tmdbId = media?["tmdbId"]?.ToString();
                 var item = library.Find(user, type, tmdbId);
                 if (item is null
-                    || !DateTime.TryParse((string?)media!["addDate"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var added))
+                    || !DateTime.TryParse((string?)media!["addDate"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var added)
+                    || (window > 0 && added.AddDays(days).Date > horizon))
                 {
                     continue;
                 }
@@ -334,15 +399,17 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         });
     }
 
+    /// <summary>The title's certificate in the server's streaming region (Settings: Streaming region; GB by default).</summary>
     private static string? Certification(JsonNode title, string type)
     {
+        var region = Plugin.Instance?.Configuration.WatchRegion is { Length: 2 } set ? set.ToUpperInvariant() : "GB";
         if (type == "movie")
         {
-            var gb = title["releases"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == "GB");
-            return gb?["release_dates"]?.AsArray().Select(d => (string?)d?["certification"]).FirstOrDefault(c => !string.IsNullOrEmpty(c));
+            var release = title["releases"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == region);
+            return release?["release_dates"]?.AsArray().Select(d => (string?)d?["certification"]).FirstOrDefault(c => !string.IsNullOrEmpty(c));
         }
 
-        var rating = title["contentRatings"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == "GB");
+        var rating = title["contentRatings"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == region);
         return (string?)rating?["rating"];
     }
 
@@ -362,5 +429,8 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
 
         /// <summary>Gets or sets the Radarr or Sonarr quality profile picked, one of those <c>discover/qualities</c> offered; null for the server's default.</summary>
         public int? ProfileId { get; set; }
+
+        /// <summary>Gets or sets the server the picked profile is on (a 4K profile may be on a server of its own); null for the default server.</summary>
+        public int? ServerId { get; set; }
     }
 }

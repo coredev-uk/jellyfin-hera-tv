@@ -58,6 +58,7 @@
   const searchTitles = (query, page = 1) => kit.hera("discover/search", { query: { query, page } });
   const qualitiesFor = (mediaType) =>
     cached(`qualities:${mediaType === "tv" ? "tv" : "movie"}`, () => kit.hera(`discover/qualities/${mediaType === "tv" ? "tv" : "movie"}`), 10 * 60 * 1000);
+  const qualityKey = (quality) => `${quality.serverId}:${quality.profileId}`;
 
   const errorStatus = (error) => error?.status ?? error?.response?.status ?? null;
   const errorMessage = async (error) => {
@@ -225,7 +226,8 @@
       busy: false,
       notice: null,
       live: false,
-      // The resolutions this person may request in ("1080p", "4K"), and the one picked.
+      // The qualities this person may request in ("1080p", "4K"), and the one picked. A quality is
+      // a profile on one Radarr or Sonarr server (4K may be a server of its own), so both name it.
       qualities: [],
       quality: null,
     };
@@ -236,7 +238,7 @@
       const list = reply?.qualities ?? [];
       if (closed || list.length < 2) return;
       ctx.qualities = list;
-      ctx.quality = (list.find((q) => q.isDefault) ?? list[0]).profileId;
+      ctx.quality = qualityKey(list.find((q) => q.isDefault) ?? list[0]);
       paintActions();
     };
 
@@ -554,29 +556,29 @@
           type: "button",
           class: "hera-sheet__quality-option",
           role: "radio",
-          "aria-checked": String(q.profileId === ctx.quality),
-          tabindex: q.profileId === ctx.quality ? "0" : "-1",
+          "aria-checked": String(qualityKey(q) === ctx.quality),
+          tabindex: qualityKey(q) === ctx.quality ? "0" : "-1",
           disabled: ctx.busy,
           text: q.label,
-          onclick: () => pickQuality(q.profileId),
+          onclick: () => pickQuality(qualityKey(q)),
         }),
       );
       const group = el("div", { class: "hera-sheet__quality", role: "radiogroup", "aria-label": "Quality" }, options);
       group.addEventListener("keydown", (event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        const index = ctx.qualities.findIndex((q) => q.profileId === ctx.quality);
+        const index = ctx.qualities.findIndex((q) => qualityKey(q) === ctx.quality);
         const next = ctx.qualities[index + (event.key === "ArrowRight" ? 1 : -1)];
         if (!next) return;
         event.preventDefault();
         event.stopPropagation();
-        pickQuality(next.profileId, true);
+        pickQuality(qualityKey(next), true);
       });
       return group;
     };
 
-    const pickQuality = (profileId, keyboard = false) => {
-      if (ctx.busy || ctx.quality === profileId) return;
-      ctx.quality = profileId;
+    const pickQuality = (key, keyboard = false) => {
+      if (ctx.busy || ctx.quality === key) return;
+      ctx.quality = key;
       paintActions();
       if (keyboard) actions.querySelector('.hera-sheet__quality-option[aria-checked="true"]')?.focus({ preventScroll: true });
     };
@@ -595,7 +597,8 @@
       if (ctx.busy) return;
       const current = info();
       const body = { mediaType: item.mediaType, tmdbId: item.tmdbId };
-      if (ctx.qualities.length && ctx.quality) body.profileId = ctx.quality;
+      const quality = ctx.qualities.find((q) => qualityKey(q) === ctx.quality);
+      if (quality) Object.assign(body, { serverId: quality.serverId, profileId: quality.profileId });
       let picked = [];
       if (isTv) {
         picked = selectableSeasons()

@@ -597,6 +597,217 @@
     renderPane();
   };
 
+  // ---------- Letterboxd --------------------------------------------------------------------
+
+  // Linking is the person's own: their Letterboxd password goes to the server once, to sign in, and
+  // is never kept. What the server stores is the token Letterboxd gives back.
+
+  const serverMessage = async (error, fallback) => {
+    try {
+      const body = await error.json();
+      if (body && body.message) return body.message;
+    } catch {
+      /* not JSON */
+    }
+    return fallback;
+  };
+
+  const films = (count) => `${count} film${count === 1 ? "" : "s"}`;
+  const localDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const diaryDate = (iso) => {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  };
+
+  const reloadLetterboxd = async () => {
+    try {
+      const next = await kit.hera("letterboxd");
+      if (ctx) ctx.letterboxd = next;
+    } catch (error) {
+      console.error("[Hera TV:settings]", error);
+    }
+    if (ctx) renderPane();
+  };
+
+  /** A row that only shows something: no action, no chevron. */
+  const staticRow = ({ icon: iconName, label, description, value }) =>
+    el("div", { class: "hera-set-row hera-set-row--static" }, [
+      iconName ? el("span", { class: "hera-set-row__icon" }, icon(iconName)) : null,
+      el("span", { class: "hera-set-row__text" }, [
+        el("span", { class: "hera-set-row__label", text: label }),
+        description ? el("span", { class: "hera-set-row__desc", text: description }) : null,
+      ]),
+      value !== undefined ? el("span", { class: "hera-set-row__value", text: value }) : null,
+    ]);
+
+  /** One sheet with a single form and a status line that doubles as its inline error. */
+  const letterboxdSheet = ({ title, fields, intro, action, onSubmit }) => {
+    const status = el("p", { class: "hera-set-status", role: "status", text: intro });
+    const submit = button(action, { primary: true, type: "submit" });
+    const form = el("form", { class: "hera-set-form" }, [...fields, status, submit]);
+    const problem = (message) => {
+      status.textContent = message;
+      status.classList.add("is-error");
+    };
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      status.classList.remove("is-error");
+      submit.disabled = true;
+      try {
+        await onSubmit({ problem, working: (message) => (status.textContent = message), close: () => dialog.close() });
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    const dialog = sheet({ title, body: el("div", { class: "hera-set-sheet__body" }, form) });
+    return dialog;
+  };
+
+  const openLetterboxdConnect = (username = "") => {
+    const name = field({ label: "Username or email", autocomplete: "off" });
+    const pass = field({ label: "Password", type: "password", autocomplete: "new-password" });
+    name.input.value = username;
+    name.input.setAttribute("autocapitalize", "none");
+    name.input.setAttribute("spellcheck", "false");
+    letterboxdSheet({
+      title: "Connect Letterboxd",
+      fields: [name.node, pass.node],
+      intro: "Your password is used once to sign in and isn't stored.",
+      action: "Connect",
+      onSubmit: async ({ problem, working, close }) => {
+        const who = name.input.value.trim();
+        if (!who || !pass.input.value) return problem("Enter your Letterboxd username and password.");
+        working("Connecting…");
+        try {
+          const next = await kit.hera("letterboxd/link", { method: "POST", body: { username: who, password: pass.input.value } });
+          pass.input.value = "";
+          if (!ctx) return;
+          ctx.letterboxd = next;
+          close();
+          say("Connected to Letterboxd");
+          renderPane();
+        } catch (error) {
+          problem(await serverMessage(error, "Couldn't reach the server. Check your connection and try again."));
+        }
+      },
+    });
+    (username ? pass : name).input.focus();
+  };
+
+  const openLetterboxdImport = () => {
+    const from = new Date();
+    from.setDate(from.getDate() - 30);
+    const date = field({ label: "From", type: "date" });
+    date.input.value = localDate(from);
+    date.input.max = localDate(new Date());
+    letterboxdSheet({
+      title: "Import past watches",
+      fields: [date.node],
+      intro: "Films you've watched here since this date are added to your diary, unless they're already in it.",
+      action: "Import",
+      onSubmit: async ({ problem, working, close }) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date.input.value)) return problem("Choose a date to import from.");
+        working("Importing…");
+        try {
+          const result = await kit.hera("letterboxd/import", { method: "POST", body: { since: date.input.value } });
+          close();
+          say(result.queued ? `Importing ${films(result.queued)}` : "Nothing new to import");
+          await reloadLetterboxd();
+        } catch (error) {
+          problem(await serverMessage(error, "Couldn't reach the server. Check your connection and try again."));
+        }
+      },
+    });
+    date.input.focus();
+  };
+
+  const openLetterboxdDisconnect = () =>
+    letterboxdSheet({
+      title: "Disconnect Letterboxd",
+      fields: [],
+      intro: "Films you finish will no longer be logged. Nothing on Letterboxd is removed.",
+      action: "Disconnect",
+      onSubmit: async ({ problem, close }) => {
+        try {
+          const next = await kit.hera("letterboxd/link", { method: "DELETE" });
+          if (!ctx) return;
+          ctx.letterboxd = next;
+          close();
+          say("Disconnected from Letterboxd");
+          renderPane();
+        } catch (error) {
+          problem(await serverMessage(error, "Couldn't reach the server. Check your connection and try again."));
+        }
+      },
+    });
+
+  const logWaitingFilms = async () => {
+    say("Logging films…");
+    try {
+      const result = await kit.hera("letterboxd/sync", { method: "POST" });
+      say(result.logged ? `Logged ${films(result.logged)}` : result.failed ? "Couldn't log some films. They're tried again tomorrow morning." : "Up to date");
+    } catch (error) {
+      console.error("[Hera TV:settings]", error);
+      say(await serverMessage(error, "Couldn't reach Letterboxd. Try again in a minute."), "error");
+    }
+    await reloadLetterboxd();
+  };
+
+  const letterboxdGroup = () => {
+    const state = ctx.letterboxd;
+    if (!state) return null;
+    const title = "Letterboxd";
+    if (!state.linked) {
+      return group({
+        title,
+        rows: [row({ icon: "movie_filter", label: "Connect Letterboxd", description: "Add the films you finish to your diary.", chevron: true, onclick: () => openLetterboxdConnect() })],
+      });
+    }
+    const account = row({ icon: "movie_filter", label: `Connected as ${state.username}`, href: `https://letterboxd.com/${encodeURIComponent(state.username)}/`, chevron: true });
+    account.target = "_blank";
+    account.rel = "noopener noreferrer";
+
+    const last = (state.recent || []).find((w) => w.state === "logged");
+    const status = state.lastError
+      ? row({ icon: "error_outline", label: state.lastError, value: "Sign in again", chevron: true, onclick: () => openLetterboxdConnect(state.username) })
+      : staticRow({
+          icon: "history",
+          label: last ? `${last.name}${last.year ? ` (${last.year})` : ""}` : "Nothing logged yet",
+          description: last ? `Last logged, watched ${diaryDate(last.watchedOn)}` : "Films you finish will appear here.",
+          value: state.pending ? `${state.pending} waiting` : undefined,
+        });
+    const waiting = state.pending || state.failed
+      ? row({
+          icon: "sync",
+          label: "Log waiting films now",
+          description: state.failed ? `${films(state.failed)} couldn't be logged. They're tried again each morning.` : undefined,
+          onclick: logWaitingFilms,
+        })
+      : null;
+
+    return group({
+      title,
+      rows: [
+        account,
+        switchRow({
+          icon: "event_available",
+          label: "Log films you finish",
+          description: "Films you watch to the end here go into your Letterboxd diary.",
+          checked: state.logFinished,
+          save: async (on) => {
+            await kit.hera("letterboxd/prefs", { method: "POST", body: { logFinished: on } });
+            if (ctx && ctx.letterboxd) ctx.letterboxd = { ...ctx.letterboxd, logFinished: on };
+          },
+        }),
+        status,
+        waiting,
+        row({ icon: "history_edu", label: "Import past watches", description: "Add films you've already watched here.", chevron: true, onclick: openLetterboxdImport }),
+        row({ icon: "link_off", label: "Disconnect", onclick: openLetterboxdDisconnect }),
+      ],
+      footer: "Films go into your diary a minute or so after you finish them, dated the day you watched.",
+    });
+  };
+
   // ---------- sections ----------------------------------------------------------------------
 
   const isLocalAccount = () => /DefaultAuthenticationProvider/.test((ctx.user.Policy && ctx.user.Policy.AuthenticationProviderId) || "");
@@ -636,6 +847,7 @@
         return [
           head,
           account.some(Boolean) ? group({ title: "Account", rows: account }) : null,
+          letterboxdGroup(),
           group({
             rows: [
               row({
@@ -765,6 +977,24 @@
               }),
             ),
             footer: "Remembered on this browser only.",
+          }),
+          group({
+            title: "What's Next",
+            rows: [
+              ["postplay", "picture_in_picture", "Show what's next", "At the credits, the picture moves to the corner and the next episode or film takes the screen."],
+              ["postplayTrailers", "smart_display", "Play trailers", "A film offered next plays its trailer, once, with sound."],
+            ].map(([key, iconName, label, description]) =>
+              switchRow({
+                icon: iconName,
+                label,
+                description,
+                checked: ctx.heraPrefs[key] !== "false",
+                save: async (on) => {
+                  await kit.prefs.set(key, on);
+                  ctx.heraPrefs = { ...ctx.heraPrefs, [key]: String(on) };
+                },
+              }),
+            ),
           }),
           group({ rows: [row({ icon: "tune", label: "More playback options", description: "Quality, skip length, transcoding", href: `${STOCK.playback}?userId=${ctx.user.Id}`, chevron: true })] }),
         ];
@@ -990,12 +1220,15 @@
     const release = setTimeout(() => {
       if (token === mountToken && !(ctx && ctx.page === page && ctx.root.isConnected)) page.classList.remove("hera-set-page");
     }, HOLD_MS);
-    const [full, cultures, views, quickConnect, notifyPrefs] = await Promise.all([
+    const [full, cultures, views, quickConnect, notifyPrefs, letterboxd, heraPrefs] = await Promise.all([
       loadUser(user),
       getJSON("Localization/Cultures").catch(() => []),
       getJSON("UserViews", { userId: user }).then((r) => (r && r.Items) || []).catch(() => []),
       getJSON("QuickConnect/Enabled").catch(() => false),
       kit.hera("notifications/prefs").catch(() => null),
+      // Only asked for when the server has Letterboxd set up; the group stays hidden without it.
+      kit.integrations().then((ints) => (ints && ints.features && ints.features.letterboxd ? kit.hera("letterboxd") : null)).catch(() => null),
+      kit.prefs.load(),
     ]).finally(() => clearTimeout(release));
     if (token !== mountToken || !page.isConnected) return;
     unmount();
@@ -1020,6 +1253,8 @@
       views,
       quickConnect: quickConnect === true,
       notifyPrefs: notifyPrefs && typeof notifyPrefs === "object" ? notifyPrefs : null,
+      letterboxd: letterboxd && letterboxd.enabled ? letterboxd : null,
+      heraPrefs: heraPrefs || {},
       section: sections.some((s) => s.id === remembered) ? remembered : "profile",
       mountedAt: Date.now(),
     };

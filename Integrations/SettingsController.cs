@@ -1,4 +1,6 @@
 using Jellyfin.Plugin.HeraTv.Collections;
+using Jellyfin.Plugin.HeraTv.Letterboxd;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -15,7 +17,13 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
 [Route("HeraTV/settings")]
-public class SettingsController(UpstreamClient upstream, ICollectionBuilder collectionBuilder, ICollectionsView collectionsView, ITaskManager taskManager) : ControllerBase
+public class SettingsController(
+    UpstreamClient upstream,
+    ICollectionBuilder collectionBuilder,
+    ICollectionsView collectionsView,
+    ITaskManager taskManager,
+    LetterboxdStore letterboxd,
+    IUserManager userManager) : ControllerBase
 {
     [HttpGet]
     public IActionResult Get() => Ok(Describe());
@@ -121,6 +129,32 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
             }
         }
 
+        if (!Locked(IntegrationSettings.LetterboxdApiKeyVariable))
+        {
+            if (body.ClearLetterboxdApiKey == true)
+            {
+                config.LetterboxdApiKey = null;
+            }
+            else if (!string.IsNullOrWhiteSpace(body.LetterboxdApiKey))
+            {
+                config.LetterboxdApiKey = body.LetterboxdApiKey.Trim();
+            }
+        }
+
+        if (!Locked(IntegrationSettings.LetterboxdApiSecretVariable))
+        {
+            if (body.ClearLetterboxdApiSecret == true)
+            {
+                config.LetterboxdApiSecret = null;
+            }
+            else if (!string.IsNullOrWhiteSpace(body.LetterboxdApiSecret))
+            {
+                config.LetterboxdApiSecret = body.LetterboxdApiSecret.Trim();
+            }
+        }
+
+        config.LetterboxdEnabled = body.LetterboxdEnabled ?? config.LetterboxdEnabled;
+
         var users = Writable(IntegrationSettings.SeerrUsersVariable, body.SeerrUsers);
         if (users is not null)
         {
@@ -132,6 +166,20 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
         config.HeroIntervalSeconds = Math.Clamp(body.HeroIntervalSeconds ?? config.HeroIntervalSeconds, 4, 60);
         config.DiscoverEnabled = body.DiscoverEnabled ?? config.DiscoverEnabled;
         config.LeavingSoonEnabled = body.LeavingSoonEnabled ?? config.LeavingSoonEnabled;
+        config.LeavingSoonDays = Math.Clamp(body.LeavingSoonDays ?? config.LeavingSoonDays, 0, 365);
+        config.RequestQualityPicker = body.RequestQualityPicker is "seerr" or "admins" or "off" ? body.RequestQualityPicker : config.RequestQualityPicker;
+        config.RequestDefaultQuality = body.RequestDefaultQuality is "server" or "1080p" or "4K" ? body.RequestDefaultQuality : config.RequestDefaultQuality;
+        if (body.RequestProfiles is not null)
+        {
+            // "serverId:profileId", or empty for "read it from the names".
+            string? Profile(string key, string? saved)
+                => body.RequestProfiles.TryGetValue(key, out var value) ? (System.Text.RegularExpressions.Regex.IsMatch(value ?? string.Empty, @"^\d+:\d+$") ? value : null) : saved;
+            config.RequestMovieHdProfile = Profile("movieHd", config.RequestMovieHdProfile);
+            config.RequestMovie4kProfile = Profile("movie4k", config.RequestMovie4kProfile);
+            config.RequestTvHdProfile = Profile("tvHd", config.RequestTvHdProfile);
+            config.RequestTv4kProfile = Profile("tv4k", config.RequestTv4kProfile);
+        }
+
         config.RequestsRowEnabled = body.RequestsRowEnabled ?? config.RequestsRowEnabled;
         config.TrendingRowEnabled = body.TrendingRowEnabled ?? config.TrendingRowEnabled;
         config.ElsewhereEnabled = body.ElsewhereEnabled ?? config.ElsewhereEnabled;
@@ -148,6 +196,25 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
             {
                 group.Set(config, on);
             }
+        }
+
+        if (body.Seasons is not null)
+        {
+            var known = Collections.Catalogue.SeasonNames.Select(s => s.Key).ToHashSet(StringComparer.Ordinal);
+            var off = Collections.Catalogue.SeasonsOff(config);
+            foreach (var (key, on) in body.Seasons.Where(s => known.Contains(s.Key)))
+            {
+                if (on)
+                {
+                    off.Remove(key);
+                }
+                else
+                {
+                    off.Add(key);
+                }
+            }
+
+            config.SeasonalOff = off.Count == 0 ? null : string.Join(",", off.Order(StringComparer.Ordinal));
         }
 
         if (!string.IsNullOrEmpty(region))
@@ -246,6 +313,61 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
         return Ok(new { ok = true, message = (string?)null, users });
     }
 
+    /// <summary>Tries Letterboxd with the form's key and secret (or the saved ones): signs a film lookup and reads the answer.</summary>
+    [HttpPost("test/letterboxd")]
+    public async Task<IActionResult> TestLetterboxd([FromBody] LetterboxdTestBody? body, CancellationToken ct)
+    {
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var keyField = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiKeyVariable, config.LetterboxdApiKey);
+        var secretField = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiSecretVariable, config.LetterboxdApiSecret);
+        var key = keyField.Locked || string.IsNullOrWhiteSpace(body?.ApiKey) ? keyField.Value : body.ApiKey.Trim();
+        var secret = secretField.Locked || string.IsNullOrWhiteSpace(body?.ApiSecret) ? secretField.Value : body.ApiSecret.Trim();
+        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(secret))
+        {
+            return Ok(new { ok = false, message = "Enter the Letterboxd API key and secret first." });
+        }
+
+        try
+        {
+            // A film lookup needs no member, so this proves the key and the signature without anyone's account.
+            var film = await new LetterboxdClient(key, secret).FindFilmAsync("155", null, "The Dark Knight", 2008, ct).ConfigureAwait(false);
+            return Ok(film is null
+                ? new { ok = false, message = "Letterboxd answered, but didn't find a film it should know. Try again in a moment." }
+                : new { ok = true, message = "Connected to Letterboxd. The key and secret work." });
+        }
+        catch (LetterboxdException ex)
+        {
+            return Ok(new
+            {
+                ok = false,
+                message = ex.Failure switch
+                {
+                    LetterboxdFailure.Unauthorised or LetterboxdFailure.KeyRejected or LetterboxdFailure.BadCredentials => "Letterboxd refused the API key or secret.",
+                    LetterboxdFailure.Unreachable or LetterboxdFailure.RateLimited => "Couldn't reach Letterboxd. Try again in a moment.",
+                    _ => $"Letterboxd answered unexpectedly ({ex.Status?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "no status"}).",
+                },
+            });
+        }
+    }
+
+    /// <summary>Which Jellyfin users have linked Letterboxd, and how each diary is going. Tokens never leave the server.</summary>
+    [HttpGet("letterboxd/links")]
+    public IActionResult LetterboxdLinks()
+    {
+        var links = letterboxd.Links().Select(link => new
+        {
+            user = Guid.TryParse(link.UserId, out var id) ? userManager.GetUserById(id)?.Username : null,
+            username = link.Username,
+            logFinished = link.LogFinished,
+            linkedAt = link.LinkedAt,
+            lastLoggedAt = link.LastLoggedAt,
+            lastError = link.LastError,
+            pending = letterboxd.Count(link.UserId, WatchState.Pending),
+            failed = letterboxd.Count(link.UserId, WatchState.Failed),
+        });
+        return Ok(new { links });
+    }
+
     /// <summary>Starts the Build Hera TV collections task now, unless it is already running.</summary>
     [HttpPost("collections/build")]
     public IActionResult BuildCollections()
@@ -310,14 +432,70 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
             features = IntegrationSettings.Features(config),
             elsewhere = new { region = string.IsNullOrWhiteSpace(config.WatchRegion) ? "GB" : config.WatchRegion.ToUpperInvariant() },
             notifications = new { arrivalsHour = Math.Clamp(config.ArrivalsHour, 0, 23) },
+            letterboxd = DescribeLetterboxd(config),
+            leavingSoonDays = Math.Clamp(config.LeavingSoonDays, 0, 365),
+            requests = new
+            {
+                picker = config.RequestQualityPicker,
+                defaultQuality = config.RequestDefaultQuality,
+                profiles = new
+                {
+                    movieHd = config.RequestMovieHdProfile,
+                    movie4k = config.RequestMovie4kProfile,
+                    tvHd = config.RequestTvHdProfile,
+                    tv4k = config.RequestTv4kProfile,
+                },
+            },
             collections = new
             {
                 enabled = config.CollectionsEnabled,
                 homeRows = config.HomeRowsEnabled,
                 groups = CollectionGroups.InOrder.Where(g => g.Builds()).ToDictionary(g => g.Id(), g => g.Enabled(config)),
+                seasons = Collections.Catalogue.SeasonNames.Select(s => new { key = s.Key, name = s.Name, on = !Collections.Catalogue.SeasonsOff(config).Contains(s.Key) }).ToArray(),
                 build = DescribeBuild(),
             },
         };
+    }
+
+    /// <summary>Seerr's Radarr and Sonarr servers and their profiles, for the Requests settings' pickers.</summary>
+    [HttpGet("seerr/profiles")]
+    public async Task<IActionResult> GetSeerrProfiles()
+    {
+        if (!IntegrationSettings.Current.SeerrEnabled)
+        {
+            return Ok(new { movie = Array.Empty<object>(), tv = Array.Empty<object>() });
+        }
+
+        async Task<object[]> Servers(string service)
+        {
+            var servers = await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+            var list = new List<object>();
+            foreach (var server in servers?.AsArray() ?? [])
+            {
+                if (server?["id"]?.GetValue<int>() is not int id)
+                {
+                    continue;
+                }
+
+                var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{id}", TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+                list.Add(new
+                {
+                    id,
+                    name = (string?)server["name"],
+                    is4k = server["is4k"]?.GetValue<bool>() == true,
+                    isDefault = server["isDefault"]?.GetValue<bool>() == true,
+                    activeProfileId = server["activeProfileId"]?.GetValue<int?>(),
+                    profiles = (detail?["profiles"]?.AsArray() ?? [])
+                        .Where(p => p?["id"]?.GetValue<int>() is not null)
+                        .Select(p => new { id = p!["id"]!.GetValue<int>(), name = (string?)p["name"], guess = DiscoverController.Resolution((string?)p["name"]) })
+                        .ToArray(),
+                });
+            }
+
+            return [.. list];
+        }
+
+        return Ok(new { movie = await Servers("radarr").ConfigureAwait(false), tv = await Servers("sonarr").ConfigureAwait(false) });
     }
 
     private static object Show(IntegrationSettings.Field field) => new { value = field.Value, source = field.Source, variable = field.Variable };
@@ -331,6 +509,18 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
             url = Show(IntegrationSettings.Inspect(def.UrlVariable, def.SavedUrl(config))),
             publicUrl = Show(IntegrationSettings.Inspect(def.PublicUrlVariable, def.SavedPublic(config))),
             apiKey = new { set = key.Value is not null, source = key.Source, variable = key.Variable },
+        };
+    }
+
+    private static object DescribeLetterboxd(PluginConfiguration config)
+    {
+        var key = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiKeyVariable, config.LetterboxdApiKey);
+        var secret = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiSecretVariable, config.LetterboxdApiSecret);
+        return new
+        {
+            enabled = config.LetterboxdEnabled,
+            apiKey = new { set = key.Value is not null, source = key.Source, variable = key.Variable },
+            apiSecret = new { set = secret.Value is not null, source = secret.Source, variable = secret.Variable },
         };
     }
 
@@ -466,6 +656,13 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
         public string? ApiKey { get; set; }
     }
 
+    public sealed class LetterboxdTestBody
+    {
+        public string? ApiKey { get; set; }
+
+        public string? ApiSecret { get; set; }
+    }
+
     public sealed class SettingsBody
     {
         public string? SeerrUrl { get; set; }
@@ -516,6 +713,33 @@ public class SettingsController(UpstreamClient upstream, ICollectionBuilder coll
 
         /// <summary>Gets or sets which groups become collections, by group id: "genres", "awards", ...</summary>
         public Dictionary<string, bool>? CollectionGroups { get; set; }
+
+        public bool? LetterboxdEnabled { get; set; }
+
+        /// <summary>Gets or sets a new key; empty or absent keeps the saved one.</summary>
+        public string? LetterboxdApiKey { get; set; }
+
+        public bool? ClearLetterboxdApiKey { get; set; }
+
+        /// <summary>Gets or sets a new secret; empty or absent keeps the saved one.</summary>
+        public string? LetterboxdApiSecret { get; set; }
+
+        public bool? ClearLetterboxdApiSecret { get; set; }
+
+        /// <summary>Gets or sets how many days ahead Leaving Soon looks; 0 for everything.</summary>
+        public int? LeavingSoonDays { get; set; }
+
+        /// <summary>Gets or sets who sees the request quality capsule: "seerr", "admins" or "off".</summary>
+        public string? RequestQualityPicker { get; set; }
+
+        /// <summary>Gets or sets the quality the capsule starts on: "server", "1080p" or "4K".</summary>
+        public string? RequestDefaultQuality { get; set; }
+
+        /// <summary>Gets or sets the request profiles by slot ("movieHd", "movie4k", "tvHd", "tv4k"): "serverId:profileId", or empty to read them from the names.</summary>
+        public Dictionary<string, string?>? RequestProfiles { get; set; }
+
+        /// <summary>Gets or sets seasonal sets on or off, by key.</summary>
+        public Dictionary<string, bool>? Seasons { get; set; }
     }
 
     public sealed class ServiceBody

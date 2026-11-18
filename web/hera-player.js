@@ -13,7 +13,7 @@
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { api, el, icon, getJSON, imageUrl, runtime, userId, hera, play, reduceMotion } = heraTv.kit;
+  const { api, el, icon, getJSON, imageUrl, runtime, userId, hera, play, reduceMotion, prefs } = heraTv.kit;
   const { jf } = heraTv;
 
   const PAUSE_DELAY = 3000;
@@ -686,7 +686,7 @@
   // once: when it ends, the film's artwork takes the screen back. A film none of whose trailers
   // will play keeps its still.
   const loadTrailer = async (next, backdrop) => {
-    if (next.kind !== "film" || reduceMotion.matches) return;
+    if (next.kind !== "film" || reduceMotion.matches || !(await prefs.on("postplayTrailers"))) return;
     const ids = await trailerIds(next.item);
     const alive = () => post.backdrop === backdrop && !!post.layer;
     if (!ids.length || !alive()) return;
@@ -928,9 +928,11 @@
     const item = post.item;
     if (!item || post.layer || post.opening || post.dismissed === item.Id) return;
     post.opening = true;
-    const next = await (item.Type === "Episode" ? nextEpisode(item) : item.Type === "Movie" ? nextFilm(item) : Promise.resolve(null)).catch(() => null);
+    // Switched off in Settings > Playback: Jellyfin's own Up Next takes the credits, as without Hera.
+    const wanted = await prefs.on("postplay");
+    const next = wanted ? await (item.Type === "Episode" ? nextEpisode(item) : item.Type === "Movie" ? nextFilm(item) : Promise.resolve(null)).catch(() => null) : null;
     post.opening = false;
-    // Nothing to offer (a finale, a film with no match): leave the credits alone for this item.
+    // Nothing to offer (a finale, a film with no match), or not wanted: leave the credits alone for this item.
     if (!next) post.dismissed = item.Id;
     if (!next || post.itemId !== item.Id || post.dismissed === item.Id || !post.page || post.page.classList.contains("hide")) return;
     const frame = playerFrame();
