@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "A polish pass over every surface. Phones: the home hero, title pages (no poster over the text), Discover's feature card, the Requests view, Your Watching, the Settings app and the Dashboard home all lay out properly. TV layout: the library tiles and Recently Added stay on Home, the hero keeps focus as it turns, Discover's header clears the TV header, and type steps up on title pages. Title pages: a More for the full synopsis, keyboard focus on the track pickers, Play on a series names its episode, Trailer has its label, runtimes read 1 hr 39 min, and Hera's own collections aren't numbered like a franchise. Cards are flat at rest, every play disc is the same 52px, and the menu is three dots across everywhere. Request states never show Seerr's Processing. Settings: visible switches when off, a proper search field in pickers, focus rings on fields, solid sheets with reduced transparency, and buttons that brighten on hover.",
+  "changelog": "- Hera TV has its own artwork in Jellyfin's plugin catalogue and on the Plugins page.\n- Each version in the catalogue's Revision History links to its release notes on GitHub, where they're formatted properly.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-19T02:30:00.0000000Z",
-  "version": "1.11.1.0",
+  "timestamp": "2026-11-19T03:30:00.0000000Z",
+  "version": "1.11.2.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]
