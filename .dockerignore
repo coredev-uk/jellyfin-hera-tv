@@ -8,3 +8,5 @@ PRODUCT.md
 .renovaterc.json5
 README.md
 assets/
+tests/
+node_modules/

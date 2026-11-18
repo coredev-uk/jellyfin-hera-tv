@@ -2183,3 +2183,49 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .hera-cfg-bar .hera-set-btn {
   min-height: 40px;
 }
+
+/* Compatibility section: the version rows, a notice, and the table of what has stood aside. */
+.hera-cfg-compat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.hera-cfg-compat .hera-cfg-verdict {
+  flex: none;
+}
+.hera-cfg-table-wrap {
+  overflow-x: auto;
+}
+.hera-cfg-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--hera-label);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.hera-cfg-table th,
+.hera-cfg-table td {
+  padding: 12px 16px;
+  border-top: 1px solid var(--hera-separator);
+  text-align: left;
+  vertical-align: top;
+}
+.hera-cfg-table thead th {
+  border-top: 0;
+  color: var(--hera-label-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hera-cfg-table tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hera-cfg-table td:nth-child(2) {
+  min-width: 24ch;
+  overflow-wrap: anywhere;
+}
+.hera-cfg-table td:last-child {
+  color: var(--hera-label-2);
+  white-space: nowrap;
+}

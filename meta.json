@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "Collections read in order: the films on the Episodes shelf with their key art, logo and synopsis; Play starts the next film you haven't watched; films the collection is missing sit in their place, ready to request.",
+  "changelog": "Survives Jellyfin updates: a part of Hera whose Jellyfin pieces have changed stands aside and leaves Jellyfin's own page, the Dashboard says what changed, ?hera=off turns Hera off in a tab, and the page always loads.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-16T00:00:00.0000000Z",
-  "version": "1.5.0.0",
+  "timestamp": "2026-11-18T00:00:00.0000000Z",
+  "version": "1.6.0.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

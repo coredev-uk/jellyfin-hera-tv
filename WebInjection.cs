@@ -14,6 +14,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<IStartupFilter, WebInjection>();
+        serviceCollection.AddSingleton<HealthStore>();
         serviceCollection.AddSingleton<Integrations.UpstreamClient>();
         serviceCollection.AddSingleton<Integrations.LibraryLookup>();
     }
@@ -24,6 +25,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 /// served. Nothing on disk changes, so the image's read-only web folder is fine, and turning the
 /// plugin off (or removing it) restores the stock page on the next load.
 /// </summary>
+/// <remarks>
+/// It fails open: this runs in front of the server's own web page, so whatever goes wrong while
+/// rewriting, the page Jellyfin produced is what gets sent.
+/// </remarks>
 public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
 {
     private const string Marker = "data-hera-tv";
@@ -31,6 +36,9 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
     /// <summary>Sets html[data-hera-scheme] from the saved appearance (hera-tv.js, `appearance`).</summary>
     private const string SchemeScript =
         """(function(){try{var p=localStorage.getItem("hera-appearance");var l=p==="light"||(p!=="dark"&&!!window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches);document.documentElement.setAttribute("data-hera-scheme",l?"light":"dark");}catch(e){}})();""";
+
+    /// <summary>Set once a rewrite failure has been logged as a warning; later ones are debug, so a broken page doesn't fill the log on every load.</summary>
+    private static int warned;
 
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
     {
@@ -69,6 +77,8 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
         context.Response.Body = buffer;
         try
         {
+            // An exception from Jellyfin's own handling of the page is Jellyfin's to raise, as
+            // it would be without this plugin; there is no finished response to fall back to.
             await next().ConfigureAwait(false);
         }
         finally
@@ -76,22 +86,55 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
             context.Response.Body = original;
         }
 
-        buffer.Position = 0;
-        var isHtml = context.Response.StatusCode == StatusCodes.Status200OK
-            && (context.Response.ContentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) ?? false);
-        if (!isHtml)
+        // Everything that can fail is in TryRewrite, which touches no header. If it throws, or
+        // declines, the bytes Jellyfin wrote go out exactly as they were. Past this point there
+        // is only the write to the client.
+        var bytes = buffer.ToArray();
+        byte[]? rewritten = null;
+        try
         {
-            await buffer.CopyToAsync(original).ConfigureAwait(false);
+            rewritten = TryRewrite(context, bytes);
+        }
+        catch (Exception ex)
+        {
+            Warn(ex, context.Request.Path);
+        }
+
+        if (rewritten is null)
+        {
+            await original.WriteAsync(bytes).ConfigureAwait(false);
             return;
         }
 
-        var html = Encoding.UTF8.GetString(buffer.ToArray());
+        context.Response.ContentLength = rewritten.Length;
+        context.Response.Headers.Remove("ETag");
+        context.Response.Headers.Remove("Last-Modified");
+        context.Response.Headers.CacheControl = "no-cache";
+        await original.WriteAsync(rewritten).ConfigureAwait(false);
+        logger.LogDebug("Injected Hera TV {Version} into {Path}", WebAssets.Version, context.Request.Path);
+    }
+
+    /// <summary>
+    /// Returns the page with Hera TV added, or null when it should go out as it is: not an HTML
+    /// 200, already injected, no head or body to anchor on, or a response that has already
+    /// started (its headers are on the wire, so its length can no longer change).
+    /// </summary>
+    private static byte[]? TryRewrite(HttpContext context, byte[] page)
+    {
+        var isHtml = context.Response.StatusCode == StatusCodes.Status200OK
+            && !context.Response.HasStarted
+            && (context.Response.ContentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) ?? false);
+        if (!isHtml)
+        {
+            return null;
+        }
+
+        var html = Encoding.UTF8.GetString(page);
         var headEnd = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
         var bodyEnd = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
         if (headEnd < 0 || bodyEnd < 0 || html.Contains(Marker, StringComparison.Ordinal))
         {
-            await original.WriteAsync(buffer.ToArray()).ConfigureAwait(false);
-            return;
+            return null;
         }
 
         var v = WebAssets.Version;
@@ -111,12 +154,18 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
             .Append(html, bodyEnd, html.Length - bodyEnd)
             .ToString();
 
-        var bytes = Encoding.UTF8.GetBytes(html);
-        context.Response.ContentLength = bytes.Length;
-        context.Response.Headers.Remove("ETag");
-        context.Response.Headers.Remove("Last-Modified");
-        context.Response.Headers.CacheControl = "no-cache";
-        await original.WriteAsync(bytes).ConfigureAwait(false);
-        logger.LogDebug("Injected Hera TV {Version} into {Path}", v, context.Request.Path);
+        return Encoding.UTF8.GetBytes(html);
+    }
+
+    private void Warn(Exception ex, PathString path)
+    {
+        if (Interlocked.Exchange(ref warned, 1) == 0)
+        {
+            logger.LogWarning(ex, "Hera TV couldn't rewrite {Path}; serving Jellyfin's page unmodified. Further failures are logged at debug level", path);
+        }
+        else
+        {
+            logger.LogDebug(ex, "Hera TV couldn't rewrite {Path}", path);
+        }
     }
 }

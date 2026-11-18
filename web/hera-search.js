@@ -823,12 +823,10 @@
   // header field only through the system keyboard, which hides the menu, where the page's own
   // keyboard keeps results in view and each key searches there too.
 
-  const HEADER = ".MuiAppBar-root, .skinHeader";
-  const BUTTON = '.MuiAppBar-root a[href="#/search"], .skinHeader a[href="#/search"], .headerSearchButton';
+  const HEADER = `${HT.jf.appBar}, ${HT.jf.legacyHeader}`;
+  const BUTTON = `${HT.jf.appBar} a[href="#/search"], ${HT.jf.legacyHeader} a[href="#/search"], .headerSearchButton`;
 
-  const capsuleOf = () =>
-    document.querySelector(".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root") ||
-    document.querySelector(".skinHeader .headerTabs");
+  const capsuleOf = () => document.querySelector(HT.jf.appBarTabs) || document.querySelector(`${HT.jf.legacyHeader} .headerTabs`);
 
   const placeHeader = () => {
     const capsule = capsuleOf();
@@ -1191,6 +1189,18 @@
     if (restore) hs.button?.focus({ preventScroll: true });
   };
 
+  // The field failed part-way: put the header back as Jellyfin drew it, so the capsule never stays hidden.
+  const abandonHeader = () => {
+    document.removeEventListener("pointerdown", onAway, true);
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("scroll", onScroll);
+    document.documentElement.classList.remove("hera-search-open");
+    if (hs) {
+      hs.open = false;
+      hs.root.hidden = true;
+    }
+  };
+
   // Capture phase, so Jellyfin's own link never navigates. Where there is no capsule to replace
   // (phone widths, where Jellyfin keeps its own layout) or on a TV, the button behaves as before.
   const onHeaderClick = (event) => {
@@ -1207,10 +1217,20 @@
       return;
     }
     if (document.documentElement.classList.contains("layout-mobile")) return;
+    // With no capsule to replace there is nowhere for the field to open: the stock button stands.
+    if (!capsuleOf()) return;
     event.preventDefault();
     event.stopPropagation();
     if (hs?.open) closeHeader();
-    else openHeader(link);
+    else {
+      try {
+        openHeader(link);
+      } catch (error) {
+        console.error("[Hera TV:search]", error);
+        abandonHeader();
+        kit.go(searchHash(""));
+      }
+    }
   };
   document.addEventListener("click", onHeaderClick, true);
 
@@ -1219,11 +1239,19 @@
 
   HT.register({
     name: "search",
+    // No `requires`: the header field takes whichever capsule is there (the modern app bar's tabs,
+    // or the TV and legacy layouts' .skinHeader), and onHeaderClick already checks for one.
     async onView(page, { params }) {
       if (!kit.userId()) return;
       if (page.id === "searchPage") {
         closeHeader({ restore: false });
-        await mount(page, params);
+        try {
+          await mount(page, params);
+        } catch (error) {
+          // Jellyfin's own search page is hidden once ours is up; a half-built one gives it back.
+          unmount();
+          throw error;
+        }
       } else unmount();
     },
     teardown() {

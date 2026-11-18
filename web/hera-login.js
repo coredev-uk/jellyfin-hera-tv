@@ -4,11 +4,14 @@
   const core = window.HeraTV;
   if (!core?.kit) return;
   const { el, icon } = core.kit;
+  const { jf } = core;
 
   const root = document.documentElement;
   const userId = () => window.ApiClient?.getCurrentUserId?.() || "";
   const CACHE_KEY = "hera-login";
   const FORM_ID = "heraManualLogin";
+  const SETTLE_MS = 2500; // how long Jellyfin's pieces of the page may take to appear
+  const PENDING_MS = 3000; // how long the form waits for the server before it shows anyway
 
   /** The server's name and whether the sign-in disclaimer carries a single sign-on link, from the last visit. */
   const readCache = () => {
@@ -65,13 +68,21 @@
   };
   cleanups.push(watchDialogs());
 
+  /** Gives the page back to Jellyfin as it drew it: our classes and additions go, its elements stay. */
+  const strip = (page) => {
+    page.querySelectorAll(".hera-login__brand, .hera-login__toggle").forEach((n) => n.remove());
+    page.querySelectorAll(".hera-login__stock-title").forEach((n) => n.classList.remove("hera-login__stock-title"));
+    page.querySelector(jf.loginStack)?.classList.remove("hera-login__stack");
+    page.classList.remove("hera-login", "hera-login--pending", "hera-login--sso", "hera-login--users", "hera-login--form", "hera-login--open");
+  };
+
   /* ---- The sign-in page ------------------------------------------------------------- */
 
   const build = (page) => {
-    const stack = page.querySelector(".margin-auto-y");
-    const form = page.querySelector(".manualLoginForm");
-    const visual = page.querySelector(".visualLoginForm");
-    const actions = page.querySelector(".readOnlyContent");
+    const stack = page.querySelector(jf.loginStack);
+    const form = page.querySelector(jf.loginForm);
+    const visual = page.querySelector(jf.loginUsers);
+    const actions = page.querySelector(jf.loginActions);
     if (!stack || !form || !visual || !actions) return null;
 
     const cached = readCache();
@@ -82,6 +93,7 @@
       open: false,
       users: false,
       stopped: false,
+      stuck: false, // the password control cannot be reached, so the form shows instead of hiding behind it
     };
 
     const name = el("h1", { class: "hera-login__name", text: state.name });
@@ -97,9 +109,12 @@
     // first, then Quick Connect, then the password route. Jellyfin finds every one of these
     // elements through the page, so moving them keeps its handlers.
     form.id = FORM_ID;
+    // Jellyfin's own heading above the fields gives way to the server's name; only a heading, never a field.
+    const heading = form.firstElementChild;
+    if (heading && !heading.querySelector("input, button, a")) heading.classList.add("hera-login__stock-title");
     const disclaimer = page.querySelector(".loginDisclaimerContainer");
     if (disclaimer) actions.prepend(disclaimer);
-    stack.insertBefore(actions, form);
+    form.before(actions);
 
     const toggle = el(
       "button",
@@ -127,7 +142,7 @@
       page.classList.toggle("hera-login--pending", state.sso === null);
       page.classList.toggle("hera-login--sso", state.sso === true);
       page.classList.toggle("hera-login--users", state.users);
-      page.classList.toggle("hera-login--form", state.open || bare || state.users);
+      page.classList.toggle("hera-login--form", state.open || bare || state.users || state.stuck);
       page.classList.toggle("hera-login--open", state.open);
       toggle.setAttribute("aria-expanded", String(state.open));
     };
@@ -176,7 +191,28 @@
     const disclaimerBox = page.querySelector(".loginDisclaimer");
     if (disclaimerBox) disclaimerObserver.observe(disclaimerBox, { childList: true });
 
+    // Neither lookup is certain to answer, and a form that never appears would lock everyone out.
+    // Once the timer has shown the form it stays open, so a late answer naming single sign-on
+    // can't hide it while someone is typing.
+    const pendingTimer = setTimeout(() => {
+      if (state.stopped || state.sso !== null) return;
+      state.sso = false;
+      state.open = true;
+      render();
+    }, PENDING_MS);
+
+    // The password form hides behind the control above it; if that control cannot be seen, the form shows instead.
+    const verifyReachable = () => {
+      setTimeout(() => {
+        if (state.stopped || state.open || state.users || state.sso !== true || page.getClientRects().length === 0) return;
+        if (toggle.getClientRects().length) return;
+        state.stuck = true;
+        render();
+      }, 600);
+    };
+
     Promise.allSettled([publicJSON("System/Info/Public"), publicJSON("Branding/Configuration")]).then(([info, branding]) => {
+      clearTimeout(pendingTimer);
       if (state.stopped) return;
       if (info.status === "fulfilled" && info.value?.ServerName) state.name = info.value.ServerName;
       // With no single sign-on button the password form is the only way in: show it. A failed
@@ -190,9 +226,11 @@
       name.textContent = state.name || "Sign in";
       render();
       focusLead();
+      verifyReachable();
     });
 
     render();
+    verifyReachable();
 
     return {
       page,
@@ -201,16 +239,14 @@
       },
       destroy() {
         state.stopped = true;
+        clearTimeout(pendingTimer);
         toggle.removeEventListener("click", onToggle);
         form.removeEventListener("keydown", onKey);
         usersObserver.disconnect();
         disclaimerObserver.disconnect();
         const password = form.querySelector("#txtManualPassword");
         if (password) password.value = "";
-        brand.remove();
-        stack.classList.remove("hera-login__stack");
-        toggle.remove();
-        page.classList.remove("hera-login", "hera-login--pending", "hera-login--sso", "hera-login--users", "hera-login--form", "hera-login--open");
+        strip(page);
       },
     };
   };
@@ -225,8 +261,48 @@
   };
 
   const leave = () => {
+    stopWaiting();
     login?.destroy();
     login = null;
+  };
+
+  const missingPieces = (page) => ["loginStack", "loginForm", "loginUsers", "loginActions"].filter((key) => !page.querySelector(jf[key]));
+
+  const tryBuild = (page) => {
+    try {
+      login = build(page);
+    } catch (error) {
+      // Half-moved elements go back; Jellyfin's page is what stays.
+      console.error("[Hera TV:login]", error);
+      strip(page);
+      login = null;
+    }
+  };
+
+  // Jellyfin draws the sign-in page in pieces. Wait a moment for them; if one never comes, the
+  // stock page stands, untouched. Nobody is signed in, so there is no one to tell but the console.
+  const waiting = { observer: null, timer: 0 };
+  function stopWaiting() {
+    waiting.observer?.disconnect();
+    waiting.observer = null;
+    clearTimeout(waiting.timer);
+  }
+  const mountLogin = (page) => {
+    stopWaiting();
+    if (!missingPieces(page).length) return tryBuild(page);
+    const attempt = () => {
+      if (missingPieces(page).length) return;
+      stopWaiting();
+      tryBuild(page);
+    };
+    waiting.observer = new MutationObserver(attempt);
+    waiting.observer.observe(page, { childList: true, subtree: true });
+    waiting.timer = setTimeout(() => {
+      const gone = missingPieces(page);
+      stopWaiting();
+      if (gone.length) console.warn(`[Hera TV:login] standing aside: Jellyfin's sign-in page has no ${gone.map((key) => jf[key]).join(", ")}`);
+      else tryBuild(page);
+    }, SETTLE_MS);
   };
 
   const show = (page) => {
@@ -237,7 +313,7 @@
     if (!isLogin) return leave();
     if (login?.page === page) return login.reset();
     leave();
-    login = build(page);
+    mountLogin(page);
   };
 
   const onViewShow = (event) => {
@@ -248,7 +324,7 @@
   cleanups.push(() => document.removeEventListener("viewshow", onViewShow));
 
   // The page may already be showing when this script arrives.
-  show(document.querySelector(".page:not(.hide)"));
+  show(document.querySelector(jf.page));
 
   core.register({
     name: "login",

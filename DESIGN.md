@@ -66,3 +66,18 @@ The theme also sets Jellyfin 12's own `--jf-palette-*` and `--mui-palette-*` var
 | LG webOS and other clients that load the server's web UI | Yes                                                                       |
 | TV layout                                                | Larger type, white-ring focus, remote navigation into and out of the hero |
 | Android TV, Swiftfin, Infuse                             | No: these use their own native interfaces                                 |
+
+## Surviving Jellyfin updates
+
+Hera restyles and adds to Jellyfin's own web client, so a Jellyfin release can change something it leans on. The rule is that an update may cost a feature, never a usable page:
+
+| Layer | What happens when Jellyfin changes |
+| --- | --- |
+| Server | The index.html rewrite falls back to Jellyfin's own page on any error, so the web client always loads |
+| Registry | The Jellyfin pieces Hera needs are named once, in `JF` in `web/hera-tv.js`; a rename is fixed there |
+| Modules | Each module lists the pieces it needs on each page (`requires`). Missing after the page settles, the module stands aside on that page and Jellyfin's own version shows. Three failures in a row switch a module off for the session |
+| Stock hidden | Jellyfin's own sections are hidden only behind a class Hera sets once its replacement is on the page (`hera-has-seasons`, `hera-has-boxset`, `hera-home`), so a replacement that fails to mount leaves the stock one showing |
+| Whole client | No `ApiClient` 20 s after loading: Hera removes its stylesheets and stops, and Jellyfin looks as it does without the plugin |
+| By hand | `?hera=off` in the address takes Hera off that tab until it closes; `?hera=on` brings it back |
+| Reporting | Modules that stand aside or switch off report to the server; the Dashboard's Hera TV page lists them, with the Jellyfin version and the releases this build was tested on |
+| Testing | `.github/workflows/compat.yaml` runs Hera against a real Jellyfin on every pull request, and nightly against `latest` and `unstable`, failing on any module that stands aside |

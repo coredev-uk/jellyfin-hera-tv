@@ -15,6 +15,24 @@
   }
 
   const root = document.documentElement;
+
+  // `?hera=off` (in the address, or after the # as Jellyfin's routes put it) takes Hera off this
+  // tab until it is closed, and `?hera=on` brings it back: the way out if an update ever leaves a
+  // page unusable. Off, the stylesheets go and nothing below runs.
+  try {
+    const asked = new URLSearchParams(window.location.search).get("hera") ?? new URLSearchParams(window.location.hash.split("?")[1] || "").get("hera");
+    if (asked === "off") sessionStorage.setItem("hera-off", "1");
+    if (asked === "on") sessionStorage.removeItem("hera-off");
+    if (sessionStorage.getItem("hera-off") === "1") {
+      document.querySelectorAll("link[data-hera-tv]").forEach((node) => node.remove());
+      root.removeAttribute("data-hera-scheme");
+      console.info("[Hera TV] off for this tab; add ?hera=on to the address to bring it back");
+      return;
+    }
+  } catch {
+    /* no sessionStorage: carry on */
+  }
+
   root.classList.add("hera");
 
   const state = {
@@ -284,6 +302,205 @@
   const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
   const modules = [];
+
+  // ---------- compatibility ------------------------------------------------------------
+  // What Hera leans on in Jellyfin's own web client, in one place, so a Jellyfin update that
+  // renames something is fixed here once. Each module names the pieces it needs on each kind of
+  // page (`requires`); when one is missing after the page has settled, that module stands aside
+  // on that page and stock Jellyfin shows, instead of a half-built page, and the Dashboard's Hera
+  // TV page says which piece went missing. A module that keeps throwing is switched off for the
+  // session. If the web client itself is unrecognisable (no ApiClient), Hera removes its
+  // stylesheets and stops: Jellyfin then looks exactly as it does without the plugin.
+  // `?hera=off` in the address does the same by hand, for this tab, until it is closed.
+  const JF = Object.freeze({
+    page: ".page:not(.hide)",
+    appBar: ".MuiAppBar-root",
+    appBarTabs: ".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root",
+    legacyHeader: ".skinHeader",
+    homeTab: "#homeTab",
+    homeSections: "#homeTab .homeSectionsContainer",
+    detailRibbon: ".detailRibbon",
+    detailButtons: ".mainDetailButtons",
+    detailPlay: ".mainDetailButtons .btnPlay",
+    detailPrimary: ".detailPagePrimaryContent",
+    detailSection: ".detailPagePrimaryContent .detailSection",
+    detailMisc: ".itemMiscInfo-primary",
+    detailBanner: ".itemBackdrop",
+    detailSecondary: ".detailPageSecondaryContainer",
+    collectionItems: ".collectionItems",
+    videoOsd: ".videoOsdBottom",
+    prefsLinks: ".readOnlyContent a.listItem-border",
+    loginForm: ".manualLoginForm",
+    loginStack: ".margin-auto-y",
+    loginActions: ".readOnlyContent",
+    loginUsers: ".visualLoginForm",
+  });
+  // Pages every module may lean on without saying so: if these are gone, Hera's built-ins stand
+  // aside on that page too.
+  const CORE_REQUIRES = {
+    itemDetailPage: ["detailRibbon", "detailButtons", "detailPrimary"],
+  };
+  const ERROR_LIMIT = 3;
+  const SETTLE_MS = 2500;
+
+  const health = {
+    boot: "starting", // starting | ok | untested | safe
+    reason: null,
+    jellyfin: null,
+    tested: null,
+    modules: new Map(), // name -> { status, missing, page, errors, streak, lastError }
+  };
+  const moduleHealth = (name) => {
+    if (!health.modules.has(name)) {
+      health.modules.set(name, { status: "idle", missing: [], page: null, errors: 0, streak: 0, lastError: null });
+    }
+    return health.modules.get(name);
+  };
+  const healthSnapshot = () => ({
+    boot: health.boot,
+    reason: health.reason,
+    jellyfin: health.jellyfin,
+    tested: health.tested,
+    modules: [...health.modules].map(([name, m]) => ({ name, status: m.status, missing: m.missing, page: m.page, errors: m.errors, lastError: m.lastError })),
+  });
+
+  // A change worth telling the server about (a module standing aside or switched off, or coming
+  // back after one) is sent once, a moment later, with everything else that changed meanwhile.
+  let reportTimer = 0;
+  let reported = "";
+  let reportedProblem = false;
+  const reportHealth = () => {
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(() => {
+      const snapshot = healthSnapshot();
+      const problem = snapshot.boot !== "ok" || snapshot.modules.some((m) => m.status === "degraded" || m.status === "disabled");
+      const key = JSON.stringify(snapshot.modules.map((m) => [m.name, m.status, m.missing]).concat([snapshot.boot]));
+      if ((!problem && !reportedProblem) || key === reported || !api() || !userId()) return;
+      reported = key;
+      reportedProblem = problem;
+      hera("health", { method: "POST", body: { ...snapshot, page: root.dataset.heraView || null } }).catch(() => {});
+    }, 3000);
+  };
+
+  const missingOn = (page, keys) => keys.filter((key) => !(JF[key] && (page.querySelector(JF[key]) || document.querySelector(JF[key]))));
+
+  // Jellyfin draws a page in pieces; a piece counts as missing only once the page has had a
+  // moment to settle and it still isn't there.
+  const waitForPieces = (page, keys) =>
+    new Promise((resolve) => {
+      if (!keys.length || !missingOn(page, keys).length) return resolve([]);
+      const observer = new MutationObserver(() => {
+        if (missingOn(page, keys).length) return;
+        finish();
+      });
+      const timer = setTimeout(() => finish(), SETTLE_MS);
+      const finish = () => {
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve(missingOn(page, keys));
+      };
+      observer.observe(page, { childList: true, subtree: true });
+    });
+
+  const requiresFor = (module, page) => [...(CORE_REQUIRES[page.id] ?? []), ...(module.requires?.[page.id] ?? []), ...(module.requires?.["*"] ?? [])];
+
+  /**
+   * Runs one module on a page: probes what it needs first, and keeps count of what it throws.
+   * `settled` carries what one showing of a page has already waited for and not found, so the
+   * modules after the first don't each wait again for the same missing piece. Returns false when
+   * the page went away while it waited (`stale`), so the caller stops there.
+   */
+  const runModule = async (module, page, context, settled = new Set(), stale = () => false) => {
+    const m = moduleHealth(module.name);
+    if (m.status === "disabled") return true;
+    const keys = requiresFor(module, page);
+    const known = keys.filter((key) => settled.has(key));
+    const missing = known.length ? [...known, ...missingOn(page, keys.filter((key) => !settled.has(key)))] : await waitForPieces(page, keys);
+    if (stale()) return false;
+    missing.forEach((key) => settled.add(key));
+    if (missing.length) {
+      if (m.status !== "degraded" || m.page !== page.id || m.missing.join() !== missing.join()) {
+        console.warn(`[Hera TV:${module.name}] standing aside on ${page.id}: Jellyfin has no ${missing.map((key) => JF[key]).join(", ")}`);
+      }
+      Object.assign(m, { status: "degraded", missing, page: page.id });
+      reportHealth();
+      return true;
+    }
+    try {
+      await module.onView?.(page, context);
+      if (m.status !== "ok") {
+        const recovered = m.status === "degraded";
+        Object.assign(m, { status: "ok", missing: [], page: null });
+        if (recovered) reportHealth();
+      }
+      m.streak = 0;
+    } catch (error) {
+      console.error(`[Hera TV:${module.name}]`, error);
+      m.errors += 1;
+      m.streak += 1;
+      m.lastError = String(error?.message || error).slice(0, 300);
+      if (m.streak >= ERROR_LIMIT) {
+        console.warn(`[Hera TV:${module.name}] switched off for this session after ${ERROR_LIMIT} failures in a row`);
+        m.status = "disabled";
+        try {
+          module.teardown?.();
+        } catch {
+          /* already failing */
+        }
+      }
+      reportHealth();
+    }
+    return true;
+  };
+
+  /** Takes Hera off this tab entirely: its stylesheets, its classes, its modules. */
+  const safeMode = (reason) => {
+    if (health.boot === "safe") return;
+    health.boot = "safe";
+    health.reason = reason;
+    console.warn(`[Hera TV] off for this tab: ${reason}`);
+    document.querySelectorAll("link[data-hera-tv], style[data-hera-tv]").forEach((node) => node.remove());
+    window.HeraTV?.teardown();
+    [...root.classList].filter((name) => name === "hera" || name.startsWith("hera-")).forEach((name) => root.classList.remove(name));
+    root.removeAttribute("data-hera-scheme");
+    root.removeAttribute("data-hera-view");
+    reportSafe();
+  };
+
+  // Safe mode usually means there is no ApiClient to report through, so this goes to the server
+  // directly, signed with the token Jellyfin keeps for the signed-in user.
+  const reportSafe = () => {
+    try {
+      const credentials = JSON.parse(localStorage.getItem("jellyfin_credentials") || "{}");
+      const token = credentials.Servers?.find((server) => server.AccessToken)?.AccessToken;
+      if (!token) return;
+      fetch(new URL("../HeraTV/health", document.baseURI), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `MediaBrowser Token="${token}"` },
+        body: JSON.stringify({ ...healthSnapshot(), page: null }),
+      }).catch(() => {});
+    } catch {
+      /* nothing to report with */
+    }
+  };
+
+  // Which Jellyfin releases this build was tested against, and which one this server runs.
+  const checkVersion = async () => {
+    try {
+      const response = await fetch(new URL("../HeraTV/compat", document.baseURI));
+      if (!response.ok) return;
+      const compat = await response.json();
+      health.jellyfin = compat.jellyfin ?? null;
+      health.tested = compat.tested ?? null;
+      if (health.boot === "starting" || health.boot === "ok") health.boot = compat.supported === false ? "untested" : "ok";
+      if (health.boot === "untested") {
+        console.warn(`[Hera TV] Jellyfin ${health.jellyfin} is newer than the releases this build was tested on (${(health.tested || []).join(", ")})`);
+        reportHealth();
+      }
+    } catch {
+      /* the server answers this for every page; without it, carry on */
+    }
+  };
 
   // ---------- stylesheet order ---------------------------------------------------------
   // Jellyfin appends its theme and plugin styles after ours at runtime; keep ours last so
@@ -1633,18 +1850,12 @@
     homeWait.timer = setTimeout(stopHomeWait, 10000);
   };
 
-  const onView = async (page) => {
-    if (!api() || !userId()) return;
-    root.dataset.heraView = page.id || "";
-    // The page's toolbar renders a moment after the page shows.
-    requestAnimationFrame(measureBar);
-    setTimeout(measureBar, 400);
-    const isHome = page.id === "indexPage";
-    stopHomeWait();
-    if (isHome && !page.querySelector("#homeTab .homeSectionsContainer")) waitForHomeSections(page);
-    if (!isHome) root.classList.remove("hera-home");
-    if (page.id !== "itemDetailPage") root.classList.remove("hera-art-top");
-    try {
+  // Hera's own pieces (hero, banner, shelves) run as a module like the others, so a Jellyfin page
+  // they no longer recognise is left to Jellyfin rather than half-rebuilt.
+  const builtIns = {
+    name: "core",
+    onView: async (page) => {
+      const isHome = page.id === "indexPage";
       if (isHome) await mountHero(page);
       if (page.id === "itemDetailPage") {
         markLogo(page);
@@ -1660,17 +1871,30 @@
           await mountBoxSet(page, id);
         }
       }
-    } catch (error) {
-      console.error("[Hera TV]", error);
-    }
+    },
+  };
+
+  // Each showing of a page gets a number; a run still waiting for Jellyfin's pieces when a newer
+  // one starts (or the page is hidden) stops, so modules never act on a page the reader has left.
+  let viewGeneration = 0;
+  const onView = async (page) => {
+    if (!api() || !userId() || health.boot === "safe") return;
+    const generation = ++viewGeneration;
+    const stale = () => generation !== viewGeneration || page.classList.contains("hide");
+    root.dataset.heraView = page.id || "";
+    // The page's toolbar renders a moment after the page shows.
+    requestAnimationFrame(measureBar);
+    setTimeout(measureBar, 400);
+    const isHome = page.id === "indexPage";
+    stopHomeWait();
+    if (isHome && !page.querySelector(JF.homeSections)) waitForHomeSections(page);
+    if (!isHome) root.classList.remove("hera-home");
+    if (page.id !== "itemDetailPage") root.classList.remove("hera-art-top");
     // Modules see every page after the built-ins; one failing never stops the others.
     const context = { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") };
-    for (const module of modules) {
-      try {
-        await module.onView?.(page, context);
-      } catch (error) {
-        console.error(`[Hera TV:${module.name}]`, error);
-      }
+    const settled = new Set();
+    for (const module of [builtIns, ...modules]) {
+      if (!(await runModule(module, page, context, settled, stale))) return;
     }
   };
 
@@ -1759,9 +1983,17 @@
         .then((info) => info?.ServerName && root.style.setProperty("--hera-server", JSON.stringify(info.ServerName)))
         .catch(() => {});
       clearInterval(waitForApi);
+      clearTimeout(watchdog);
+      if (health.boot === "starting") health.boot = "ok";
+      checkVersion();
       onHash();
     }, 250);
-    state.cleanups.push(() => clearInterval(waitForApi));
+    // A web client with no ApiClient long after loading is not one Hera knows: step aside. The
+    // sign-in page has one too, so a signed-out tab isn't caught by this.
+    const watchdog = setTimeout(() => {
+      if (!api()) safeMode("Jellyfin's web client has no ApiClient");
+    }, 20000);
+    state.cleanups.push(() => clearInterval(waitForApi), () => clearTimeout(watchdog));
   };
 
   window.HeraTV = {
@@ -1790,15 +2022,22 @@
       appearances: APPEARANCES,
       isTv: () => root.classList.contains("layout-tv"),
     },
-    /** Adds a module: `{ name, onView(page, { itemId, params }), teardown() }`. */
+    /** Jellyfin's pieces Hera leans on, by name (see "compatibility"). */
+    jf: JF,
+    /** How Hera is getting on with this Jellyfin: boot state and each module's status. */
+    health: healthSnapshot,
+    /**
+     * Adds a module: `{ name, requires, onView(page, { itemId, params }), teardown() }`.
+     * `requires` maps a page id (or "*") to the names in `jf` the module can't work without on
+     * that page; until they are there, the module is not run on it.
+     */
     register(module) {
       modules.push(module);
+      moduleHealth(module.name);
       // A module that arrives after the first page still sees it.
-      const page = document.querySelector(".page:not(.hide)");
-      if (page && api() && userId()) {
-        Promise.resolve()
-          .then(() => module.onView?.(page, { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") }))
-          .catch((error) => console.error(`[Hera TV:${module.name}]`, error));
+      const page = document.querySelector(JF.page);
+      if (page && api() && userId() && health.boot !== "safe") {
+        runModule(module, page, { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") });
       }
     },
     teardown() {

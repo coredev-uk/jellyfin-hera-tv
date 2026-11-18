@@ -843,7 +843,7 @@
 
   const mountView = (page) => {
     if (view.root?.isConnected) return;
-    const host = page.querySelector("#homeTab");
+    const host = page.querySelector(HT.jf.homeTab);
     if (!host) return;
     unmountView();
     view.abort = new AbortController();
@@ -886,14 +886,14 @@
     }
   };
 
-  const STACK = ".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root";
+  // The tabs are optional chrome: with no strip to put them in, Discover is still reached by its address.
   let seerrOn = false;
   let desktopTab = null;
   let tvTab = null;
 
   const tabsFor = () => {
     const onHome = currentPage()?.id === "indexPage";
-    const stack = document.querySelector(STACK);
+    const stack = document.querySelector(HT.jf.appBarTabs);
     const slider = onHome ? document.querySelector(".headerTabs .emby-tabs-slider") : null;
     return { stack, slider };
   };
@@ -1074,6 +1074,8 @@
 
   HT.register({
     name: "discover",
+    // The view mounts into the home tab; Discover has nowhere to appear without it.
+    requires: { indexPage: ["homeTab"] },
     async onView(page, { itemId }) {
       if (!kit.userId()) return;
       const ints = await kit.integrations();

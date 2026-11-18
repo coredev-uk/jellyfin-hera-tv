@@ -2,8 +2,9 @@
 
 /* ---------- Jellyfin's own home sections (hera-home.js) ------------------------------------------ */
 
-/* Until hera-home.js knows which slot holds Recently Added, every stock section waits. */
-html.hera-owns-home .homeSectionsContainer > [class*="section"]:not(.hera-row):not(.hera-keep),
+/* Until hera-home.js knows which slot holds Recently Added, every stock section waits. The hold
+ * is a class on the sections container itself, so it can never outlive the module that set it. */
+.homeSectionsContainer.hera-owns-home > [class*="section"]:not(.hera-row):not(.hera-keep),
 .hera-stock-hidden {
   display: none !important;
 }

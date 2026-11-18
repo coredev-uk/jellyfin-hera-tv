@@ -1,0 +1,15 @@
+{
+  "name": "hera-tv-compat",
+  "private": true,
+  "description": "Runs Hera TV against a real Jellyfin server and fails when Hera reports anything broken.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.65.1"
+  }
+}

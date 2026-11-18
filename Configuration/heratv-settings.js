@@ -8,6 +8,9 @@
  * variables own are shown read-only with their value (the API key is never shown), because those
  * variables win over anything saved here. The Seerr API key is write-only: the page learns only
  * whether one is set.
+ *
+ * The Compatibility section at the foot reads /HeraTV/health: which parts of Hera the web clients
+ * say have stood aside because this Jellyfin's web client no longer matches what they expect.
  */
 
 const el = (tag, attrs = {}, children = []) => {
@@ -46,6 +49,14 @@ const reason = async (error) => {
   return "Couldn't reach the server. Check your connection and try again.";
 };
 
+// Page ids as the web client names them, for the Compatibility section's sentences.
+const PAGE_NAMES = {
+  indexPage: "the home page",
+  itemDetailPage: "detail pages",
+  loginPage: "the sign-in page",
+  videoOsdPage: "the video player",
+};
+
 // [feature key in /HeraTV/settings, request field, icon, label, description]
 const SWITCHES = [
   ["discover", "discoverEnabled", "explore", "Discover tab", "A tab on the home page for browsing and requesting films and shows through Seerr."],
@@ -80,6 +91,7 @@ export default function (view) {
   let clearKey = false;
   const clearArrKeys = new Set(); // service ids whose saved key is removed on the next save
   let barTimer = 0;
+  let compat = null; // The last /HeraTV/health answer, or { error }
 
   const lower = (name) => String(name || "").toLowerCase();
 
@@ -483,6 +495,103 @@ export default function (view) {
     return group("Title pages", el("div", { class: "hera-set-list" }, rows), foot("These apply to everyone on this server."));
   };
 
+  // ---------- compatibility -------------------------------------------------------------------
+
+  const compatRow = (iconName, label, value) =>
+    el("div", { class: "hera-set-row hera-set-row--static" }, [
+      el("span", { class: "hera-set-row__icon" }, icon(iconName)),
+      el("span", { class: "hera-set-row__text" }, el("span", { class: "hera-set-row__label", text: label })),
+      el("span", { class: "hera-set-row__value", text: value }),
+    ]);
+
+  const when = (iso) => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+
+  /** What a module's report means, in plain words. */
+  const describeModule = (m) => {
+    if (m.status === "disabled") return `Switched off after repeated errors${m.lastError ? `: ${m.lastError}` : ""}`;
+    const gone = m.missing.length ? `Jellyfin has no ${m.missing.join(", ")}` : "a piece of Jellyfin it needs is missing";
+    return `Standing aside on ${PAGE_NAMES[m.page] || (m.page ? `the ${m.page} page` : "this page")}: ${gone}`;
+  };
+
+  /** Everything that has gone wrong: modules that stood aside or were switched off, and times the whole client did. */
+  const problemsOf = (data) => [
+    ...data.boot
+      .filter((b) => b.boot === "safe")
+      .map((b) => ({ name: "Hera TV (whole page)", what: `Switched off in the browser${b.reason ? `: ${b.reason}` : ""}`, user: b.user, count: b.count, lastSeen: b.lastSeen })),
+    ...data.modules
+      .filter((m) => m.status === "degraded" || m.status === "disabled")
+      .map((m) => ({ name: m.name, what: describeModule(m), user: m.user, count: m.count, lastSeen: m.lastSeen })),
+  ];
+
+  const problemTable = (problems) =>
+    el("div", { class: "hera-set-list" }, el("div", { class: "hera-cfg-table-wrap" }, el("table", { class: "hera-cfg-table" }, [
+      el("thead", {}, el("tr", {}, ["Module", "What happened", "Reported by", "Last seen"].map((text) => el("th", { scope: "col", text })))),
+      el("tbody", {}, problems.map((p) =>
+        el("tr", {}, [
+          el("th", { scope: "row", text: p.name }),
+          el("td", { text: p.what }),
+          el("td", { text: p.count > 1 ? `${p.user} (${p.count} reports)` : p.user }),
+          el("td", { text: when(p.lastSeen) }),
+        ]))),
+    ])));
+
+  const compatSection = () => {
+    const refresh = button("Refresh", {
+      iconName: "refresh",
+      onclick: async () => {
+        refresh.disabled = true;
+        await loadCompat();
+      },
+    });
+    const note = foot("To see a page without Hera TV, add ?hera=off to its address (before or after the #); ?hera=on turns it back on. It applies to that browser tab until the tab is closed.");
+
+    let body;
+    if (!compat) {
+      body = el("p", { class: "hera-set-status", text: "Checking…" });
+    } else if (compat.error) {
+      body = el("div", { class: "hera-cfg-compat" }, [
+        el("p", { class: "hera-set-status hera-cfg-verdict is-error", role: "status" }, [icon("error_outline"), el("span", { text: compat.error })]),
+        el("div", { class: "hera-cfg-test" }, refresh),
+      ]);
+    } else {
+      const problems = problemsOf(compat);
+      body = el("div", { class: "hera-cfg-compat" }, [
+        el("div", { class: "hera-set-list" }, [
+          compatRow("dns", "Jellyfin", compat.jellyfin),
+          compatRow("verified", "Tested with", compat.tested.join(", ")),
+          compatRow("tv", "Hera TV", compat.plugin),
+        ]),
+        compat.supported
+          ? null
+          : el("p", { class: "hera-set-status hera-cfg-verdict is-error", role: "status" }, [
+              icon("warning"),
+              el("span", { text: `Hera TV hasn't been tested with Jellyfin ${compat.jellyfin}. It keeps running, and any part that no longer fits Jellyfin's web client switches itself off and is listed below, but pages may look or behave differently until a release for this version is out.` }),
+            ]),
+        problems.length
+          ? problemTable(problems)
+          : el("p", { class: "hera-set-status hera-cfg-verdict", role: "status" }, [icon("check_circle"), el("span", { text: "Everything is working. Nothing has been reported since the server started." })]),
+        el("div", { class: "hera-cfg-test" }, refresh),
+      ]);
+    }
+    return group("Compatibility", body, note);
+  };
+
+  const renderCompat = () => {
+    const next = compatSection();
+    sections.compat.replaceWith(next);
+    sections.compat = next;
+  };
+
+  /** Fetches what browsers have reported; failing to is shown in the section, not on the whole page. */
+  const loadCompat = async () => {
+    try {
+      compat = await window.ApiClient.ajax({ type: "GET", url: window.ApiClient.getUrl("HeraTV/health"), dataType: "json" });
+    } catch (error) {
+      compat = { error: await reason(error) };
+    }
+    renderCompat();
+  };
+
   // ---------- save bar ------------------------------------------------------------------------
 
   const bar = el("div", { class: "hera-cfg-bar", role: "region", "aria-label": "Save changes" });
@@ -542,6 +651,7 @@ export default function (view) {
 
     sections.seerr = group("Seerr", seerrSection());
     sections.mapping = mappingSection();
+    sections.compat = compatSection();
     root.replaceChildren(
       ...[
         el("h1", { class: "hera-set-title", text: "Hera TV" }),
@@ -556,6 +666,7 @@ export default function (view) {
         homeSection(),
         rowsSection(),
         titleSection(),
+        sections.compat,
         bar,
       ].filter(Boolean),
     );
@@ -572,6 +683,7 @@ export default function (view) {
       jellyfinUsers = (jellyfinUsers || []).slice().sort((a, b) => String(a.Name).localeCompare(String(b.Name), undefined, { sensitivity: "base" }));
       directory = null;
       render();
+      loadCompat();
       root.removeAttribute("aria-busy");
       if (server.seerr.url.value && server.seerr.apiKey.set) {
         await loadDirectory({});

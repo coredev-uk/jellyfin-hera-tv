@@ -95,9 +95,10 @@ html.hera-signed-out .backdropContainer {
 .hera-login--pending .manualLoginForm {
   visibility: hidden;
 }
-/* Jellyfin's own headings are replaced by the name above. */
-#loginPage .manualLoginForm > :first-child,
-#loginPage .visualLoginForm > h1 {
+/* Jellyfin's own headings are replaced by the name above. hera-login.js marks the one above the
+ * fields only when it is a heading, and the users' heading only once the page is ours. */
+#loginPage .manualLoginForm > .hera-login__stock-title,
+#loginPage.hera-login .visualLoginForm > h1 {
   display: none;
 }
 
