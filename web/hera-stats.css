@@ -1,0 +1,553 @@
+/* Hera TV: "Your Watching" (hera-stats.js). Loaded after hera-tv.css. */
+
+/* ---------- The view: #/home?hera=stats ---------------------------------------------------- */
+
+/* The page takes the place of the home tab, as Discover and the Requests view do: no hero, no home rows, and Home steps back. */
+html.hera-stats-on[data-hera-view] .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root:not(:has(> a.MuiButton-colorPrimary)) > a:first-child,
+html.hera-stats-on .headerTabs .emby-tab-button.emby-tab-button-active:not(:focus) {
+  background: transparent !important;
+  color: var(--hera-label-2) !important;
+}
+html.hera-stats-on #homeTab > .hera-hero,
+html.hera-stats-on #indexPage .homeSectionsContainer,
+html.hera-stats-on .backdropContainer,
+html.hera-stats-on #slides-container {
+  display: none !important;
+}
+
+.hera-stats {
+  padding-bottom: 72px;
+}
+
+/* ---------- Banner: the most-watched title's key art, and the sentence over it ------------------ */
+
+.hera-stats__banner {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  min-height: clamp(420px, 60vh, 720px);
+  margin: -64px 0 0;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--hera-label);
+}
+.layout-tv .hera-stats__banner {
+  margin-top: -88px;
+}
+.hera-stats__banner.has-art {
+  background: var(--hera-surface);
+}
+.hera-stats__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+  opacity: 0;
+  transition: opacity 600ms var(--hera-ease);
+}
+.hera-stats__art.is-loaded {
+  opacity: 1;
+}
+.hera-stats__banner.has-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.5) 30%, transparent 62%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.45) 22%, transparent 50%);
+}
+/* Dark: the art dissolves into the page. Light: a contained sheet with its own scrim and a rounded
+ * foot, as the home hero and the detail banners are. */
+:root:not([data-hera-scheme="light"]) .hera-stats__banner.has-art {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 96px), transparent 100%);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 96px), transparent 100%);
+}
+:root[data-hera-scheme="light"] .hera-stats__banner.has-art {
+  margin-bottom: 28px;
+  border-radius: 0 0 28px 28px;
+  box-shadow: 0 16px 32px -24px rgba(0, 0, 0, 0.3);
+}
+
+.hera-stats__intro {
+  position: relative;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  max-width: calc(min(52vw, 860px) + var(--hera-edge));
+  padding: 0 var(--hera-edge) clamp(40px, 7vh, 72px);
+}
+.hera-stats__logo {
+  display: block;
+  max-width: min(100%, 520px);
+  max-height: clamp(80px, 14vh, 150px);
+  width: auto;
+  object-fit: contain;
+  object-position: left bottom;
+  filter: drop-shadow(0 6px 26px rgba(0, 0, 0, 0.55));
+  margin-bottom: 6px;
+}
+/* The sentence is white, the figures and the title heavier. */
+.hera-stats__lead {
+  margin: 0;
+  color: var(--hera-label);
+  font-family: var(--hera-font-display);
+  font-size: clamp(32px, 4.2vw, 60px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.06;
+  text-wrap: balance;
+  text-shadow: 0 2px 28px rgba(0, 0, 0, 0.45);
+}
+.hera-stats__lead strong,
+.hera-stats__title-link {
+  color: var(--hera-label);
+  font-weight: 800;
+}
+.hera-stats__title-link {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--hera-label-3);
+  text-underline-offset: 0.12em;
+  transition: text-decoration-color var(--hera-fast) var(--hera-ease);
+}
+.hera-stats__title-link:hover {
+  text-decoration-color: var(--hera-label);
+}
+.hera-stats__sub {
+  margin: 0;
+  color: var(--hera-label-2);
+  font: 600 clamp(16px, 1.4vw, 20px) / 1.4 var(--hera-font);
+}
+.hera-stats__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  margin-top: 8px;
+}
+
+/* No artwork (nothing to show, nothing recorded, or a title with no backdrop): a quiet page head. */
+.hera-stats__banner.is-plain {
+  display: block;
+  min-height: 0;
+  margin-top: 0;
+  padding-top: 84px;
+  overflow: visible;
+}
+.layout-tv .hera-stats__banner.is-plain {
+  padding-top: 24px;
+}
+.hera-stats__banner.is-plain .hera-stats__intro {
+  max-width: calc(760px + var(--hera-edge) * 2);
+  padding-bottom: 24px;
+}
+.hera-stats__banner.is-plain .hera-stats__lead {
+  font-size: clamp(30px, 3.4vw, 44px);
+  font-weight: 700;
+  text-shadow: none;
+}
+.hera-stats__banner.is-plain .hera-stats__lead strong {
+  font-weight: 700;
+}
+
+/* The period switch: a capsule of three, one selected. */
+.hera-stats__range {
+  display: inline-flex;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--hera-glass);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+}
+.hera-stats__range-btn {
+  flex: 0 1 auto;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--hera-label-2);
+  font: 600 15px/1 var(--hera-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-stats__range-btn:hover {
+  color: var(--hera-label);
+  background: var(--hera-hover);
+}
+.hera-stats__range-btn[aria-pressed="true"] {
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+}
+.hera-stats__range-btn:active {
+  transform: scale(0.95);
+}
+.hera-stats__home {
+  text-decoration: none;
+}
+
+/* ---------- Body ------------------------------------------------------------------------------ */
+
+.hera-stats__body {
+  padding-top: 12px;
+}
+.hera-stats__body .hera-row {
+  margin-bottom: 40px;
+}
+.hera-stats__section {
+  min-width: 0;
+}
+.hera-stats__line {
+  margin: 6px 0 22px;
+  max-width: 40em;
+  color: var(--hera-label-2);
+  font: 500 clamp(18px, 1.6vw, 24px) / 1.35 var(--hera-font);
+  text-wrap: pretty;
+}
+.hera-stats__line strong {
+  color: var(--hera-label);
+  font-weight: 700;
+}
+.hera-stats__rank {
+  margin-right: 8px;
+  color: var(--hera-label-3);
+  font-variant-numeric: tabular-nums;
+}
+/* A title the library no longer holds is shown but goes nowhere. */
+.hera-stats .hera-card:disabled {
+  cursor: default;
+}
+.hera-stats .hera-card:disabled:hover .hera-card__art {
+  transform: none;
+  box-shadow: var(--hera-shadow);
+}
+.hera-stats .hera-card:disabled:hover .hera-card__art img {
+  transform: none;
+}
+
+/* When you watch and What you watch sit side by side where there is room. */
+.hera-stats__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+  gap: 0 clamp(32px, 5vw, 96px);
+  padding: 0 var(--hera-edge);
+}
+.hera-stats__pair > .hera-stats__section {
+  padding: 0;
+}
+
+/* Hidden from the eye, read by a screen reader: the numbers behind each drawing. */
+.hera-stats__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Heatmaps: the weekday by hour grid and the calendar ------------------------------ */
+
+.hera-stats__cell {
+  min-width: 0;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: var(--hera-fill);
+}
+.hera-stats__cell.lvl-1,
+.hera-stats__cell.lvl-2,
+.hera-stats__cell.lvl-3,
+.hera-stats__cell.lvl-4 {
+  background: var(--hera-select);
+}
+.hera-stats__cell.lvl-1 {
+  opacity: 0.3;
+}
+.hera-stats__cell.lvl-2 {
+  opacity: 0.5;
+}
+.hera-stats__cell.lvl-3 {
+  opacity: 0.75;
+}
+.hera-stats__heat .hera-stats__cell:hover,
+.hera-stats__cal .hera-stats__cell:hover {
+  box-shadow: 0 0 0 2px var(--hera-label);
+}
+
+.hera-stats__heat,
+.hera-stats__cal {
+  display: grid;
+  gap: 3px;
+  color: var(--hera-label-3);
+  font: 600 12px / 1 var(--hera-font);
+}
+.hera-stats__heat {
+  grid-template-columns: 2.8em repeat(24, minmax(0, 1fr));
+  max-width: 720px;
+}
+.hera-stats__heat-day,
+.hera-stats__cal-day {
+  grid-column: 1;
+  align-self: center;
+}
+.hera-stats__heat-hour {
+  margin-top: 6px;
+  white-space: nowrap;
+}
+.hera-stats__cal {
+  grid-template-columns: 2.8em repeat(var(--weeks), minmax(0, 1fr));
+  max-width: 1040px;
+}
+.hera-stats__cal-month {
+  padding-bottom: 6px;
+  white-space: nowrap;
+}
+.hera-stats__year-name {
+  margin: 0 0 10px;
+  color: var(--hera-label-2);
+  font: 700 15px / 1 var(--hera-font);
+}
+.hera-stats__year + .hera-stats__year {
+  margin-top: 22px;
+}
+.hera-stats__legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  color: var(--hera-label-3);
+  font: 600 12px / 1 var(--hera-font);
+}
+.hera-stats__legend .hera-stats__cell {
+  width: 14px;
+  flex: none;
+}
+.hera-stats__legend .hera-stats__cell:first-of-type {
+  margin-left: 6px;
+}
+.hera-stats__legend .hera-stats__cell:last-of-type {
+  margin-right: 6px;
+}
+.hera-stats__note {
+  margin: 10px 0 0;
+  color: var(--hera-label-3);
+  font: 500 13px / 1.4 var(--hera-font);
+}
+
+/* A month: one bar a day. */
+.hera-stats__bars {
+  display: grid;
+  grid-template-columns: repeat(var(--days), minmax(0, 1fr));
+  gap: 4px;
+  align-items: end;
+  height: 160px;
+  max-width: 1040px;
+  border-bottom: 1px solid var(--hera-separator);
+}
+.hera-stats__day {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+.hera-stats__day i {
+  display: block;
+  width: 100%;
+  min-height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--hera-select);
+}
+.hera-stats__day i.is-zero {
+  background: var(--hera-fill);
+}
+.hera-stats__day:hover i {
+  box-shadow: 0 0 0 2px var(--hera-label);
+}
+.hera-stats__bars-axis {
+  display: flex;
+  justify-content: space-between;
+  max-width: 1040px;
+  margin-top: 8px;
+  color: var(--hera-label-3);
+  font: 600 12px / 1 var(--hera-font);
+}
+
+/* ---------- Genres ---------------------------------------------------------------------------- */
+
+.hera-stats__genres {
+  display: grid;
+  gap: 14px;
+  max-width: 640px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats__genre {
+  display: grid;
+  grid-template-columns: minmax(84px, 150px) 1fr auto;
+  align-items: center;
+  gap: 16px;
+  font: 600 16px / 1.3 var(--hera-font);
+}
+.hera-stats__genre-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hera-stats__bar {
+  display: block;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hera-track);
+}
+.hera-stats__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hera-select);
+  transform-origin: left;
+}
+.hera-stats__genre-time {
+  width: 6.5em;
+  color: var(--hera-label-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- Highlights ------------------------------------------------------------------------ */
+
+.hera-stats__facts {
+  display: grid;
+  gap: 22px;
+  max-width: 760px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats__fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.hera-stats__fact .material-icons {
+  flex: none;
+  margin-top: 1px;
+  color: var(--hera-label-2);
+  font-size: 28px;
+}
+.hera-stats__fact p {
+  margin: 0;
+  color: var(--hera-label-2);
+  font: 500 clamp(19px, 1.8vw, 26px) / 1.35 var(--hera-font);
+  text-wrap: pretty;
+}
+.hera-stats__fact strong {
+  color: var(--hera-label);
+  font-weight: 700;
+}
+
+/* ---------- Loading --------------------------------------------------------------------------- */
+
+.hera-stats__banner--bone {
+  background: var(--hera-surface);
+  border-radius: 0 0 28px 28px;
+}
+.hera-stats__bone {
+  display: block;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--hera-fill-strong);
+}
+.hera-stats__bones {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--hera-gap);
+  padding: 28px var(--hera-edge);
+}
+.hera-stats__bone--card {
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--hera-r-wide);
+}
+
+/* ---------- TV layout -------------------------------------------------------------------------- */
+
+.layout-tv .hera-stats__lead {
+  font-size: clamp(40px, 4.6vw, 68px);
+}
+.layout-tv .hera-stats__sub {
+  font-size: 22px;
+}
+.layout-tv .hera-stats__range-btn {
+  min-height: 52px;
+  padding: 0 24px;
+  font-size: 18px;
+}
+.layout-tv .hera-stats__range-btn:focus {
+  outline: none !important;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  transform: scale(1.08);
+  box-shadow: var(--hera-shadow-lift);
+}
+.layout-tv .hera-stats__range:focus-within .hera-stats__range-btn[aria-pressed="true"]:not(:focus) {
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+}
+.layout-tv .hera-stats__line {
+  font-size: 26px;
+}
+.layout-tv .hera-stats__fact p {
+  font-size: 28px;
+}
+.layout-tv .hera-stats__genre {
+  font-size: 20px;
+}
+.layout-tv .hera-stats__heat,
+.layout-tv .hera-stats__cal,
+.layout-tv .hera-stats__legend,
+.layout-tv .hera-stats__bars-axis {
+  font-size: 15px;
+}
+
+/* ---------- Motion ---------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hera-stats__bar > span {
+    animation: hera-stats-grow 700ms var(--hera-ease) both;
+  }
+  .hera-stats__bone,
+  .hera-stats__banner--bone {
+    animation: hera-stats-pulse 1.6s ease-in-out infinite;
+  }
+}
+@keyframes hera-stats-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes hera-stats-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-stats__art,
+  .hera-stats__range-btn,
+  .hera-stats__title-link {
+    transition: none;
+  }
+}

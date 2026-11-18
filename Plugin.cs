@@ -23,6 +23,9 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// <summary>The name the dashboard page is addressed by: <c>#/configurationpage?name=HeraTV</c>.</summary>
     public const string SettingsPage = "HeraTV";
 
+    /// <summary>The name the Statistics dashboard page is addressed by: <c>#/configurationpage?name=HeraStats</c>.</summary>
+    public const string StatsPage = "HeraStats";
+
     /// <summary>Gets the dashboard's settings page (HTML plus its script) and its place in the sidebar.</summary>
     public IEnumerable<PluginPageInfo> GetPages()
     {
@@ -39,6 +42,20 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         {
             Name = "heratv-settings.js",
             EmbeddedResourcePath = "heratv-settings.js",
+        };
+        yield return new PluginPageInfo
+        {
+            Name = StatsPage,
+            DisplayName = "Statistics",
+            EmbeddedResourcePath = "herastats.html",
+            EnableInMainMenu = true,
+            MenuSection = "server",
+            MenuIcon = "insights",
+        };
+        yield return new PluginPageInfo
+        {
+            Name = "herastats.js",
+            EmbeddedResourcePath = "herastats.js",
         };
     }
 
