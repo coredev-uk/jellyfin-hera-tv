@@ -82,6 +82,10 @@
     return h ? `${h} hr${m ? ` ${m} min` : ""}` : `${m} min`;
   };
 
+  // A certificate as the country's own board writes it: "GB-15" is "15". Jellyfin keeps the
+  // country prefix on everything outside the US; TV-, PG- and NC- are US ratings, not countries.
+  const certificate = (rating) => (rating ? rating.replace(/^(?!(?:TV|PG|NC)-)[A-Z]{2}-(?=\S)/, "") : rating);
+
   const shuffle = (list) => {
     const out = list.slice();
     for (let i = out.length - 1; i > 0; i--) {
@@ -645,7 +649,7 @@
         : runtime(item.RunTimeTicks)
           ? el("span", { text: runtime(item.RunTimeTicks) })
           : null,
-      item.OfficialRating ? el("span", { class: "hera-badge", text: item.OfficialRating }) : null,
+      item.OfficialRating ? el("span", { class: "hera-badge", text: certificate(item.OfficialRating) }) : null,
     ]);
 
     const favourite = item.UserData?.IsFavorite ?? false;
@@ -1242,7 +1246,7 @@
       numbered: true,
       name: item.Name,
       overview: item.Overview,
-      meta: [item.ProductionYear, runtime(item.RunTimeTicks), rating ? item.OfficialRating : null].filter(Boolean).join(" · "),
+      meta: [item.ProductionYear, runtime(item.RunTimeTicks), rating ? certificate(item.OfficialRating) : null].filter(Boolean).join(" · "),
       progress: item.UserData?.PlayedPercentage,
       played: item.UserData?.Played,
       action: { icon: "play_arrow", label: `Play ${item.Name}`, run: () => play(item).catch(console.error) },
@@ -1965,7 +1969,8 @@
   // ---------- British copy -------------------------------------------------------------
   // Jellyfin's React header, its menus and its section titles name things in American English
   // ("Movies", "Favorites", "Shows"), and a CSS ::after cannot tell one title from another. Rewrite
-  // those exact words where Jellyfin draws them, and again when it redraws them.
+  // those exact words where Jellyfin draws them, and again when it redraws them. Its certificates
+  // lose their country prefix and take the badge, inside the item so the line's dot stays outside.
 
   const BRITISH = new Map([
     ["Movies", "Films"],
@@ -1979,6 +1984,10 @@
         const next = BRITISH.get(text.nodeValue.trim());
         if (next) text.nodeValue = next;
       }
+    }
+    for (const node of document.querySelectorAll(".mediaInfoOfficialRating")) {
+      if (node.firstElementChild?.classList.contains("hera-badge")) continue;
+      node.replaceChildren(el("span", { class: "hera-badge", text: certificate(node.textContent.trim()) }));
     }
   };
   const watchCopy = () => {

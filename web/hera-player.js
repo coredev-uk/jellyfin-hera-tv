@@ -571,7 +571,10 @@
   const YOUTUBE = "https://www.youtube-nocookie.com";
   const youTube = (frame, func, args = []) => frame?.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), YOUTUBE);
 
-  const TRAILER_VOLUME = 80;
+  // The trailer's level at the player's full volume. Trailers are mixed far louder than a film's
+  // credits, so it starts at half, scaled by the player's own volume, in the slider's steps of 5.
+  const TRAILER_VOLUME = 50;
+  const trailerLevel = (v) => Math.max(5, Math.round((TRAILER_VOLUME * (v ? v.volume : 1)) / 5) * 5);
   const FADE_MS = 1500;
   const FOCUS_AFTER_MS = 30000;
 
@@ -627,7 +630,7 @@
   const startTrailer = (frame) => {
     if (!post.layer || post.trailer) return;
     const v = video();
-    post.trailer = { frame, volume: TRAILER_VOLUME, muted: false };
+    post.trailer = { frame, volume: trailerLevel(v), muted: false };
     post.creditsVolume = v ? v.volume : null;
     youTube(frame, "setVolume", [0]);
     youTube(frame, "unMute");

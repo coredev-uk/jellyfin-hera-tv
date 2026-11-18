@@ -17,41 +17,43 @@
   display: none;
 }
 .itemMiscInfo .hera-xmeta {
+  --hera-xmeta-gap: 14px;
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: 4px var(--hera-xmeta-gap);
 }
-/* The group's separator dot sits beside its last item, not a flex gap away. */
-.itemMiscInfo .hera-xmeta::after {
-  margin-left: -4px;
+.itemMiscInfo .hera-qualities {
+  --hera-xmeta-gap: 6px;
 }
+/* The group's separator dot sits as far from its last item as the line's other dots do, not a
+ * flex gap further. */
+.itemMiscInfo .mediaInfoItem.hera-xmeta:not(:last-child)::after {
+  margin-left: calc(10px - var(--hera-xmeta-gap));
+}
+/* A score is its source's mark and the number, in the line's own grey: the IMDb wordmark, the
+ * Tomatometer's tomato or splat, the Popcornmeter's bucket upright or spilled. */
 .hera-rating {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--hera-label);
+  gap: 5px;
+  color: var(--hera-label-2);
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
-}
-.hera-mark {
-  padding: 0 5px;
-  border: 1px solid var(--hera-label-3);
-  border-radius: var(--hera-r-badge);
-  color: var(--hera-label-2);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 16px;
   white-space: nowrap;
 }
-.hera-rating__state {
-  color: var(--hera-label-2);
-  font-size: 15px;
+.hera-rating__mark {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
-.hera-qualities {
-  gap: 6px !important;
+.hera-rating__icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 .hera-chip {
   padding: 0 6px;
