@@ -1097,3 +1097,84 @@ html.layout-tv .hera-post__reason {
     transition: none;
   }
 }
+
+/* ---------- a title's trailer, from its page (hera-player.js) ----------------------------------
+ * The whole screen on black: the title's backdrop, dimmed, while the trailer loads, then the
+ * trailer at 16:9, as large as the screen allows, with YouTube's own controls. The back disc is
+ * post-play's. A trailer that won't play leaves a line and a way to YouTube in the middle. */
+.hera-trailer {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  background: #000;
+  color: var(--hera-label);
+  opacity: 0;
+  transition: opacity var(--hera-fast) var(--hera-ease);
+}
+.hera-trailer.is-on {
+  opacity: 1;
+  transition-duration: var(--hera-slow);
+}
+.hera-trailer__still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.35;
+  transition: opacity 600ms var(--hera-ease);
+}
+/* Once the trailer plays, the backdrop goes: only black round its letterbox. */
+.hera-trailer.is-playing .hera-trailer__still {
+  opacity: 0;
+}
+/* No trailer will play: the backdrop sinks further, so the line over it holds its contrast. */
+.hera-trailer:has(.hera-trailer__note:not([hidden])) .hera-trailer__still {
+  opacity: 0.18;
+}
+.hera-trailer__frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(100vw, 177.78vh);
+  height: min(56.25vw, 100vh);
+  border: 0;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 600ms var(--hera-ease);
+}
+.hera-trailer__frame.is-on {
+  opacity: 1;
+}
+.hera-trailer__close {
+  z-index: 1;
+}
+.hera-trailer__note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 0 var(--hera-edge);
+  text-align: center;
+}
+.hera-trailer__note[hidden] {
+  display: none;
+}
+.hera-trailer__text {
+  margin: 0;
+  font: 600 19px/1.35 var(--hera-font-display);
+}
+/* None of a title's trailers will play here: Jellyfin's Trailer button goes. */
+.hera-no-trailer .btnPlayTrailer {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-trailer,
+  .hera-trailer.is-on,
+  .hera-trailer__frame {
+    transition: none;
+  }
+}

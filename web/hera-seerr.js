@@ -66,9 +66,9 @@
   /** Before `ref` when it is a direct child of `host`, else last: a stock section that has moved must not make the insert throw. */
   const insertBefore = (host, node, ref) => host.insertBefore(node, ref?.parentNode === host ? ref : null);
 
-  /** A card for something the library holds: its own artwork, a link to its page. */
-  const libraryCard = ({ id, title, subtitle, badge }) =>
-    kit.card({ href: detailsHref(id), image: poster(id), title, subtitle, badge });
+  /** A card for something the library holds: its own artwork, a link to its page, and Play. */
+  const libraryCard = ({ id, title, subtitle, badge, series }) =>
+    kit.card({ href: detailsHref(id), image: poster(id), title, subtitle, badge, action: kit.playAction({ Id: id, Type: series ? "Series" : "Movie", Name: title }) });
 
   // ---------- expandable text -----------------------------------------------------------
 
@@ -245,7 +245,7 @@
             id: "seerr-person-library",
             title: "In Your Library",
             cards: ranked.map((entry) =>
-              libraryCard({ id: entry.id, title: entry.title, subtitle: [entry.role || kindText(entry), entry.year].filter(Boolean).join(" · ") }),
+              libraryCard({ id: entry.id, title: entry.title, subtitle: [entry.role || kindText(entry), entry.year].filter(Boolean).join(" · "), series: entry.mediaType === "tv" }),
             ),
           }),
         );
@@ -480,7 +480,7 @@
     const addLibrary = (id, title, year, kind) => {
       if (held.has(id)) return;
       held.add(id);
-      cards.push(libraryCard({ id, title, subtitle: [year, kind].filter(Boolean).join(" · "), badge: "In Library" }));
+      cards.push(libraryCard({ id, title, subtitle: [year, kind].filter(Boolean).join(" · "), badge: "In Library", series: kind === "TV Show" }));
     };
     for (const other of related.results) {
       if (other.jellyfinId) addLibrary(other.jellyfinId, other.title, other.year, kindText(other));

@@ -108,6 +108,8 @@
   };
 
   const play = async (item) => {
+    // A card may know only an id (and perhaps a kind): the item itself says what to resume.
+    if (!item.Type || (item.Type !== "Series" && !item.UserData)) item = await api().getItem(userId(), item.Id);
     let target = item;
     if (item.Type === "Series") {
       const next = await getJSON("Shows/NextUp", { seriesId: item.Id, userId: userId(), limit: 1 });
@@ -125,6 +127,13 @@
     if (position) params.startPositionTicks = position;
     await api().ajax({ type: "POST", url: api().getUrl(`Sessions/${id}/Playing`, params) });
   };
+
+  /** A card's Play, for anything the library holds: `kit.card({ action: playAction(item) })`. */
+  const playAction = (item) => ({
+    icon: "play_arrow",
+    label: `Play ${item.Name}`,
+    run: () => play(item).catch((error) => console.error("[Hera TV]", error)),
+  });
 
   const toggleFavourite = async (item, button) => {
     const next = !(item.UserData?.IsFavorite ?? false);
@@ -229,8 +238,23 @@
   /**
    * One card for every row: poster (2:3) or wide (16:9) artwork with an optional badge and
    * progress bar, title and subtitle below. `href` makes it a link; `onClick` a button.
+   * `action` ({ icon, label, run }) is what the card does from where it sits (Play, for anything
+   * the library holds): hovered or focused, its artwork frosts under a glass disc, as Jellyfin's
+   * own posters and the episode stills do. On a link the disc is a button that runs it; on a card
+   * that already runs it when pressed, the disc is only a picture of it.
    */
-  const card = ({ href, onClick, image, shape = "poster", title, subtitle, badge, badgeTone, progress, label }) => {
+  const card = ({ href, onClick, image, shape = "poster", title, subtitle, badge, badgeTone, progress, label, action }) => {
+    let disc = null;
+    if (action && href) {
+      disc = el("button", { type: "button", class: "hera-btn hera-btn--glass hera-card__play", "aria-label": action.label }, icon(action.icon));
+      disc.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        action.run(e);
+      });
+    } else if (action) {
+      disc = el("span", { class: "hera-btn hera-btn--glass hera-card__play", "aria-hidden": "true" }, icon(action.icon));
+    }
     const art = el("span", { class: "hera-card__art" }, [
       image
         ? el("img", { src: image, alt: "", loading: "lazy", decoding: "async" })
@@ -239,12 +263,14 @@
       progress > 0
         ? el("span", { class: "hera-card__progress" }, el("span", { style: `width:${Math.min(100, Math.max(3, progress))}%` }))
         : null,
+      action ? el("span", { class: "hera-card__frost", "aria-hidden": "true" }) : null,
+      disc,
     ]);
     const text = [
       title ? el("span", { class: "hera-card__title", text: title }) : null,
       subtitle ? el("span", { class: "hera-card__subtitle", text: subtitle }) : null,
     ];
-    const attrs = { class: `hera-card hera-card--${shape}`, "aria-label": label || [title, subtitle].filter(Boolean).join(", ") };
+    const attrs = { class: `hera-card hera-card--${shape}${action ? " has-action" : ""}`, "aria-label": label || [title, subtitle].filter(Boolean).join(", ") };
     if (href) return el("a", { ...attrs, href }, [art, ...text]);
     const button = el("button", { ...attrs, type: "button" }, [art, ...text]);
     if (onClick) button.addEventListener("click", onClick);
@@ -2070,6 +2096,7 @@
       shuffle,
       go,
       play,
+      playAction,
       hera,
       integrations,
       card,

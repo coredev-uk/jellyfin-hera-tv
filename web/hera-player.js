@@ -571,6 +571,99 @@
   const YOUTUBE = "https://www.youtube-nocookie.com";
   const youTube = (frame, func, args = []) => frame?.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), YOUTUBE);
 
+  // ---------- trailers that play ----------------------------------------------------------
+  // A video's owner can turn off playback outside youtube.com, and YouTube then draws its own
+  // "Video unavailable" page in the frame. The server asks YouTube beforehand which of a title's
+  // trailers may be embedded (/HeraTV/trailers); and a frame stays hidden until it reports that
+  // it is playing, so one that fails anyway gives way to the next unseen.
+  const START_MS = 12000;
+
+  const trailerIds = async (item) => {
+    const checked = await hera(`trailers/${item.Id}`).catch(() => null);
+    if (Array.isArray(checked?.youtube)) return checked.youtube;
+    return [...new Set((item.RemoteTrailers || []).map((trailer) => youTubeId(trailer.Url)).filter(Boolean))];
+  };
+
+  const trailerFrame = (id, { className, title, controls, muted }) =>
+    el("iframe", {
+      class: className,
+      src: `${YOUTUBE}/embed/${id}?${new URLSearchParams({
+        autoplay: "1",
+        mute: muted ? "1" : "0",
+        controls: controls ? "1" : "0",
+        playsinline: "1",
+        rel: "0",
+        modestbranding: "1",
+        iv_load_policy: "3",
+        disablekb: controls ? "0" : "1",
+        enablejsapi: "1",
+        origin: window.location.origin,
+      })}`,
+      title,
+      allow: "autoplay; encrypted-media; fullscreen; picture-in-picture",
+      allowfullscreen: controls ? true : null,
+      tabindex: controls ? null : "-1",
+      referrerpolicy: "strict-origin-when-cross-origin",
+    });
+
+  const youTubeMessage = (event, frame) => {
+    if (event.origin !== YOUTUBE || event.source !== frame.contentWindow) return null;
+    try {
+      return JSON.parse(event.data);
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Settles once the frame is playing ("playing"), YouTube refuses it ("error") or it has said
+   * nothing for START_MS ("timeout"). Until it answers, the frame is asked to report its state,
+   * which also lets the caller hear it end.
+   */
+  const startOf = (frame) =>
+    new Promise((resolve) => {
+      let heard = false;
+      const ask = setInterval(() => {
+        if (!heard) frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: "hera-trailer", channel: "widget" }), YOUTUBE);
+      }, 300);
+      const finish = (result) => {
+        clearInterval(ask);
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve(result);
+      };
+      const onMessage = (event) => {
+        const data = youTubeMessage(event, frame);
+        if (!data) return;
+        heard = true;
+        if (data.event === "onError") finish("error");
+        else if (data.info?.playerState === 1) finish("playing");
+      };
+      const timer = setTimeout(() => finish("timeout"), START_MS);
+      window.addEventListener("message", onMessage);
+    });
+
+  /**
+   * Tries the ids in turn: `make(id)` builds a frame, `place(frame)` puts it in the page. The
+   * first that plays is returned in place; a refused one is removed and the next tried. `alive()`
+   * false stops it (the layer has gone). `keepWaiting` keeps a frame that only timed out (one a
+   * click may still start) rather than move on.
+   */
+  const firstThatPlays = async (ids, { make, place, alive, keepWaiting = false }) => {
+    for (const id of ids) {
+      const frame = make(id);
+      place(frame);
+      const result = await startOf(frame);
+      if (!alive()) {
+        frame.remove();
+        return null;
+      }
+      if (result === "playing" || (result === "timeout" && keepWaiting)) return { frame, id };
+      frame.remove();
+    }
+    return null;
+  };
+
   // The trailer's level at the player's full volume. Trailers are mixed far louder than a film's
   // credits, so it starts at half, scaled by the player's own volume, in the slider's steps of 5.
   const TRAILER_VOLUME = 50;
@@ -579,50 +672,32 @@
   const FOCUS_AFTER_MS = 30000;
 
   // Under the shrunken picture: the next title's still or backdrop, and a film's trailer fading in
-  // over it once it has started, so YouTube's loading frame never shows. Reduced motion keeps the
-  // still, and the credits' sound.
+  // over it once it is playing (loadTrailer), so YouTube's loading frame or its "Video
+  // unavailable" page never shows. Reduced motion keeps the still, and the credits' sound.
   const buildBackdrop = (next) => {
     const still = stillFor(next);
-    const node = el("div", { class: "hera-post-backdrop", "aria-hidden": "true" }, [
+    return el("div", { class: "hera-post-backdrop", "aria-hidden": "true" }, [
       still ? el("img", { class: "hera-post-backdrop__still", src: still, alt: "" }) : null,
       el("div", { class: "hera-post-backdrop__scrim" }),
     ]);
-    const trailer = next.kind === "film" && !reduceMotion.matches ? youTubeId(next.item.RemoteTrailers?.[0]?.Url) : null;
-    if (trailer) {
-      // Muted to begin with, so it may start on its own; startTrailer brings its sound up. It
-      // plays once: when it ends, the film's artwork takes the screen back.
-      const query = new URLSearchParams({
-        autoplay: "1",
-        mute: "1",
-        controls: "0",
-        playsinline: "1",
-        rel: "0",
-        modestbranding: "1",
-        iv_load_policy: "3",
-        disablekb: "1",
-        enablejsapi: "1",
-        origin: window.location.origin,
-      });
-      const frame = el("iframe", {
-        class: "hera-post-backdrop__trailer",
-        src: `${YOUTUBE}/embed/${trailer}?${query}`,
-        title: `${next.item.Name} trailer`,
-        allow: "autoplay; encrypted-media",
-        tabindex: "-1",
-        referrerpolicy: "strict-origin-when-cross-origin",
-      });
-      frame.addEventListener(
-        "load",
-        () =>
-          setTimeout(() => {
-            frame.classList.add("is-on");
-            startTrailer(frame);
-          }, 1800),
-        { once: true },
-      );
-      node.insertBefore(frame, node.lastChild);
-    }
-    return node;
+  };
+
+  // Muted to begin with, so it may start on its own; startTrailer brings its sound up. It plays
+  // once: when it ends, the film's artwork takes the screen back. A film none of whose trailers
+  // will play keeps its still.
+  const loadTrailer = async (next, backdrop) => {
+    if (next.kind !== "film" || reduceMotion.matches) return;
+    const ids = await trailerIds(next.item);
+    const alive = () => post.backdrop === backdrop && !!post.layer;
+    if (!ids.length || !alive()) return;
+    const found = await firstThatPlays(ids, {
+      make: (id) => trailerFrame(id, { className: "hera-post-backdrop__trailer", title: `${next.item.Name} trailer`, controls: false, muted: true }),
+      place: (frame) => backdrop.insertBefore(frame, backdrop.lastChild),
+      alive,
+    });
+    if (!found) return;
+    found.frame.classList.add("is-on");
+    startTrailer(found.frame);
   };
 
   // The credits' music fades out as the trailer's comes up. Thirty seconds in, the credits leave:
@@ -645,8 +720,6 @@
     post.layer.classList.add("has-trailer");
     syncSound();
     post.focusTimer = setTimeout(focusTrailer, FOCUS_AFTER_MS);
-    // Ask the player to report its state, so the end of the trailer is heard.
-    frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: "hera-trailer", channel: "widget" }), YOUTUBE);
   };
 
   // The trailer has finished: it fades back to the film's artwork, its sound controls go, and
@@ -663,17 +736,10 @@
     focusTrailer();
   };
 
-  // YouTube's player reports its state once asked (startTrailer); 0 is "ended".
+  // The player reports its state once asked (startOf); 0 is "ended".
   const onTrailerMessage = (event) => {
     const trailer = post.trailer;
-    if (!trailer || event.origin !== YOUTUBE || event.source !== trailer.frame.contentWindow) return;
-    let data = null;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (data?.info?.playerState === 0) endTrailer();
+    if (trailer && youTubeMessage(event, trailer.frame)?.info?.playerState === 0) endTrailer();
   };
 
   // ---------- the volume popup, for the trailer --------------------------------------------
@@ -886,6 +952,7 @@
       }),
     );
     layer.querySelector(".hera-post__play")?.focus({ preventScroll: true });
+    loadTrailer(next, backdrop).catch((error) => console.warn("[Hera TV:postplay] trailer", error));
     if (next.kind === "episode" && (await autoplayOn()) && post.layer === layer) startCountdown(layer.querySelector(".hera-post__fill"));
   };
 
@@ -1026,10 +1093,118 @@
     Object.assign(post, { page: null, itemId: null, item: null, creditsAt: null, dismissed: null, autoplay: null });
   };
 
+  // ---------- a title's trailer, from its page ---------------------------------------------
+  // Jellyfin's Trailer button hands a remote trailer to its YouTube player, which shows YouTube's
+  // "Video unavailable" page for a video that can't be embedded. Hera plays it instead, in a layer
+  // of its own over the whole screen: the title's backdrop, dimmed, until the first trailer that
+  // will play starts, then that trailer with YouTube's controls. Back, Escape or the trailer's end
+  // close it. A title none of whose trailers will play loses the button; trailer files stay Jellyfin's.
+
+  const detail = { itemId: null, item: null, ids: null, run: 0, bound: new WeakSet() };
+  const sheet = { node: null, opener: null, inert: [], cleanups: [] };
+
+  const BACK_KEYS = new Set(["Escape", "Backspace", "BrowserBack", "GoBack"]);
+
+  const closeTrailerSheet = () => {
+    const { node, opener } = sheet;
+    if (!node) return;
+    sheet.node = null;
+    sheet.cleanups.splice(0).forEach((fn) => fn());
+    sheet.inert.splice(0).forEach((other) => (other.inert = false));
+    node.classList.remove("is-on");
+    setTimeout(() => node.remove(), 360);
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+  };
+
+  const openTrailerSheet = async (item, ids, opener) => {
+    closeTrailerSheet();
+    const tag = item.BackdropImageTags?.[0];
+    const still = tag ? imageUrl(item.Id, "Backdrop", { maxWidth: 1920, tag }) : null;
+    const close = el("button", { class: "hera-post__back hera-trailer__close", type: "button", "aria-label": "Close trailer", title: "Close" }, icon("arrow_back"));
+    const watch = item.RemoteTrailers?.[0]?.Url || `https://www.youtube.com/watch?v=${ids[0]}`;
+    const note = el("div", { class: "hera-trailer__note", hidden: true }, [
+      el("p", { class: "hera-trailer__text", text: "This trailer can't be played here." }),
+      el("a", { class: "hera-btn hera-btn--glass hera-btn--text", href: watch, target: "_blank", rel: "noopener noreferrer" }, [icon("open_in_new"), "Watch on YouTube"]),
+    ]);
+    const node = el("div", { class: "hera-trailer hera-dark", role: "dialog", "aria-modal": "true", "aria-label": `${item.Name} trailer` }, [
+      still ? el("img", { class: "hera-trailer__still", src: still, alt: "" }) : null,
+      close,
+      note,
+    ]);
+    sheet.node = node;
+    sheet.opener = opener;
+    document.body.append(node);
+    // The page behind is out of reach (keyboard, remote, screen reader) while the trailer is up.
+    for (const other of document.body.children) {
+      if (other === node || other.inert) continue;
+      other.inert = true;
+      sheet.inert.push(other);
+    }
+    const on = (target, type, fn, options) => {
+      target.addEventListener(type, fn, options);
+      sheet.cleanups.push(() => target.removeEventListener(type, fn, options));
+    };
+    close.addEventListener("click", closeTrailerSheet);
+    on(window, "keydown", (event) => {
+      if (!BACK_KEYS.has(event.key) && event.keyCode !== 461) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeTrailerSheet();
+    }, true);
+    requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add("is-on")));
+    close.focus({ preventScroll: true });
+
+    const alive = () => sheet.node === node;
+    const found = await firstThatPlays(ids, {
+      make: (id) => trailerFrame(id, { className: "hera-trailer__frame", title: `${item.Name} trailer`, controls: true, muted: false }),
+      place: (frame) => node.insertBefore(frame, close),
+      alive,
+      // A trailer that waits for a press (the browser held back its sound) stays, to be pressed.
+      keepWaiting: true,
+    });
+    if (!alive()) return;
+    if (!found) {
+      note.hidden = false;
+      return;
+    }
+    found.frame.classList.add("is-on");
+    node.classList.add("is-playing");
+    on(window, "message", (event) => {
+      if (youTubeMessage(event, found.frame)?.info?.playerState === 0) closeTrailerSheet();
+    });
+  };
+
+  // On a title's page: learn which of its trailers will play, and drop the button if none will.
+  const mountTrailer = async (page, itemId) => {
+    const run = ++detail.run;
+    Object.assign(detail, { itemId, item: null, ids: null });
+    page.classList.remove("hera-no-trailer");
+    if (!detail.bound.has(page)) {
+      detail.bound.add(page);
+      page.addEventListener("click", onTrailerButton, true);
+    }
+    const item = await api().getItem(userId(), itemId).catch(() => null);
+    // A trailer file, or no trailer at all: Jellyfin's button as it is.
+    if (!item || run !== detail.run || item.LocalTrailerCount > 0 || !item.RemoteTrailers?.length) return;
+    detail.item = item;
+    detail.ids = trailerIds(item);
+    const ids = await detail.ids;
+    if (run === detail.run && !ids.length) page.classList.add("hera-no-trailer");
+  };
+
+  const onTrailerButton = (event) => {
+    const button = event.target.closest?.(".btnPlayTrailer");
+    const { item, ids } = detail;
+    if (!button || !item || !ids || detail.itemId !== heraTv.kit.itemIdFromHash()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    ids.then((list) => list.length && openTrailerSheet(item, list, button)).catch((error) => console.error("[Hera TV:trailer]", error));
+  };
+
   // ---------- lifecycle --------------------------------------------------------------------
-  // Three modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
+  // Four modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
   // scheme must hold even when the pause screen or post-play has stood aside (light mode would
-  // otherwise put dark text on the picture).
+  // otherwise put dark text on the picture). The trailer layer belongs to a title's page.
 
   heraTv.register({
     name: "player",
@@ -1072,6 +1247,20 @@
     },
     teardown() {
       unbindPost();
+    },
+  });
+
+  heraTv.register({
+    name: "trailer",
+    requires: { itemDetailPage: ["detailButtons"] },
+    onView(page, { itemId }) {
+      closeTrailerSheet();
+      if (page?.id === "itemDetailPage" && itemId) mountTrailer(page, itemId).catch((error) => console.error("[Hera TV:trailer]", error));
+      else detail.run++;
+    },
+    teardown() {
+      closeTrailerSheet();
+      detail.run++;
     },
   });
 })();
