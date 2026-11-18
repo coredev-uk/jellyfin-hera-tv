@@ -366,9 +366,18 @@
 
   // A change worth telling the server about (a module standing aside or switched off, or coming
   // back after one) is sent once, a moment later, with everything else that changed meanwhile.
+  // Whether the last report from this browser was a problem is kept across reloads, so the first
+  // healthy visit after one tells the server, and the Dashboard clears.
+  const PROBLEM_KEY = "hera-reported-problem";
   let reportTimer = 0;
   let reported = "";
-  let reportedProblem = false;
+  let reportedProblem = (() => {
+    try {
+      return localStorage.getItem(PROBLEM_KEY) === "1";
+    } catch {
+      return false;
+    }
+  })();
   const reportHealth = () => {
     clearTimeout(reportTimer);
     reportTimer = setTimeout(() => {
@@ -378,6 +387,12 @@
       if ((!problem && !reportedProblem) || key === reported || !api() || !userId()) return;
       reported = key;
       reportedProblem = problem;
+      try {
+        if (problem) localStorage.setItem(PROBLEM_KEY, "1");
+        else localStorage.removeItem(PROBLEM_KEY);
+      } catch {
+        /* no storage: the next restart clears it instead */
+      }
       hera("health", { method: "POST", body: { ...snapshot, page: root.dataset.heraView || null } }).catch(() => {});
     }, 3000);
   };
@@ -1707,6 +1722,7 @@
       const links = el("nav", { class: "hera-cc__links", "aria-label": "Account" }, [
         link(`#/userprofile?userId=${user.Id}`, "person", "Profile"),
         link("#/mypreferencesmenu", "settings", "Settings"),
+        link("#/home?hera=stats", "history", "Your Watching"),
         admin ? link("#/dashboard", "dashboard", "Dashboard") : null,
         el(
           "button",
@@ -1896,6 +1912,9 @@
     for (const module of [builtIns, ...modules]) {
       if (!(await runModule(module, page, context, settled, stale))) return;
     }
+    // After a problem was reported (this session or an earlier one), a full pass is the news
+    // that clears it; reportHealth sends only if something actually changed.
+    if (reportedProblem) reportHealth();
   };
 
   const onViewShow = (event) => {

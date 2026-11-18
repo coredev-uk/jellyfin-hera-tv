@@ -17,6 +17,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<HealthStore>();
         serviceCollection.AddSingleton<Integrations.UpstreamClient>();
         serviceCollection.AddSingleton<Integrations.LibraryLookup>();
+        serviceCollection.AddSingleton<Stats.PlaybackReportingSource>();
+        serviceCollection.AddSingleton<Stats.StatsStore>();
+        serviceCollection.AddSingleton<Stats.IItemCatalogue, Stats.ItemCatalogue>();
+        serviceCollection.AddSingleton<Stats.IStatsReports, Stats.StatsReports>();
+        serviceCollection.AddHostedService<Stats.StreamRecorder>();
     }
 }
 

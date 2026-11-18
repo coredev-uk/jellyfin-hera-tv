@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Jellyfin.Plugin.HeraTv</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.HeraTv</AssemblyName>
-    <Version>1.6.0.0</Version>
+    <Version>1.7.0.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -16,6 +16,8 @@
     <!-- Supplied by the server at runtime; never copied into the plugin folder. -->
     <PackageReference Include="Jellyfin.Controller" Version="12.4.0" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="12.4.0" ExcludeAssets="runtime" />
+    <!-- Reads Playback Reporting's database and keeps Hera's own samples. The server ships this assembly, with SQLitePCLRaw's e_sqlite3 behind it. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" ExcludeAssets="runtime" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

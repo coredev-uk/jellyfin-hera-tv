@@ -809,6 +809,7 @@
         const own = [
           row({ icon: "gamepad", label: "Controls", description: "Gamepad and smooth scrolling", href: `${STOCK.controls}?userId=${ctx.user.Id}`, chevron: true }),
           row({ icon: "person", label: "Profile page", href: `${STOCK.profile}?userId=${ctx.user.Id}`, chevron: true }),
+          row({ icon: "history", label: "Your Watching", description: "What you watched, and when", href: "#/home?hera=stats", chevron: true }),
         ];
         const extras = stockExtras();
         const mirror = (item) =>

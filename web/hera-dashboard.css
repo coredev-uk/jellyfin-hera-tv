@@ -2229,3 +2229,612 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   color: var(--hera-label-2);
   white-space: nowrap;
 }
+
+/* ---- Statistics (Plugins > Statistics) ----
+ * Drawn by Configuration/herastats.js on the settings page's groups: a Now playing group of stream
+ * cards, a History group and a Recorded by Hera group of panels. Charts are inline SVG in scheme
+ * tokens only. Series differ by fill pattern as well as tone, and every chart has a visually
+ * hidden table, so nothing rests on colour alone. */
+
+.dashboardDocument #HeraStatsPage {
+  --dash-form-w: none;
+}
+.hera-stats {
+  font-variant-numeric: tabular-nums;
+}
+/* Author display rules below would otherwise win over the hidden attribute. */
+.hera-stats [hidden] {
+  display: none !important;
+}
+.hera-stats .hera-set-group {
+  margin-bottom: 52px;
+}
+.hera-stats-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+.hera-cfg .hera-stats-head .hera-set-group__title {
+  margin: 0;
+}
+.hera-stats .hera-set-seg__option:focus-visible {
+  outline-offset: -3px;
+}
+.hera-stats .hera-set-group__foot {
+  margin-top: 14px;
+}
+
+.hera-stats-lede {
+  max-width: 68ch;
+  margin: 0 0 4px;
+  color: var(--hera-label);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+}
+.hera-stats-lede--icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+}
+.hera-stats-lede--icon .material-icons {
+  flex: none;
+  color: var(--hera-label-2);
+  font-size: 22px;
+}
+.hera-stats-lede--icon.is-error {
+  color: var(--hera-label);
+}
+.hera-stats-now:not([hidden]) {
+  margin-top: 18px;
+}
+.hera-stats-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.hera-stats-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.hera-stats-error .material-icons {
+  font-size: 20px;
+}
+
+.hera-stats-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: var(--dash-r-card);
+  background: var(--hera-surface);
+  color: var(--hera-label);
+}
+.hera-stats-notice .material-icons {
+  flex: none;
+  margin-top: 1px;
+  color: var(--hera-label-2);
+  font-size: 24px;
+}
+.hera-stats-notice p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.hera-stats-link {
+  color: var(--hera-label);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.hera-stats-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* Panels */
+.hera-stats-card {
+  min-width: 0;
+  padding: 20px;
+  border-radius: var(--dash-r-card);
+  background: var(--hera-surface);
+}
+.hera-stats-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+.hera-stats-card__title {
+  margin: 0;
+  color: var(--hera-label);
+  font: 700 16px/1.3 var(--hera-font-display);
+  letter-spacing: -0.015em;
+}
+.hera-stats-card--flush {
+  padding: 20px 0 6px;
+}
+.hera-stats-card--flush .hera-stats-card__head {
+  padding: 0 20px;
+}
+.hera-stats-pad {
+  padding: 0 20px 14px;
+}
+.hera-stats-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+}
+.hera-stats-cols--3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
+
+/* Now playing: one card per stream, the title's wide art leading */
+.hera-stats-now {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats-now__card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--dash-r-card);
+  background: var(--hera-surface);
+}
+.hera-stats-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--hera-surface-2);
+}
+.hera-stats-art > .material-icons {
+  color: var(--hera-label-3);
+  font-size: 40px;
+}
+.hera-stats-art__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+}
+/* The progress bar sits on artwork of any brightness, so it gets its own dark scrim. */
+.hera-stats-art::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 44%;
+  background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent);
+  pointer-events: none;
+}
+.hera-stats-art__pause {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgb(0 0 0 / 0.56);
+  color: var(--hera-label);
+  font: 600 15px/1.2 var(--hera-font);
+}
+.hera-stats-art__pause .material-icons {
+  font-size: 40px;
+}
+.is-paused .hera-stats-art__pause {
+  display: flex;
+}
+.hera-stats-progress {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  left: 14px;
+  z-index: 2;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hera-track);
+}
+.hera-stats-progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hera-label);
+  transition: width var(--hera-slow) var(--hera-ease);
+}
+.hera-stats-now__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 18px 18px;
+}
+.hera-stats-now__body > :where(p) {
+  margin: 0;
+}
+.hera-stats-now__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--hera-label);
+  font: 700 17px/1.3 var(--hera-font-display);
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hera-stats-now__sub {
+  overflow: hidden;
+  color: var(--hera-label-2);
+  font-size: 14px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hera-stats-now__who {
+  margin-top: 8px;
+  color: var(--hera-label-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.hera-stats-now__user {
+  color: var(--hera-label);
+  font-weight: 600;
+}
+.hera-stats-now__time {
+  color: var(--hera-label-2);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.hera-stats-now__method {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--hera-label);
+  font-size: 14px;
+  font-weight: 600;
+}
+.hera-stats-now__method .material-icons {
+  font-size: 20px;
+}
+.hera-stats-now__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.hera-stats-now__detail:empty {
+  display: none;
+}
+.hera-stats-now__row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.hera-stats-now__row dt {
+  color: var(--hera-label-2);
+}
+.hera-stats-now__row dd {
+  margin: 0;
+  color: var(--hera-label);
+  overflow-wrap: anywhere;
+}
+.hera-stats-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats-reasons li {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+/* Charts */
+.hera-stats-chart {
+  position: relative;
+  min-width: 0;
+  border-radius: 12px;
+}
+.hera-stats-chart:focus-visible {
+  outline-offset: 6px;
+}
+.hera-stats-chart__plot {
+  width: 100%;
+}
+.hera-stats-svg {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+.hera-stats-readout {
+  min-height: 20px;
+  margin: 0 0 10px;
+  color: var(--hera-label);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.hera-stats-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats-key li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--hera-label-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hera-stats-swatch {
+  flex: none;
+}
+.hera-stats-axis {
+  fill: var(--hera-label-2);
+  font: 12px/1 var(--hera-font);
+  font-variant-numeric: tabular-nums;
+}
+.hera-stats-grid {
+  stroke: var(--hera-separator);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.hera-stats-hit {
+  fill: var(--hera-hover);
+}
+.hera-stats-tone--solid {
+  fill: var(--hera-label);
+}
+.hera-stats-tone--soft {
+  fill: var(--hera-label-3);
+}
+.hera-stats-hatch__bg {
+  fill: var(--hera-fill-strong);
+}
+.hera-stats-hatch__line {
+  stroke: var(--hera-label);
+}
+.hera-stats-lvl-1 {
+  --lvl: 0.3;
+}
+.hera-stats-lvl-2 {
+  --lvl: 0.5;
+}
+.hera-stats-lvl-3 {
+  --lvl: 0.75;
+}
+.hera-stats-lvl-4 {
+  --lvl: 1;
+}
+.hera-stats-cell {
+  fill: var(--hera-label);
+  fill-opacity: var(--lvl, 1);
+}
+.hera-stats-cell.hera-stats-lvl-0 {
+  fill: var(--hera-fill);
+  fill-opacity: 1;
+}
+.hera-stats-cell:hover {
+  stroke: var(--hera-label);
+  stroke-width: 1.5;
+}
+.hera-stats-scale {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--hera-label-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hera-stats-scale__step {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--hera-label);
+  opacity: var(--lvl, 1);
+}
+.hera-stats-scale__step.hera-stats-lvl-0 {
+  background: var(--hera-fill);
+  opacity: 1;
+}
+.hera-stats-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Proportions: a bar per row with its share, plays and time in words beside it */
+.hera-stats-shares {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats-shares__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-bottom: 6px;
+}
+.hera-stats-shares__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--hera-label);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.hera-stats-shares__stats {
+  color: var(--hera-label-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.hera-stats-meter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hera-fill-strong);
+}
+.hera-stats-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hera-label);
+}
+
+/* Top films and shows */
+.hera-stats-top {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hera-stats-top li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.hera-stats-top__rank {
+  flex: none;
+  width: 20px;
+  color: var(--hera-label-2);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}
+.hera-stats-top__art {
+  flex: none;
+  width: 44px;
+  height: 66px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--hera-fill-strong);
+}
+.hera-stats-top__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hera-stats-top__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.hera-stats-top__name {
+  overflow: hidden;
+  color: var(--hera-label);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hera-stats-top__meta {
+  color: var(--hera-label-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.hera-stats-top__text .hera-stats-meter {
+  height: 4px;
+  margin-top: 6px;
+}
+
+/* Users */
+.hera-stats-table .is-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.hera-stats-table td:nth-child(2) {
+  min-width: 0;
+}
+.hera-stats-table td:last-child {
+  min-width: 18ch;
+  white-space: normal;
+}
+.hera-stats-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.hera-stats-avatar {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  font-size: 14px;
+}
+.hera-stats-avatar__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 600px) {
+  .hera-stats-card {
+    padding: 16px;
+  }
+  .hera-stats-card--flush {
+    padding: 16px 0 4px;
+  }
+  .hera-stats-card--flush .hera-stats-card__head {
+    padding: 0 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-stats-progress__fill {
+    transition: none;
+  }
+}
