@@ -80,6 +80,27 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets a value indicating whether Maintainerr's Leaving Soon row and chip show.</summary>
     public bool LeavingSoonEnabled { get; set; } = true;
 
+    /// <summary>Gets or sets how far ahead Leaving Soon looks, in days: titles leaving later are left out. 0 lists everything Maintainerr has queued.</summary>
+    public int LeavingSoonDays { get; set; }
+
+    /// <summary>Gets or sets who sees the quality capsule (1080p | 4K) on a request: "seerr" (anyone Seerr lets pick a profile), "admins" (Jellyfin administrators among them) or "off".</summary>
+    public string RequestQualityPicker { get; set; } = "seerr";
+
+    /// <summary>Gets or sets the profile a 1080p film request uses, as "serverId:profileId" from Seerr's Radarr servers; empty reads it from the profiles' names.</summary>
+    public string? RequestMovieHdProfile { get; set; }
+
+    /// <summary>Gets or sets the profile a 4K film request uses ("serverId:profileId"); on a server Seerr marks 4K, the request is a 4K request. Empty reads it from the names.</summary>
+    public string? RequestMovie4kProfile { get; set; }
+
+    /// <summary>Gets or sets the profile a 1080p series request uses ("serverId:profileId" on a Sonarr server); empty reads it from the names.</summary>
+    public string? RequestTvHdProfile { get; set; }
+
+    /// <summary>Gets or sets the profile a 4K series request uses ("serverId:profileId"); empty reads it from the names.</summary>
+    public string? RequestTv4kProfile { get; set; }
+
+    /// <summary>Gets or sets the quality the capsule starts on: "server" (the server's own default profile), "1080p" or "4K".</summary>
+    public string RequestDefaultQuality { get; set; } = "server";
+
     /// <summary>Gets or sets a value indicating whether the Your Requests row shows on the home page.</summary>
     public bool RequestsRowEnabled { get; set; } = true;
 
@@ -124,6 +145,9 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets a value indicating whether seasonal sets (Christmas, Bonfire Night, ...) become collections while in season.</summary>
     public bool CollectionsSeasonal { get; set; } = true;
+
+    /// <summary>Gets or sets the seasonal sets switched off, by key ("halloween,remembrance"); the rest follow <see cref="CollectionsSeasonal"/>.</summary>
+    public string? SeasonalOff { get; set; }
 
     /// <summary>Gets or sets a value indicating whether Homegrown (British-made) sets become collections.</summary>
     public bool CollectionsHomegrown { get; set; } = true;
@@ -186,4 +210,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the SABnzbd URL people open in a browser.</summary>
     public string? SabnzbdPublicUrl { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether people can link a Letterboxd account, so the films they finish are logged to its diary.</summary>
+    public bool LetterboxdEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets the Letterboxd API key. Letterboxd only issues keys to partners.</summary>
+    public string? LetterboxdApiKey { get; set; }
+
+    /// <summary>Gets or sets the Letterboxd API shared secret that signs every request.</summary>
+    public string? LetterboxdApiSecret { get; set; }
 }

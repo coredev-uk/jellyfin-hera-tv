@@ -25,6 +25,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Integrations.UserRequests>();
         serviceCollection.AddSingleton<Notifications.NotificationStore>();
         serviceCollection.AddHostedService<Notifications.NotificationCentre>();
+        serviceCollection.AddSingleton<Letterboxd.LetterboxdStore>();
+        serviceCollection.AddSingleton<Letterboxd.LetterboxdSync>();
+        serviceCollection.AddSingleton<Letterboxd.LetterboxdWatcher>();
+        serviceCollection.AddHostedService(services => services.GetRequiredService<Letterboxd.LetterboxdWatcher>());
         serviceCollection.AddSingleton<Collections.Snapshots>();
         serviceCollection.AddSingleton<Collections.Catalogue>();
         serviceCollection.AddSingleton<Collections.StreamingCache>();

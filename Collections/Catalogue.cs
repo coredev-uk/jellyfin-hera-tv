@@ -129,18 +129,40 @@ internal sealed class Catalogue(Snapshots snapshots)
             yield break;
         }
 
+        // The providers were read for the server's streaming region (Settings: Streaming region).
+        var where = streaming.Region.Equals("GB", StringComparison.OrdinalIgnoreCase) ? "the UK" : RegionName(streaming.Region);
         foreach (var provider in StreamingProvider.All)
         {
             yield return new Definition($"streaming:{provider.Key}", $"On {provider.Name}", CollectionGroup.Streaming, t => streaming.Has(provider, t.Key))
             {
-                Summary = $"What you have that streams on {provider.Name} in the UK.",
+                Summary = $"What you have that streams on {provider.Name} in {where}.",
             };
         }
     }
 
+    private static string RegionName(string code)
+    {
+        try
+        {
+            return new System.Globalization.RegionInfo(code).EnglishName;
+        }
+        catch (ArgumentException)
+        {
+            return code;
+        }
+    }
+
+    /// <summary>The seasonal sets, by key and name, for the admin page's per-season switches.</summary>
+    internal static IEnumerable<(string Key, string Name)> SeasonNames => Seasons.Select(s => (s.Key, s.Name));
+
+    /// <summary>The seasons switched off in Settings (<see cref="PluginConfiguration.SeasonalOff"/>).</summary>
+    internal static HashSet<string> SeasonsOff(PluginConfiguration? config)
+        => new((config?.SeasonalOff ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.Ordinal);
+
     private IEnumerable<Definition> SeasonalSets()
     {
-        foreach (var season in Seasons)
+        var off = SeasonsOff(Plugin.Instance?.Configuration);
+        foreach (var season in Seasons.Where(s => !off.Contains(s.Key)))
         {
             IReadOnlySet<string> listed = season.Snapshot is null ? new HashSet<string>() : snapshots.KeysOf(season.Snapshot);
             var rule = season.Rule;

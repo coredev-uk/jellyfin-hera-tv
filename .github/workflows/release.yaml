@@ -85,8 +85,18 @@ jobs:
 
       - name: Manifest
         if: ${{ steps.version.outputs.released == 'false' || github.event_name == 'workflow_dispatch' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" > releases.json
+          # The releases list can lag a release just created (1.10.4 published a manifest without
+          # itself): wait until it names this version.
+          for attempt in $(seq 1 12); do
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" > releases.json
+            jq -e --arg tag "v${VERSION}" 'any(.[]; .tag_name == $tag)' releases.json >/dev/null && break
+            echo "v${VERSION} not listed yet (attempt ${attempt})"
+            sleep 10
+          done
+          jq -e --arg tag "v${VERSION}" 'any(.[]; .tag_name == $tag)' releases.json >/dev/null
           .github/scripts/manifest.sh releases.json > manifest.json
           jq -e '.[0].versions | length > 0' manifest.json >/dev/null
 

@@ -210,6 +210,33 @@
     },
   };
 
+  // A person's own Hera switches (post-play, its trailers), kept beside the appearance in the same
+  // display-preferences record, so they follow the person between browsers. Read once per user.
+  const prefs = {
+    user: null,
+    loaded: null,
+    load() {
+      if (this.user !== userId() || !this.loaded) {
+        this.user = userId();
+        this.loaded = api()
+          .getJSON(prefsUrl())
+          .then((record) => record?.CustomPrefs || {})
+          .catch(() => ({}));
+      }
+      return this.loaded;
+    },
+    /** Resolves to the switch's value: true unless the person turned it off. */
+    async on(key) {
+      return (await this.load())[key] !== "false";
+    },
+    async set(key, on) {
+      const record = (await api().getJSON(prefsUrl()).catch(() => null)) || { Id: "hera", Client: "heratv" };
+      record.CustomPrefs = { ...record.CustomPrefs, [key]: String(on) };
+      await api().ajax({ type: "POST", url: prefsUrl(), data: JSON.stringify(record), contentType: "application/json" });
+      this.loaded = Promise.resolve(record.CustomPrefs);
+    },
+  };
+
   // ---------- shared kit for modules ----------------------------------------------------
   // hera-home.js and hera-discover.js load after this file and build on these pieces, so every
   // row, card and request in the client looks and behaves the same.
@@ -2108,6 +2135,7 @@
       itemIdFromHash,
       reduceMotion,
       appearance,
+      prefs,
       appearances: APPEARANCES,
       isTv: () => root.classList.contains("layout-tv"),
     },

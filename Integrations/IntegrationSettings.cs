@@ -34,6 +34,8 @@ public sealed class IntegrationSettings
     public const string SeerrPublicUrlVariable = "HERATV_SEERR_PUBLIC_URL";
     public const string SeerrApiKeyVariable = "HERATV_SEERR_API_KEY";
     public const string SeerrUsersVariable = "HERATV_SEERR_USERS";
+    public const string LetterboxdApiKeyVariable = "HERATV_LETTERBOXD_API_KEY";
+    public const string LetterboxdApiSecretVariable = "HERATV_LETTERBOXD_API_SECRET";
     public const string MaintainerrUrlVariable = "HERATV_MAINTAINERR_URL";
 
     /// <summary>The download stack's settings, in the order the dashboard lists them.</summary>
@@ -53,6 +55,9 @@ public sealed class IntegrationSettings
         string? seerrApiKey,
         IReadOnlyDictionary<string, int> seerrUsers,
         Uri? maintainerrUrl,
+        string? letterboxdApiKey,
+        string? letterboxdApiSecret,
+        bool letterboxdSwitch,
         IReadOnlyDictionary<ArrService, (Uri? Url, string? Key)> arr,
         IReadOnlyDictionary<ArrService, string?> publicUrls)
     {
@@ -61,6 +66,9 @@ public sealed class IntegrationSettings
         SeerrApiKey = seerrApiKey;
         SeerrUsers = seerrUsers;
         MaintainerrUrl = maintainerrUrl;
+        LetterboxdApiKey = letterboxdApiKey;
+        LetterboxdApiSecret = letterboxdApiSecret;
+        LetterboxdEnabled = letterboxdSwitch && !string.IsNullOrEmpty(letterboxdApiKey) && !string.IsNullOrEmpty(letterboxdApiSecret);
         _arr = arr;
         _public = publicUrls;
     }
@@ -79,6 +87,15 @@ public sealed class IntegrationSettings
 
     /// <summary>Gets the Maintainerr base URL the server calls (cluster-internal).</summary>
     public Uri? MaintainerrUrl { get; }
+
+    /// <summary>Gets the Letterboxd API key; it never leaves the server.</summary>
+    public string? LetterboxdApiKey { get; }
+
+    /// <summary>Gets the Letterboxd API secret that signs requests; it never leaves the server.</summary>
+    public string? LetterboxdApiSecret { get; }
+
+    /// <summary>Gets a value indicating whether Letterboxd is switched on and has both its key and secret.</summary>
+    public bool LetterboxdEnabled { get; }
 
     public bool SeerrEnabled => SeerrUrl is not null && !string.IsNullOrEmpty(SeerrApiKey);
 
@@ -109,6 +126,9 @@ public sealed class IntegrationSettings
         activity = config.ActivityEnabled,
         notifications = config.NotificationsEnabled,
         homeRows = config.HomeRowsEnabled,
+        letterboxd = config.LetterboxdEnabled
+            && !string.IsNullOrEmpty(Inspect(LetterboxdApiKeyVariable, config.LetterboxdApiKey).Value)
+            && !string.IsNullOrEmpty(Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value),
     };
 
     public static IntegrationSettings Current
@@ -122,6 +142,9 @@ public sealed class IntegrationSettings
                 Inspect(SeerrApiKeyVariable, config.SeerrApiKey).Value,
                 ParseUsers(Inspect(SeerrUsersVariable, config.SeerrUsers).Value),
                 ParseUri(Inspect(MaintainerrUrlVariable, config.MaintainerrUrl).Value),
+                Inspect(LetterboxdApiKeyVariable, config.LetterboxdApiKey).Value,
+                Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value,
+                config.LetterboxdEnabled,
                 Arr.ToDictionary(
                     d => d.Service,
                     d => (ParseUri(Inspect(d.UrlVariable, d.SavedUrl(config)).Value), Inspect(d.KeyVariable, d.SavedKey(config)).Value)),
