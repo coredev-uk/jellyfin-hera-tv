@@ -828,17 +828,21 @@
 
   const capsuleOf = () => document.querySelector(HT.jf.appBarTabs) || document.querySelector(`${HT.jf.legacyHeader} .headerTabs`);
 
+  // The field opens where the button is: its right edge on the button's, centred on it, growing
+  // left over the tab capsule (which fades) and no further than the capsule's left edge.
   const placeHeader = () => {
-    const capsule = capsuleOf();
-    const box = capsule?.getBoundingClientRect();
-    const height = box && box.height > 0 ? box.height : 52;
-    const top = box && box.height > 0 ? box.top : 6;
-    const width = Math.min(640, window.innerWidth - 32);
+    const capsule = capsuleOf()?.getBoundingClientRect();
+    const button = hs.button.getBoundingClientRect();
+    const height = capsule && capsule.height > 0 ? capsule.height : 52;
+    const right = button.width > 0 ? button.right : window.innerWidth - 16;
+    const middle = button.height > 0 ? button.top + button.height / 2 : 6 + height / 2;
+    const limit = capsule && capsule.width > 0 ? capsule.left : 16;
+    const width = Math.max(240, Math.min(560, right - Math.max(16, limit)));
     const style = hs.root.style;
-    style.setProperty("--hs-top", `${top}px`);
+    style.setProperty("--hs-top", `${Math.max(0, middle - height / 2)}px`);
     style.setProperty("--hs-height", `${height}px`);
     style.setProperty("--hs-width", `${width}px`);
-    style.setProperty("--hs-left", `${(window.innerWidth - width) / 2}px`);
+    style.setProperty("--hs-left", `${right - width}px`);
   };
 
   // Over the home hero the app bar keeps the dark set whatever the scheme; the field follows it.
@@ -1129,17 +1133,21 @@
     hs.term = "";
     hs.clear.hidden = true;
     paintMenu();
-    // The field grows out of the button: a button-sized window at the button, widening to the field.
+    // The field grows out of the button where it stands: a button-sized window over it, widening leftwards.
     hs.animation?.cancel();
     if (!kit.reduceMotion.matches) {
       const from = button.getBoundingClientRect();
-      const to = hs.field.getBoundingClientRect();
       hs.animation = hs.field.animate(
         [
-          { transform: `translateX(${from.right - to.right}px)`, clipPath: `inset(0 0 0 calc(100% - ${from.width}px) round 999px)` },
-          { transform: "translateX(0)", clipPath: "inset(0 0 0 0 round 999px)" },
+          { clipPath: `inset(0 0 0 calc(100% - ${from.width}px) round 999px)`, opacity: 0.6 },
+          { clipPath: "inset(0 0 0 0 round 999px)", opacity: 1 },
         ],
-        { duration: 340, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        { duration: 300, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+      );
+      // The menu drops in once the field is most of the way open, not ahead of it.
+      hs.menu.animate(
+        [{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }],
+        { duration: 200, delay: 160, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "backwards" },
       );
     }
     hs.input.focus({ preventScroll: true });
@@ -1169,12 +1177,11 @@
     hs.animation?.cancel();
     if (kit.reduceMotion.matches) finish();
     else {
-      const to = hs.field.getBoundingClientRect();
       const from = hs.button.getBoundingClientRect();
       hs.animation = hs.field.animate(
         [
-          { transform: "translateX(0)", clipPath: "inset(0 0 0 0 round 999px)" },
-          { transform: `translateX(${from.right - to.right}px)`, clipPath: `inset(0 0 0 calc(100% - ${from.width}px) round 999px)` },
+          { clipPath: "inset(0 0 0 0 round 999px)", opacity: 1 },
+          { clipPath: `inset(0 0 0 calc(100% - ${from.width}px) round 999px)`, opacity: 0 },
         ],
         { duration: 200, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" },
       );

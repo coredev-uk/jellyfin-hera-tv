@@ -12,29 +12,38 @@ namespace Jellyfin.Plugin.HeraTv.Collections;
 /// <param name="Key">The slug the set and row ids carry.</param>
 /// <param name="Name">The service's name.</param>
 /// <param name="Ids">TMDB provider ids, checked against Seerr's <c>/watchproviders</c> list for GB.</param>
-internal sealed record StreamingProvider(string Key, string Name, int[] Ids)
+/// <param name="Network">
+/// The TMDB network whose logo is the service's wordmark, as Seerr's Networks row draws it, or null
+/// when TMDB has no network for the service (NOW, Sky Go and BBC iPlayer have none of their own);
+/// those show the provider's app icon instead. Checked against Seerr's <c>/network/{id}</c>.
+/// </param>
+internal sealed record StreamingProvider(string Key, string Name, int[] Ids, int? Network)
 {
     /// <summary>
     /// The services a UK household is likely to have, in the order they are listed. Ids are TMDB's
     /// (Seerr passes them through): 8 Netflix, 9 Amazon Prime Video, 337 Disney Plus, 350 Apple TV,
-    /// 39 Now TV, 531 Paramount Plus, 41 ITVX, 38 BBC iPlayer, 103 Channel 4, 29 Sky Go.
+    /// 39 Now TV, 531 Paramount Plus, 41 ITVX, 38 BBC iPlayer, 103 Channel 4, 29 Sky Go. Networks:
+    /// 213 Netflix, 1024 Prime Video, 2739 Disney+, 2552 Apple TV, 4330 Paramount+, 5871 ITVX, 26 Channel 4.
     /// </summary>
     public static readonly IReadOnlyList<StreamingProvider> All =
     [
-        new("netflix", "Netflix", [8, 1796, 175]),
-        new("prime-video", "Prime Video", [9, 2100, 613]),
-        new("disney-plus", "Disney+", [337]),
-        new("apple-tv", "Apple TV+", [350]),
-        new("now", "NOW", [39, 591]),
-        new("paramount-plus", "Paramount+", [531, 582, 1853, 2303, 2304]),
-        new("itvx", "ITVX", [41, 2300]),
-        new("bbc-iplayer", "BBC iPlayer", [38]),
-        new("channel-4", "Channel 4", [103, 2311]),
-        new("sky-go", "Sky Go", [29]),
+        new("netflix", "Netflix", [8, 1796, 175], 213),
+        new("prime-video", "Prime Video", [9, 2100, 613], 1024),
+        new("disney-plus", "Disney+", [337], 2739),
+        new("apple-tv", "Apple TV+", [350], 2552),
+        new("now", "NOW", [39, 591], null),
+        new("paramount-plus", "Paramount+", [531, 582, 1853, 2303, 2304], 4330),
+        new("itvx", "ITVX", [41, 2300], 5871),
+        new("bbc-iplayer", "BBC iPlayer", [38], null),
+        new("channel-4", "Channel 4", [103, 2311], 26),
+        new("sky-go", "Sky Go", [29], null),
     ];
 
     public static StreamingProvider? Find(string key) => All.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.Ordinal));
 }
+
+/// <summary>A service's logos as TMDB image paths: its wordmark (a network logo) and its app icon.</summary>
+internal sealed record ProviderLogo(string? Wordmark, string? Icon);
 
 /// <summary>Where the library's titles stream in the watch region, and which of them are trending, as of one fetch.</summary>
 internal sealed class StreamingSnapshot
@@ -50,6 +59,9 @@ internal sealed class StreamingSnapshot
 
     /// <summary>Gets or sets the titles Seerr lists as trending, most trending first, as <c>movie:603</c>.</summary>
     public List<string> Trending { get; set; } = [];
+
+    /// <summary>Gets or sets each service's logos by provider key, as TMDB image paths.</summary>
+    public Dictionary<string, ProviderLogo> Logos { get; set; } = [];
 
     public bool Has(StreamingProvider provider, string key)
         => key.Length > 0 && Titles.TryGetValue(key, out var ids) && ids.Any(id => Array.IndexOf(provider.Ids, id) >= 0);
@@ -109,7 +121,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
     {
         var current = Current;
         if (!IntegrationSettings.Current.SeerrEnabled
-            || (current is not null && current.Region == Region && DateTimeOffset.UtcNow - current.Fetched < Stale)
+            || (current is not null && current.Region == Region && DateTimeOffset.UtcNow - current.Fetched < Stale && current.Logos.Count > 0)
             || Interlocked.Exchange(ref _refreshing, 1) == 1)
         {
             return;
@@ -214,6 +226,8 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             }
         }
 
+        var logos = await LogosAsync(region, previous?.Logos ?? []).ConfigureAwait(false);
+
         // A failed trending call leaves yesterday's list rather than an empty one.
         var next = new StreamingSnapshot
         {
@@ -221,6 +235,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             Region = region,
             Titles = new Dictionary<string, int[]>(titles, StringComparer.Ordinal),
             Trending = trending.Count > 0 ? trending : previous?.Trending ?? [],
+            Logos = logos,
         };
         Write(next);
         lock (_gate)
@@ -229,8 +244,50 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             _loaded = true;
         }
 
-        logger.LogInformation("Hera TV: streaming availability for {Region} refreshed: {Titles} titles, {Trending} trending", region, titles.Count, next.Trending.Count);
+        logger.LogInformation("Hera TV: streaming availability for {Region} refreshed: {Titles} titles, {Trending} trending, {Logos} logos", region, titles.Count, next.Trending.Count, logos.Count);
         return true;
+    }
+
+    /// <summary>
+    /// Each service's wordmark (its TMDB network's logo, as Seerr's Networks row shows them) and app
+    /// icon (the watch-provider logo). A service Seerr can't answer for keeps what it had.
+    /// </summary>
+    private async Task<Dictionary<string, ProviderLogo>> LogosAsync(string region, Dictionary<string, ProviderLogo> previous)
+    {
+        var icons = new Dictionary<int, string>();
+        foreach (var kind in new[] { "movies", "tv" })
+        {
+            var list = await upstream.SeerrGetAsync($"api/v1/watchproviders/{kind}?watchRegion={region}", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            foreach (var provider in list?.AsArray() ?? [])
+            {
+                if (provider?["id"]?.GetValue<int>() is int id && (string?)provider["logoPath"] is { Length: > 0 } path)
+                {
+                    icons.TryAdd(id, path);
+                }
+            }
+        }
+
+        var logos = new Dictionary<string, ProviderLogo>(StringComparer.Ordinal);
+        foreach (var service in StreamingProvider.All)
+        {
+            string? wordmark = null;
+            if (service.Network is int network)
+            {
+                var node = await upstream.SeerrGetAsync($"api/v1/network/{network}", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                wordmark = (string?)node?["logoPath"];
+            }
+
+            var icon = service.Ids.Select(id => icons.GetValueOrDefault(id)).FirstOrDefault(path => path is not null);
+            previous.TryGetValue(service.Key, out var known);
+            wordmark ??= known?.Wordmark;
+            icon ??= known?.Icon;
+            if (wordmark is not null || icon is not null)
+            {
+                logos[service.Key] = new ProviderLogo(wordmark, icon);
+            }
+        }
+
+        return logos;
     }
 
     /// <summary>The provider ids that carry a title on subscription or free with ads in a region.</summary>

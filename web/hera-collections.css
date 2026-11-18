@@ -16,6 +16,26 @@ html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collectio
   display: none;
 }
 
+/* A browse page shows every collection at once: each group wraps into a grid rather than a
+ * sideways shelf, so nothing sits past the edge waiting for a paddle, a trackpad or a remote to
+ * find it. Posters keep shelf size; wide cards (Streaming, Networks) take three to five a row. */
+.hera-collections .hera-row__viewport {
+  overflow: visible;
+}
+.hera-collections .hera-shelf {
+  grid-auto-flow: row;
+  grid-auto-columns: unset;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(132px, 11.5vw, 196px), 1fr));
+  overflow: visible;
+  scroll-snap-type: none;
+}
+.hera-collections .hera-shelf--wide {
+  grid-template-columns: repeat(auto-fill, minmax(clamp(240px, 22vw, 340px), 1fr));
+}
+.hera-collections .hera-row__paddle {
+  display: none !important;
+}
+
 /* ---------- Groups | All: the capsule switch ------------------------------------------------ */
 
 .hera-collections__bar {
@@ -161,6 +181,35 @@ html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collectio
 }
 .layout-tv .hera-collections__name {
   font-size: 28px;
+}
+
+/* A service's wordmark replaces its name; a service shown by app icon keeps a smaller name under it. */
+.hera-collections__face.has-logo .hera-collections__name {
+  display: none;
+}
+/* The face's own selectors outrank `.hera-card__art img`, which would stretch these to cover the card. */
+.hera-collections__face .hera-collections__wordmark {
+  display: block;
+  width: 62%;
+  height: 42%;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 8px rgba(0, 0, 0, 0.45));
+}
+.hera-collections__face.has-icon {
+  flex-direction: column;
+  gap: 12px;
+}
+.hera-collections__face .hera-collections__icon {
+  display: block;
+  width: clamp(52px, 4.2vw, 72px);
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 22%;
+  object-fit: cover;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.hera-collections__face.has-icon .hera-collections__name {
+  font-size: clamp(17px, 1.4vw, 22px);
 }
 
 /* ---------- Motion -------------------------------------------------------------------------- */

@@ -525,16 +525,20 @@
    The header's search field
    ========================================================================== */
 
-/* While it is open the field takes the tab capsule's place. */
-.MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root {
+/* While it is open the field grows left from the search button over the tab capsule and the
+ * buttons before it, which step aside. */
+.MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root,
+.MuiAppBar-root :has(~ a[href="#/search"]) {
   transition: opacity var(--hera-fast) var(--hera-ease);
 }
-html.hera-search-open .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root {
+html.hera-search-open .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root,
+html.hera-search-open .MuiAppBar-root :has(~ a[href="#/search"]) {
   opacity: 0;
   pointer-events: none;
 }
+/* The field sits over the button it grew from; the glass would show the button's icon through it. */
 .MuiAppBar-root a[href="#/search"][aria-expanded="true"] {
-  background: var(--hera-fill-strong);
+  opacity: 0;
 }
 
 .hera-hs {
