@@ -6,22 +6,22 @@
     ":semanticCommits",
     "helpers:pinGitHubActionDigests",
   ],
-  // A merge here only builds ghcr.io/coredev-uk/jellyfin-hera-tv:<sha>; what runs is pinned by
-  // digest in home-ops, so nothing Renovate merges reaches the server on its own.
+  // A merge here reaches the server only as a release: a meta.json version bump that
+  // release.yaml publishes to the plugin repository. Nothing Renovate merges ships on its own.
   automerge: false,
   rebaseWhen: "conflicted",
   prHourlyLimit: 4,
   prConcurrentLimit: 10,
   dependencyDashboardTitle: "📦 Renovate Dashboard",
-  // The project file's NuGet packages, the Containerfile's base images and the workflow actions
-  enabledManagers: ["nuget", "dockerfile", "github-actions"],
+  // The project file's NuGet packages and the workflow actions
+  enabledManagers: ["nuget", "github-actions"],
   packageRules: [
     {
       description: "Let minor and patch releases settle before proposing them",
       matchUpdateTypes: ["minor", "patch"],
       minimumReleaseAge: "3 days",
-      // Container registries publish no release timestamp: without this, Renovate holds
-      // every image update as pending forever instead of proposing it.
+      // A source that publishes no release timestamp (a pinned action's digest) would otherwise
+      // be held as pending for ever instead of proposed.
       minimumReleaseAgeBehaviour: "timestamp-optional",
     },
     {
@@ -31,12 +31,6 @@
       groupName: "jellyfin",
       matchPackageNames: ["Jellyfin.Controller", "Jellyfin.Model"],
       dependencyDashboardApproval: true,
-    },
-    {
-      // The SDK image must stay on the major the project targets (net10.0).
-      description: ".NET SDK stays on the project's target framework",
-      matchPackageNames: ["mcr.microsoft.com/dotnet/sdk"],
-      allowedVersions: "/^10\\./",
     },
     {
       matchUpdateTypes: ["major"],
