@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.11.1.0",
+        "changelog": "A polish pass over every surface. Phones: the home hero, title pages (no poster over the text), Discover's feature card, the Requests view, Your Watching, the Settings app and the Dashboard home all lay out properly. TV layout: the library tiles and Recently Added stay on Home, the hero keeps focus as it turns, Discover's header clears the TV header, and type steps up on title pages. Title pages: a More for the full synopsis, keyboard focus on the track pickers, Play on a series names its episode, Trailer has its label, runtimes read 1 hr 39 min, and Hera's own collections aren't numbered like a franchise. Cards are flat at rest, every play disc is the same 52px, and the menu is three dots across everywhere. Request states never show Seerr's Processing. Settings: visible switches when off, a proper search field in pickers, focus rings on fields, solid sheets with reduced transparency, and buttons that brighten on hover.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.11.1.0/hera-tv_1.11.1.0.zip",
+        "checksum": "d61adc7bbcd346681603bf86292af39a",
+        "timestamp": "2026-11-18T22:04:16Z"
+      },
+      {
         "version": "1.11.0.0",
         "changelog": "Letterboxd, built in: each person links their own account under Settings > Profile, and every film they watch to the end is logged to their diary (rewatches marked, days already logged skipped), with an import of past watches. The admin page sets the Letterboxd API pair (or HERATV_LETTERBOXD_API_KEY and _SECRET). New settings: who sees the request quality capsule, which quality it starts on, and the exact Radarr and Sonarr profiles for 1080p and 4K (a 4K server makes a 4K request); how far ahead Leaving Soon looks; a switch per seasonal set; and, per person under Settings > Playback, post-play and its trailers. Certificates and streaming collections follow the configured region.\n",
         "targetAbi": "12.4.0.0",
