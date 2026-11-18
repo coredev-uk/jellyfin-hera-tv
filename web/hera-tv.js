@@ -1223,7 +1223,7 @@
         handle.shelf = nextShelf;
         handle.head = nextSection.querySelector(".hera-seasons__head");
       },
-      // Up to three films fill the width between them; four or more make an ordinary shelf.
+      // Up to three films fill the width between them; four or more wrap into a grid.
       refit() {
         const count = handle.shelf.children.length;
         handle.shelf.toggleAttribute("data-few", count < 4);
@@ -1234,15 +1234,6 @@
         const after = date ? [...handle.shelf.children].find((other) => !other.dataset.date || other.dataset.date > date) : null;
         handle.shelf.insertBefore(card, after ?? null);
         handle.refit();
-      },
-      // Scrolls the next film into view when it would start off the right edge, as a season
-      // shelf opens on the episode you're up to.
-      reveal() {
-        const next = handle.shelf.querySelector(".is-current");
-        if (!next) return;
-        const x = next.offsetLeft - handle.shelf.offsetLeft;
-        if (x + next.offsetWidth <= handle.shelf.clientWidth) return;
-        handle.shelf.scrollTo({ left: x, behavior: "instant" });
       },
     };
     return handle;
@@ -1307,13 +1298,12 @@
     ]);
     const primary = page.querySelector(".detailPagePrimaryContent");
     if (!primary) return null;
-    // Coming back to the page redraws the shelf in place (watched films, the next one, Play), so
+    // Coming back to the page redraws the grid in place (watched films, the next one, Play), so
     // nothing jumps; what hera-seerr.js added (missing films, Request) moves across with it, and
-    // so do the shelf's scroll and the remote's focus.
+    // so does the remote's focus.
     const stale = page.querySelector(".hera-boxset");
     const handle = stale && previous ? previous : boxSetHandle(section, shelf);
     if (stale) {
-      const left = stale.querySelector(".hera-shelf")?.scrollLeft ?? 0;
       const focused = stale.contains(document.activeElement) ? document.activeElement : null;
       const focusedHref = focused?.getAttribute("href");
       handle.adopt(section, shelf);
@@ -1322,13 +1312,11 @@
       for (const node of stale.querySelectorAll(':scope > [data-hera-seerr="collection"]')) section.append(node);
       handle.refit();
       stale.replaceWith(section);
-      shelf.scrollTo({ left, behavior: "instant" });
       const refocus = focusedHref ? shelf.querySelector(`a[href="${CSS.escape(focusedHref)}"]`) : focused?.isConnected ? focused : null;
       refocus?.focus({ preventScroll: true });
     } else {
       handle.refit();
       primary.insertBefore(section, primary.firstChild);
-      handle.reveal();
     }
     page.classList.add("hera-has-boxset");
     fitBoxSetMeta(page, items, films ? "film" : shows ? "TV show" : "title");

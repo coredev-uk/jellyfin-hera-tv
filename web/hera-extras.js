@@ -303,8 +303,7 @@
   const placeMore = (card) => {
     const art = card.querySelector(".hera-card__art") || card;
     const box = art.getBoundingClientRect();
-    const inset = card.closest(".hera-upnext") ? 48 : 8;
-    more.node.style.left = `${Math.round(box.right - inset - 32)}px`;
+    more.node.style.left = `${Math.round(box.right - 8 - 32)}px`;
     more.node.style.top = `${Math.round(box.top + 8)}px`;
   };
 

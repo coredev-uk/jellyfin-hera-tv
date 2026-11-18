@@ -39,7 +39,6 @@
 .cardOverlayButton,
 .cardOverlayFab-primary,
 .hera-card__badge,
-.hera-card__info,
 .hera-episode__play,
 .listItemImageButton,
 html.hera-home:not(.hera-discover-on):not(.hera-scrolled) .MuiAppBar-root,
@@ -2288,15 +2287,26 @@ html.hera-home #homeTab {
 .hera-has-boxset .collectionItems {
   display: none !important;
 }
+/* A collection's films wrap into a grid rather than one sideways line: a mouse, a trackpad and a
+ * remote all reach every film, and a long collection reads at a glance. */
 .hera-boxset .hera-shelf {
   counter-reset: hera-film;
-  grid-auto-columns: clamp(280px, 26vw, 400px);
+  grid-auto-flow: row;
+  grid-template-columns: repeat(auto-fill, minmax(clamp(260px, 22vw, 360px), 1fr));
+  row-gap: 28px;
+  overflow: visible;
+  scroll-snap-type: none;
 }
 /* Up to three films share the width (--hera-few is the count, at least 2), each at most 600px:
  * a short collection reads as a set of features, not a row that stops a third of the way across. */
 .hera-boxset .hera-shelf[data-few] {
-  grid-auto-columns: min(600px, calc((100% - (var(--hera-few) - 1) * var(--hera-gap)) / var(--hera-few)));
-  scroll-snap-type: none;
+  grid-template-columns: repeat(var(--hera-few), minmax(0, 600px));
+}
+@media (max-width: 720px) {
+  .hera-boxset .hera-shelf,
+  .hera-boxset .hera-shelf[data-few] {
+    grid-template-columns: 1fr;
+  }
 }
 .hera-boxset .hera-episode {
   counter-increment: hera-film;
@@ -2309,7 +2319,7 @@ html.hera-home #homeTab {
 }
 .hera-boxset .hera-episode__overview {
   font-size: 14px;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 3;
   max-width: 68ch;
 }
 /* The film's logo over its key art, on a quiet foot of shade; above the hover frost. */

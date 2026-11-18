@@ -626,8 +626,6 @@
     };
 
     paint();
-    // Missing films before the next one push it along; bring it back into view.
-    handle.reveal();
   };
 
   // ---------- detail pages --------------------------------------------------------------
