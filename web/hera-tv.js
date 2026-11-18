@@ -249,11 +249,39 @@
   };
 
   /**
-   * A titled horizontal row of cards with tv.apple.com's hover paddles. `id` makes it
-   * replaceable: mounting a row with the same id swaps the old one in place.
+   * A titled horizontal row of cards. `id` makes it replaceable: mounting a row with the same id
+   * swaps the old one in place. Its paddles come from `paddlesFor`, as every sideways row's do.
    */
   const shelf = ({ id, title, href, cards, shape = "poster" }) => {
     const track = el("div", { class: `hera-shelf hera-shelf--${shape}` }, cards);
+    const heading = el("h2", { class: "sectionTitle sectionTitle-cards hera-row__title", text: title });
+    return el("section", { class: "hera-row verticalSection", "data-hera-row": id || null, "aria-label": title }, [
+      el("div", { class: "hera-row__head" }, [
+        href
+          ? el("a", { class: "hera-row__link", href }, [heading, icon("chevron_right")])
+          : heading,
+      ]),
+      el("div", { class: "hera-row__viewport" }, track),
+    ]);
+  };
+
+  // ---------- paddles --------------------------------------------------------------------
+  // tv.apple.com's shelf paddles: while a pointer is over a sideways row, a glass chevron sits at
+  // each end it can still scroll towards, on the edge of the cards and level with their artwork,
+  // and moves the row on most of a page. Every such row gets them, Hera's and Jellyfin's alike
+  // (Recently Added, Episodes, Cast & Crew); they are made the first time a pointer comes over
+  // the row. A remote or a keyboard moves focus through the cards instead and the row follows
+  // it, so the paddles stay out of the tab order and off the TV layout.
+  const SCROLLERS = ".hera-shelf, .emby-scroller";
+  const ART = ".hera-card__art, .hera-episode__still, .cardScalable, .cardImageContainer, img";
+  const PADDLE = 44;
+
+  const paddlesFor = (track) => {
+    const host = track.parentElement;
+    if (!host) return null;
+    if (getComputedStyle(host).position === "static") host.classList.add("hera-paddle-host");
+    host.classList.add("hera-paddled");
+    const title = track.closest("section, .verticalSection")?.querySelector("h2, h3")?.textContent.trim() || "row";
     const paddle = (dir) =>
       el(
         "button",
@@ -276,17 +304,32 @@
       prev.hidden = track.scrollLeft <= 4;
       next.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
     };
+    const place = () => {
+      const box = track.getBoundingClientRect();
+      const frame = host.getBoundingClientRect();
+      const art = track.querySelector(ART)?.getBoundingClientRect();
+      const style = getComputedStyle(track);
+      const middle = art?.height ? art.top + art.height / 2 : box.top + box.height / 2;
+      const start = Math.max(4, box.left + parseFloat(style.paddingLeft) - PADDLE / 2);
+      const end = Math.min(window.innerWidth - PADDLE - 4, box.right - parseFloat(style.paddingRight) - PADDLE / 2);
+      prev.style.top = next.style.top = `${Math.round(middle - frame.top - PADDLE / 2)}px`;
+      prev.style.left = `${Math.round(start - frame.left)}px`;
+      next.style.left = `${Math.round(end - frame.left)}px`;
+      sync();
+    };
     track.addEventListener("scroll", sync, { passive: true });
-    requestAnimationFrame(sync);
-    const heading = el("h2", { class: "sectionTitle sectionTitle-cards hera-row__title", text: title });
-    return el("section", { class: "hera-row verticalSection", "data-hera-row": id || null, "aria-label": title }, [
-      el("div", { class: "hera-row__head" }, [
-        href
-          ? el("a", { class: "hera-row__link", href }, [heading, icon("chevron_right")])
-          : heading,
-      ]),
-      el("div", { class: "hera-row__viewport" }, [track, prev, next]),
-    ]);
+    // A row redrawn in place (another series' episodes) leaves its old track's paddles behind.
+    host.querySelectorAll(":scope > .hera-row__paddle").forEach((old) => old.remove());
+    host.append(prev, next);
+    track.heraPaddles = { place };
+    return track.heraPaddles;
+  };
+
+  const onPaddleHover = (event) => {
+    if (event.pointerType === "touch" || root.classList.contains("layout-tv")) return;
+    const track = event.target.closest?.(SCROLLERS);
+    if (!track || !/auto|scroll/.test(getComputedStyle(track).overflowX)) return;
+    (track.heraPaddles || paddlesFor(track))?.place();
   };
 
   /** Puts a row where `place` says, replacing a previous row with the same id. */
@@ -1979,6 +2022,8 @@
     // Capture phase, so the profile button's own menu never opens underneath.
     document.addEventListener("click", onProfileClick, true);
     state.cleanups.push(() => document.removeEventListener("click", onProfileClick, true));
+    document.addEventListener("pointerover", onPaddleHover, { passive: true });
+    state.cleanups.push(() => document.removeEventListener("pointerover", onPaddleHover));
     state.cleanups.push(() => controlCenter.dialog?.remove());
     window.addEventListener("hashchange", onHash);
     state.cleanups.push(() => document.removeEventListener("viewshow", onViewShow));
