@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-18T19:00:00Z",
+  "title": "Design System: Hera TV",
+  "extensions": {
+    "colorMeta": {
+      "select": { "role": "primary", "displayName": "Selection", "canonical": "#ffffff", "tonalRamp": ["#262626", "#3d3d3d", "#5c5c5c", "#7d7d7d", "#a0a0a0", "#c4c4c4", "#e3e3e3", "#ffffff"] },
+      "background": { "role": "neutral", "displayName": "System Background", "canonical": "#000000", "tonalRamp": ["#000000", "#0a0a0b", "#121214", "#1c1c1e", "#2c2c2e", "#3a3a3c", "#48484a", "#636366"] },
+      "surface": { "role": "neutral", "displayName": "Secondary System Background", "canonical": "#121214", "tonalRamp": ["#000000", "#0a0a0b", "#121214", "#1c1c1e", "#2c2c2e", "#3a3a3c", "#48484a", "#636366"] },
+      "surface-2": { "role": "neutral", "displayName": "Tertiary System Background", "canonical": "#1c1c1e", "tonalRamp": ["#0a0a0b", "#121214", "#1c1c1e", "#2c2c2e", "#3a3a3c", "#48484a", "#636366", "#8e8e93"] },
+      "label": { "role": "neutral", "displayName": "Label", "canonical": "#ffffff" },
+      "label-2": { "role": "neutral", "displayName": "Secondary Label", "canonical": "rgba(235, 235, 245, 0.64)" },
+      "label-3": { "role": "neutral", "displayName": "Tertiary Label", "canonical": "rgba(235, 235, 245, 0.52)" },
+      "fill": { "role": "neutral", "displayName": "Fill", "canonical": "rgba(118, 118, 128, 0.24)" },
+      "fill-strong": { "role": "neutral", "displayName": "Strong Fill", "canonical": "rgba(118, 118, 128, 0.36)" },
+      "glass": { "role": "neutral", "displayName": "Glass", "canonical": "rgba(30, 30, 34, 0.62)" },
+      "separator": { "role": "neutral", "displayName": "Separator", "canonical": "rgba(84, 84, 88, 0.55)" },
+      "track": { "role": "neutral", "displayName": "Track", "canonical": "rgba(255, 255, 255, 0.28)" },
+      "light-background": { "role": "neutral", "displayName": "System Background (light)", "canonical": "#ffffff", "tonalRamp": ["#1d1d1f", "#3a3a3c", "#636366", "#8e8e93", "#c7c7cc", "#e5e5ea", "#f5f5f7", "#ffffff"] },
+      "light-label": { "role": "neutral", "displayName": "Label (light)", "canonical": "#1d1d1f" },
+      "light-select": { "role": "primary", "displayName": "Selection (light)", "canonical": "#1d1d1f" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The home hero's title when a title has no logo artwork." },
+      "headline": { "displayName": "Headline", "purpose": "Page titles in a library page's header row." },
+      "title": { "displayName": "Title", "purpose": "Section and shelf titles." },
+      "body": { "displayName": "Body", "purpose": "Synopses, capped at 52ch in the hero and three lines on cards." },
+      "body-large": { "displayName": "Body Large", "purpose": "The pause and post-play synopsis, and text typed into search fields." },
+      "button": { "displayName": "Button", "purpose": "Text in capsules." },
+      "label": { "displayName": "Label", "purpose": "Card titles and meta lines." },
+      "subtitle": { "displayName": "Subtitle", "purpose": "The line under a card's title and an episode's synopsis." },
+      "caption": { "displayName": "Caption", "purpose": "Badges and quality chips." }
+    },
+    "shadows": [
+      { "name": "rest", "value": "0 10px 24px -10px rgba(0, 0, 0, 0.8)", "purpose": "Chrome at rest: the tab bar, paddles." },
+      { "name": "lift", "value": "0 24px 40px -14px rgba(0, 0, 0, 0.9)", "purpose": "Artwork on hover or focus; floating cards, menus and sheets." },
+      { "name": "glass-edge", "value": "inset 0 1px 0 rgba(255, 255, 255, 0.16)", "purpose": "The top highlight on every glass surface." },
+      { "name": "focus-ring", "value": "0 0 0 3px #ffffff", "purpose": "A focused card on a remote, with Lift and a 6% scale." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Every transition: spring-like ease-out." },
+      { "name": "fast", "value": "180ms", "purpose": "Exits and small state changes." },
+      { "name": "slow", "value": "420ms", "purpose": "Entrances and lifts." },
+      { "name": "press", "value": "scale(0.95) over 90ms", "purpose": "Every button on press." },
+      { "name": "blur", "value": "blur(30px) saturate(170%)", "purpose": "The glass material's backdrop-filter, chrome only." }
+    ],
+    "breakpoints": [
+      { "name": "collection-grid-single", "value": "720px" },
+      { "name": "jellyfin-phone-layout", "value": "900px" },
+      { "name": "tab-labels-short", "value": "1440px" },
+      { "name": "tv", "value": "html.layout-tv (a mode, not a width)" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Selection-white capsule with an icon then the verb: Play, Request, Play Next Episode. One per group.",
+      "html": "<button class=\"ds-btn-primary\"><svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\" fill=\"currentColor\"/></svg>Play</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 26px 0 20px; border: 0; border-radius: 999px; background: var(--hera-select, #fff); color: var(--hera-on-select, #000); font: 600 16px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; cursor: pointer; transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn-primary:hover { background: var(--hera-select-hover, rgba(255, 255, 255, 0.86)); } .ds-btn-primary:focus-visible { outline: 2px solid var(--hera-focus, #fff); outline-offset: 3px; } .ds-btn-primary:active { transform: scale(0.95); transition-duration: 90ms; }"
+    },
+    {
+      "name": "Glass Button",
+      "kind": "button",
+      "refersTo": "button-glass",
+      "description": "A round 48px glass disc for a secondary action; widened with a label when it needs words.",
+      "html": "<button class=\"ds-btn-glass\" aria-label=\"More Info\"><svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z\" fill=\"currentColor\"/></svg></button>",
+      "css": ".ds-btn-glass { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 0; border-radius: 999px; background: var(--hera-glass, rgba(30, 30, 34, 0.62)); color: var(--hera-label, #fff); box-shadow: inset 0 1px 0 var(--hera-glass-edge, rgba(255, 255, 255, 0.16)); backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%); cursor: pointer; transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-btn-glass:hover { background: var(--hera-glass-hover, rgba(70, 70, 76, 0.85)); } .ds-btn-glass:focus-visible { outline: 2px solid var(--hera-focus, #fff); outline-offset: 3px; } .ds-btn-glass:active { transform: scale(0.95); }"
+    },
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tab-bar",
+      "description": "The floating glass capsule of tabs centred at the top; the active tab is the white capsule.",
+      "html": "<nav class=\"ds-tabs\"><a class=\"ds-tab ds-tab--active\" href=\"#\">Home</a><a class=\"ds-tab\" href=\"#\">Favourites</a><a class=\"ds-tab\" href=\"#\">Films</a><a class=\"ds-tab\" href=\"#\">TV Shows</a><a class=\"ds-tab\" href=\"#\">Discover</a></nav>",
+      "css": ".ds-tabs { display: inline-flex; gap: 2px; padding: 4px; border-radius: 999px; background: var(--hera-glass, rgba(30, 30, 34, 0.62)); box-shadow: inset 0 1px 0 var(--hera-glass-edge, rgba(255, 255, 255, 0.16)), 0 10px 24px -10px rgba(0, 0, 0, 0.8); backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%); } .ds-tab { padding: 10px 16px; border-radius: 999px; color: var(--hera-label-2, rgba(235, 235, 245, 0.64)); font: 600 15px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; text-decoration: none; transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-tab:hover { color: var(--hera-label, #fff); background: var(--hera-hover, rgba(255, 255, 255, 0.1)); } .ds-tab:focus-visible { outline: 2px solid var(--hera-focus, #fff); outline-offset: 2px; } .ds-tab--active, .ds-tab--active:hover { background: var(--hera-select, #fff); color: var(--hera-on-select, #000); }"
+    },
+    {
+      "name": "Poster Card",
+      "kind": "card",
+      "refersTo": "card-art",
+      "description": "Rounded artwork with the title and subtitle under it; lifts 2px and zooms its image 3% on hover or focus. A status badge sits at a corner.",
+      "html": "<a class=\"ds-card\" href=\"#\"><span class=\"ds-card__art\"><span class=\"ds-card__img\"></span><span class=\"ds-card__badge\">Awaiting Release</span></span><span class=\"ds-card__title\">The Hunger Games</span><span class=\"ds-card__sub\">2026 · Film</span></a>",
+      "css": ".ds-card { display: inline-flex; flex-direction: column; gap: 4px; width: 184px; color: var(--hera-label, #fff); text-decoration: none; } .ds-card__art { position: relative; aspect-ratio: 2 / 3; overflow: hidden; border-radius: 12px; background: var(--hera-surface-2, #1c1c1e); transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-card__img { position: absolute; inset: 0; background: linear-gradient(160deg, #3a3a3c, #121214); transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-card:hover .ds-card__art, .ds-card:focus-visible .ds-card__art { transform: translateY(-2px); box-shadow: 0 24px 40px -14px rgba(0, 0, 0, 0.9); } .ds-card:hover .ds-card__img { transform: scale(1.03); } .ds-card:focus-visible { outline: none; } .ds-card:focus-visible .ds-card__art { box-shadow: 0 0 0 3px var(--hera-focus, #fff), 0 24px 40px -14px rgba(0, 0, 0, 0.9); } .ds-card__badge { position: absolute; top: 8px; left: 8px; padding: 3px 8px; border-radius: 999px; background: var(--hera-glass-hover, rgba(70, 70, 76, 0.85)); font: 700 11px/1.3 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; letter-spacing: 0.01em; } .ds-card__title { margin-top: 6px; font: 600 14px/1.3 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; } .ds-card__sub { font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; color: var(--hera-label-2, rgba(235, 235, 245, 0.64)); }"
+    },
+    {
+      "name": "Quality Chip",
+      "kind": "chip",
+      "refersTo": "chip-quality",
+      "description": "Nearly square Caption chips in meta lines and on cards.",
+      "html": "<span class=\"ds-chips\"><span class=\"ds-chip\">4K</span><span class=\"ds-chip\">DV</span><span class=\"ds-chip\">Atmos</span></span>",
+      "css": ".ds-chips { display: inline-flex; gap: 4px; } .ds-chip { height: 18px; padding: 0 6px; border-radius: 4px; background: var(--hera-fill-strong, rgba(118, 118, 128, 0.36)); color: var(--hera-label, #fff); font: 700 11px/18px -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "A Fill capsule with a leading glyph; a white ring and Strong Fill on focus, widening while in use.",
+      "html": "<label class=\"ds-search\"><svg viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" aria-hidden=\"true\"><path d=\"M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16a6.47 6.47 0 0 0 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z\" fill=\"currentColor\"/></svg><input type=\"search\" placeholder=\"Search films and TV shows\"></label>",
+      "css": ".ds-search { display: inline-flex; align-items: center; gap: 10px; width: 300px; height: 44px; padding: 0 14px; border-radius: 999px; background: var(--hera-fill, rgba(118, 118, 128, 0.24)); color: var(--hera-label-2, rgba(235, 235, 245, 0.64)); transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-search:focus-within { width: 380px; background: var(--hera-fill-strong, rgba(118, 118, 128, 0.36)); box-shadow: 0 0 0 2px var(--hera-focus, #fff); } .ds-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--hera-label, #fff); font: 500 17px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; } .ds-search input::placeholder { color: var(--hera-label-3, rgba(235, 235, 245, 0.52)); }"
+    },
+    {
+      "name": "Segmented Switch",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "A glass capsule of options with the chosen one as the white pill: Groups | All, 1080p | 4K.",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\" aria-label=\"Quality\"><button class=\"ds-seg__opt\" role=\"radio\" aria-checked=\"true\">1080p</button><button class=\"ds-seg__opt\" role=\"radio\" aria-checked=\"false\">4K</button></div>",
+      "css": ".ds-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--hera-glass, rgba(30, 30, 34, 0.62)); box-shadow: inset 0 1px 0 var(--hera-glass-edge, rgba(255, 255, 255, 0.16)); } .ds-seg__opt { min-height: 42px; min-width: 64px; padding: 0 18px; border: 0; border-radius: 999px; background: none; color: var(--hera-label-2, rgba(235, 235, 245, 0.64)); font: 600 15px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, sans-serif; cursor: pointer; transition: background-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 180ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-seg__opt:hover { color: var(--hera-label, #fff); background: var(--hera-hover, rgba(255, 255, 255, 0.1)); } .ds-seg__opt[aria-checked=\"true\"] { background: var(--hera-select, #fff); color: var(--hera-on-select, #000); } .ds-seg__opt:focus-visible { outline: 2px solid var(--hera-focus, #fff); outline-offset: 2px; } .ds-seg__opt:active { transform: scale(0.95); }"
+    },
+    {
+      "name": "Pager",
+      "kind": "custom",
+      "description": "The hero's glass capsule of dots; the active dot stretches and fills with the slide's progress.",
+      "html": "<div class=\"ds-pager\" role=\"tablist\"><button class=\"ds-dot\" aria-selected=\"false\"></button><button class=\"ds-dot\" aria-selected=\"true\" style=\"--p: 0.45\"></button><button class=\"ds-dot\" aria-selected=\"false\"></button><button class=\"ds-dot\" aria-selected=\"false\"></button></div>",
+      "css": ".ds-pager { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--hera-glass, rgba(30, 30, 34, 0.62)); backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%); } .ds-dot { position: relative; width: 8px; height: 8px; padding: 0; border: 0; border-radius: 999px; background: var(--hera-track, rgba(255, 255, 255, 0.28)); overflow: hidden; cursor: pointer; transition: width 420ms cubic-bezier(0.22, 1, 0.36, 1); } .ds-dot:hover { background: var(--hera-label-3, rgba(235, 235, 245, 0.52)); } .ds-dot[aria-selected=\"true\"] { width: 30px; } .ds-dot[aria-selected=\"true\"]::after { content: \"\"; position: absolute; inset: 0; border-radius: inherit; background: var(--hera-select, #fff); transform-origin: left; transform: scaleX(var(--p, 0)); } .ds-dot:focus-visible { outline: 2px solid var(--hera-focus, #fff); outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lights-Down Room",
+    "overview": "Hera TV is the household's Jellyfin library made to behave like the Apple TV app (tvOS 26 for the look, tv.apple.com for how a mouse uses it). It is a room with the lights down: a black ground, the artwork the only colour in it, and every control dimmed back until a hand reaches for it. The interface whispers and the artwork speaks. Type is white in three strengths, the selected thing is simply white, and glass appears only where tvOS puts it, on the chrome that floats over the picture.\n\nThe mood is hushed, cinematic and exact. Density is generous: one edge column (`{spacing.edge}`) for every title, row and first card, shelves of rounded artwork with titles under them, and nothing ornamental between them. Controls are quiet capsules that turn white when chosen. Depth is mostly flat, with artwork lifting on hover or focus, and one lifted level for floating cards and sheets. Light mode exists and mirrors every token, but anything whose text sits on artwork keeps the dark set, as the Apple TV app does.\n\nIt covers the desktop and TV layouts; phones keep Jellyfin's own layout, which the colours and type still restyle. The surface-by-surface comparison with the Apple TV app, the Plex-style extras and the rules for surviving Jellyfin updates follow the standard sections below.",
+    "keyCharacteristics": [
+      "A black ground with no accent colour; artwork carries every hue.",
+      "White type in three strengths, never a fourth.",
+      "Selection is the inverse of the ground: white with black text on dark, near-black with white text on light.",
+      "Glass and blur on chrome only: the tab bar, secondary buttons, menus, the player.",
+      "Rounded artwork that lifts 2px on hover and zooms 3% inside its frame; no tilt.",
+      "Capsules for everything pressable that isn't artwork."
+    ],
+    "rules": [
+      { "name": "The No Accent Rule", "body": "Hera has no brand colour. White (near-black in light mode) is the only selection colour; anything coloured on screen came from the artwork.", "section": "colors" },
+      { "name": "The Token Only Rule", "body": "Components use the `--hera-*` scheme tokens and never raw white or black, so one scheme switch restyles everything, Jellyfin's own components included.", "section": "colors" },
+      { "name": "The Dark Over Art Rule", "body": "Text that sits on artwork (the home hero, detail banners, the player, sheet headers, Discover's feature) keeps the dark set in light mode, over its own scrim.", "section": "colors" },
+      { "name": "The No Eyebrow Rule", "body": "Nothing sits in small caps above a heading. An episode's number leads its title on the same line, in Tertiary Label.", "section": "typography" },
+      { "name": "The Three Strengths Rule", "body": "Text colour is Label, Secondary Label or Tertiary Label. Hierarchy comes from size and weight first, strength second, never from colour.", "section": "typography" },
+      { "name": "The One Edge Rule", "body": "If it's a title or the first thing in a row, it starts on `{spacing.edge}`.", "section": "layout" },
+      { "name": "The Glass Is Chrome Rule", "body": "Blur belongs to the tab bar, secondary buttons, menus and the player. No card carries a standing backdrop-filter; badges and overlay buttons on artwork are solid translucent fills.", "section": "elevation" },
+      { "name": "The Lift Rule", "body": "Content is flat at rest. A shadow is the answer to hover or focus, never a decoration.", "section": "elevation" },
+      { "name": "The Capsule Rule", "body": "If you can press it and it isn't a picture, it's a capsule.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do let artwork carry the colour: black ground, white type, Selection white for whatever is chosen.",
+      "Do use only the `--hera-*` tokens, and re-declare the dark set (`.hera-dark`) wherever text sits on artwork.",
+      "Do keep text to three strengths: Label, Secondary Label (64%) and Tertiary Label (52%).",
+      "Do make every pressable non-artwork control a capsule, and press it to 95%.",
+      "Do lift artwork 2px with the Lift shadow on hover and focus, zooming the image 3% inside its frame.",
+      "Do keep focus visible everywhere: a white ring on dark, near-black on light; a 3px ring and 6% scale on a TV.",
+      "Do honour reduced motion (no autoplay, no slides, crossfades only) and reduced transparency (no blur).",
+      "Do use Material Icons for every glyph."
+    ],
+    "donts": [
+      "Don't introduce an accent colour, gradient text or a brand hue; the violet Jellyfin mark is gone for that reason.",
+      "Don't put glass or a standing backdrop-filter on a card, badge or overlay button.",
+      "Don't tilt artwork under the pointer; tvOS's parallax reads as a gimmick with a mouse.",
+      "Don't set an eyebrow label above a heading.",
+      "Don't move an element when it's hovered; its artwork lifts and zooms, the element stays put.",
+      "Don't use emoji."
+    ]
+  }
+}
