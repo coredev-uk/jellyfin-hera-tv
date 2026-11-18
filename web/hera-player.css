@@ -788,7 +788,15 @@ html.layout-tv .hera-pause__button {
   transition:
     transform 720ms var(--hera-ease),
     border-radius 720ms var(--hera-ease),
-    box-shadow 720ms var(--hera-ease);
+    box-shadow 720ms var(--hera-ease),
+    opacity 900ms var(--hera-ease);
+}
+/* Thirty seconds into a film's trailer the credits leave the corner, and the film has the screen. */
+html.hera-postplay-focus .videoPlayerContainer.hera-postplay-video {
+  opacity: 0;
+}
+html.hera-postplay-focus .hera-post__frame {
+  visibility: hidden;
 }
 
 /* Jellyfin's controls, its Up Next card and the skip button step aside while post-play has the screen. */
@@ -868,6 +876,130 @@ html.hera-postplay-on .skip-button-container {
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 250ms linear;
+}
+/* Back to where the player was opened from, where the player's own back arrow sits. */
+.hera-post__back {
+  position: absolute;
+  top: 14px;
+  left: var(--hera-edge);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hera-label);
+  background: var(--hera-glass);
+  backdrop-filter: var(--hera-blur);
+  -webkit-backdrop-filter: var(--hera-blur);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-post__back:hover {
+  background: var(--hera-glass-hover);
+}
+.hera-post__back:active {
+  transform: scale(0.95);
+}
+.hera-post__back:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 3px;
+}
+
+/* The trailer's sound, lower right on the line of the buttons: a mute toggle and a level, as the
+ * player's own volume control is drawn. It appears once the trailer is playing. */
+.hera-post__sound {
+  position: absolute;
+  right: var(--hera-edge);
+  bottom: clamp(48px, 9vh, 96px);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 18px 0 6px;
+  border-radius: 999px;
+  background: var(--hera-glass);
+  backdrop-filter: var(--hera-blur);
+  -webkit-backdrop-filter: var(--hera-blur);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+}
+.hera-post.has-trailer .hera-post__sound {
+  display: flex;
+}
+.hera-post__mute {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hera-label);
+  background: none;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-post__mute .material-icons {
+  font-size: 22px;
+}
+.hera-post__mute:hover {
+  background: var(--hera-hover);
+}
+.hera-post__mute:active {
+  transform: scale(0.95);
+}
+.hera-post__mute:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 2px;
+}
+/* A thin white level on a translucent track; --hera-level is the filled share. */
+.hera-post__volume {
+  width: 112px;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.hera-post__volume::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--hera-label) var(--hera-level, 80%), var(--hera-track) var(--hera-level, 80%));
+}
+.hera-post__volume::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--hera-label) var(--hera-level, 80%), var(--hera-track) var(--hera-level, 80%));
+}
+.hera-post__volume::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hera-label);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.hera-post__volume::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hera-label);
+}
+.hera-post__volume:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+html.layout-tv .hera-post__volume {
+  width: 160px;
 }
 html.layout-tv .hera-post__info {
   width: min(760px, 60vw);

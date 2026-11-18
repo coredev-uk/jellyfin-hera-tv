@@ -510,6 +510,13 @@
     backdrop: null,
     ticker: 0,
     autoplay: null,
+    // A film's trailer: its frame, the volume it plays at and whether it's muted; the credits'
+    // own volume to give back, and whether they were paused when the trailer took over.
+    trailer: null,
+    creditsVolume: null,
+    creditsPaused: false,
+    fadeTimer: 0,
+    focusTimer: 0,
     cleanups: [],
   };
 
@@ -557,9 +564,17 @@
 
   const youTubeId = (url) => /(?:v=|youtu\.be\/|embed\/)([\w-]{11})/.exec(url || "")?.[1] ?? null;
 
-  // Under the shrunken picture: the next title's still or backdrop, and a film's trailer (muted,
-  // looping, no controls) fading in over it once it has started, so YouTube's loading frame never
-  // shows. Reduced motion keeps the still.
+  // The trailer is driven through YouTube's postMessage API (enablejsapi=1); nothing loads its script.
+  const YOUTUBE = "https://www.youtube-nocookie.com";
+  const youTube = (frame, func, args = []) => frame?.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), YOUTUBE);
+
+  const TRAILER_VOLUME = 80;
+  const FADE_MS = 1500;
+  const FOCUS_AFTER_MS = 30000;
+
+  // Under the shrunken picture: the next title's still or backdrop, and a film's trailer fading in
+  // over it once it has started, so YouTube's loading frame never shows. Reduced motion keeps the
+  // still, and the credits' sound.
   const buildBackdrop = (next) => {
     const still = stillFor(next);
     const node = el("div", { class: "hera-post-backdrop", "aria-hidden": "true" }, [
@@ -568,19 +583,115 @@
     ]);
     const trailer = next.kind === "film" && !reduceMotion.matches ? youTubeId(next.item.RemoteTrailers?.[0]?.Url) : null;
     if (trailer) {
-      const query = new URLSearchParams({ autoplay: "1", mute: "1", controls: "0", loop: "1", playlist: trailer, playsinline: "1", rel: "0", modestbranding: "1", iv_load_policy: "3", disablekb: "1" });
+      // Muted to begin with, so it may start on its own; startTrailer brings its sound up.
+      const query = new URLSearchParams({
+        autoplay: "1",
+        mute: "1",
+        controls: "0",
+        loop: "1",
+        playlist: trailer,
+        playsinline: "1",
+        rel: "0",
+        modestbranding: "1",
+        iv_load_policy: "3",
+        disablekb: "1",
+        enablejsapi: "1",
+        origin: window.location.origin,
+      });
       const frame = el("iframe", {
         class: "hera-post-backdrop__trailer",
-        src: `https://www.youtube-nocookie.com/embed/${trailer}?${query}`,
+        src: `${YOUTUBE}/embed/${trailer}?${query}`,
         title: `${next.item.Name} trailer`,
         allow: "autoplay; encrypted-media",
         tabindex: "-1",
         referrerpolicy: "strict-origin-when-cross-origin",
       });
-      frame.addEventListener("load", () => setTimeout(() => frame.classList.add("is-on"), 1800), { once: true });
+      frame.addEventListener(
+        "load",
+        () =>
+          setTimeout(() => {
+            frame.classList.add("is-on");
+            startTrailer(frame);
+          }, 1800),
+        { once: true },
+      );
       node.insertBefore(frame, node.lastChild);
     }
     return node;
+  };
+
+  // The credits' music fades out as the trailer's comes up. Thirty seconds in, the credits leave:
+  // the picture fades from its corner and pauses, and the film being offered has the screen.
+  const startTrailer = (frame) => {
+    if (!post.layer || post.trailer) return;
+    const v = video();
+    post.trailer = { frame, volume: TRAILER_VOLUME, muted: false };
+    post.creditsVolume = v ? v.volume : null;
+    youTube(frame, "setVolume", [0]);
+    youTube(frame, "unMute");
+    const start = Date.now();
+    clearInterval(post.fadeTimer);
+    post.fadeTimer = setInterval(() => {
+      const t = Math.min(1, (Date.now() - start) / FADE_MS);
+      if (v && post.creditsVolume !== null) v.volume = post.creditsVolume * (1 - t);
+      if (!post.trailer.muted) youTube(frame, "setVolume", [Math.round(post.trailer.volume * t)]);
+      if (t >= 1) clearInterval(post.fadeTimer);
+    }, 100);
+    post.layer.classList.add("has-trailer");
+    syncSound();
+    post.focusTimer = setTimeout(focusTrailer, FOCUS_AFTER_MS);
+  };
+
+  const focusTrailer = () => {
+    if (!post.layer) return;
+    document.documentElement.classList.add("hera-postplay-focus");
+    const v = video();
+    if (v && !v.paused) {
+      v.pause();
+      post.creditsPaused = true;
+    }
+  };
+
+  const syncSound = () => {
+    const sound = post.layer?.querySelector(".hera-post__sound");
+    const trailer = post.trailer;
+    if (!sound || !trailer) return;
+    const silent = trailer.muted || trailer.volume === 0;
+    const mute = sound.querySelector(".hera-post__mute");
+    mute.setAttribute("aria-label", silent ? "Unmute trailer" : "Mute trailer");
+    mute.setAttribute("aria-pressed", String(silent));
+    mute.querySelector(".material-icons").textContent = silent ? "volume_off" : trailer.volume < 40 ? "volume_down" : "volume_up";
+    const slider = sound.querySelector(".hera-post__volume");
+    slider.value = String(trailer.muted ? 0 : trailer.volume);
+    slider.style.setProperty("--hera-level", `${trailer.muted ? 0 : trailer.volume}%`);
+  };
+
+  const setTrailerVolume = (volume) => {
+    const trailer = post.trailer;
+    if (!trailer) return;
+    clearInterval(post.fadeTimer);
+    trailer.volume = Math.max(0, Math.min(100, volume));
+    trailer.muted = trailer.volume === 0;
+    youTube(trailer.frame, trailer.muted ? "mute" : "unMute");
+    youTube(trailer.frame, "setVolume", [trailer.volume]);
+    syncSound();
+  };
+
+  const toggleTrailerMute = () => {
+    const trailer = post.trailer;
+    if (!trailer) return;
+    clearInterval(post.fadeTimer);
+    trailer.muted = !trailer.muted;
+    if (!trailer.muted && trailer.volume === 0) trailer.volume = TRAILER_VOLUME;
+    youTube(trailer.frame, trailer.muted ? "mute" : "unMute");
+    if (!trailer.muted) youTube(trailer.frame, "setVolume", [trailer.volume]);
+    syncSound();
+  };
+
+  // Back leaves the player altogether, as the player's own back arrow does.
+  const leavePlayer = () => {
+    hidePost({ dismiss: true, resume: false });
+    window.history.back();
   };
 
   const buildPost = (next) => {
@@ -598,10 +709,30 @@
     ]);
     const credits = el("button", { class: "hera-pause__button hera-post__credits", type: "button", text: "Watch Credits" });
     const frame = el("button", { class: "hera-post__frame", type: "button", "aria-label": "Watch Credits", title: "Watch Credits" });
-    primary.addEventListener("click", () => startNext(next));
+    const back = el("button", { class: "hera-post__back", type: "button", "aria-label": "Back", title: "Back" }, icon("arrow_back"));
+    primary.addEventListener("click", () => startNext(next, primary));
     credits.addEventListener("click", () => hidePost({ dismiss: true }));
     frame.addEventListener("click", () => hidePost({ dismiss: true }));
+    back.addEventListener("click", leavePlayer);
+    // The trailer's sound: a mute toggle and a level, shown once the trailer is playing.
+    const sound =
+      next.kind === "film"
+        ? el("div", { class: "hera-post__sound", role: "group", "aria-label": "Trailer sound" }, [
+            el("button", { class: "hera-post__mute", type: "button", "aria-pressed": "false", "aria-label": "Mute trailer", onclick: toggleTrailerMute }, icon("volume_up")),
+            el("input", {
+              class: "hera-post__volume",
+              type: "range",
+              min: "0",
+              max: "100",
+              step: "5",
+              value: String(TRAILER_VOLUME),
+              "aria-label": "Trailer volume",
+              oninput: (event) => setTrailerVolume(Number(event.target.value)),
+            }),
+          ])
+        : null;
     return el("div", { class: "hera-post hera-dark", role: "dialog", "aria-label": episode ? "Next episode" : "Up next" }, [
+      back,
       frame,
       el("div", { class: "hera-post__info" }, [
         logo ? el("img", { class: "hera-pause__logo", src: logo, alt: name }) : el("h2", { class: "hera-pause__name", text: name }),
@@ -610,15 +741,22 @@
         item.Overview ? el("p", { class: "hera-pause__overview", text: item.Overview }) : null,
         el("div", { class: "hera-pause__actions" }, [primary, credits]),
       ]),
+      sound,
     ]);
   };
 
-  const startNext = (next) => {
-    // Jellyfin's own Start Now keeps its queue; without it (no queue, or autoplay off) Hera plays it.
-    const startNow = next.kind === "episode" ? document.querySelector(".upNextDialog .btnStartNow") : null;
-    hidePost({ dismiss: true });
-    if (startNow) startNow.click();
-    else play(next.item).catch(() => {});
+  // The next title starts the way every Hera Play button starts one: the server's PlayNow to this
+  // browser's session. (Pressing Jellyfin's own Start Now from script does nothing: it only
+  // answers a real press.) An episode started this way gets Jellyfin's usual queue of the rest of
+  // the series, so autoplay carries on after it. The screen stays until the new stream begins.
+  const startNext = async (next, button) => {
+    button?.setAttribute("aria-busy", "true");
+    try {
+      await play(next.item);
+    } catch (error) {
+      console.error("[Hera TV:postplay]", error);
+      hidePost({ dismiss: true });
+    }
   };
 
   const autoplayOn = async () => {
@@ -673,10 +811,20 @@
     if (next.kind === "episode" && (await autoplayOn()) && post.layer === layer) startCountdown(layer.querySelector(".hera-post__fill"));
   };
 
-  const hidePost = ({ dismiss = false } = {}) => {
+  // `resume` plays the credits again if the trailer had paused them (Watch Credits); leaving or
+  // moving on to the next title doesn't.
+  const hidePost = ({ dismiss = false, resume = dismiss } = {}) => {
     if (dismiss && post.itemId) post.dismissed = post.itemId;
     clearInterval(post.ticker);
-    document.documentElement.classList.remove("hera-postplay-on");
+    clearInterval(post.fadeTimer);
+    clearTimeout(post.focusTimer);
+    const v = video();
+    if (v && post.creditsVolume !== null) v.volume = post.creditsVolume;
+    if (v && post.creditsPaused && resume) v.play()?.catch?.(() => {});
+    post.trailer = null;
+    post.creditsVolume = null;
+    post.creditsPaused = false;
+    document.documentElement.classList.remove("hera-postplay-on", "hera-postplay-focus");
     playerFrame()?.classList.remove("hera-postplay-video");
     const { layer, backdrop } = post;
     post.layer = null;
@@ -733,25 +881,46 @@
     post.stale = true;
   };
 
+  // Left and right step along the row (Play, Watch Credits, the trailer's mute), Up reaches Back,
+  // Down returns to the row; on the volume level left and right change it. Escape or the remote's
+  // Back gives the credits back; the on-screen Back arrow leaves the player.
   const onPostKey = (event) => {
     const layer = post.layer;
     if (!layer) return;
-    const buttons = [...layer.querySelectorAll(".hera-pause__button")];
-    const index = buttons.indexOf(document.activeElement);
+    const active = document.activeElement;
+    const row = [...layer.querySelectorAll(".hera-pause__button, .hera-post.has-trailer .hera-post__mute")];
+    const all = [layer.querySelector(".hera-post__back"), ...row, layer.classList.contains("has-trailer") ? layer.querySelector(".hera-post__volume") : null].filter(Boolean);
     if (["Escape", "Backspace", "GoBack", "BrowserBack"].includes(event.key)) {
       event.preventDefault();
       event.stopImmediatePropagation();
       hidePost({ dismiss: true });
       return;
     }
-    if (["ArrowLeft", "ArrowRight", "Tab"].includes(event.key)) {
-      const step = event.key === "ArrowLeft" || (event.key === "Tab" && event.shiftKey) ? -1 : 1;
-      event.preventDefault();
+    if (active?.classList.contains("hera-post__volume") && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       event.stopImmediatePropagation();
-      buttons[Math.min(buttons.length - 1, Math.max(0, index < 0 ? 0 : index + step))]?.focus();
       return;
     }
-    // Enter on a button is that button's; nothing else reaches Jellyfin's player keys meanwhile.
+    if (event.key === "Tab") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const index = all.indexOf(active);
+      all[(index + (event.shiftKey ? -1 : 1) + all.length) % all.length]?.focus();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const index = row.indexOf(active);
+      row[Math.min(row.length - 1, Math.max(0, index < 0 ? 0 : index + (event.key === "ArrowLeft" ? -1 : 1)))]?.focus();
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      (event.key === "ArrowUp" ? layer.querySelector(".hera-post__back") : row[0])?.focus();
+      return;
+    }
+    // Enter on a control is that control's; nothing else reaches Jellyfin's player keys meanwhile.
     if (event.key !== "Enter" && event.key !== " ") event.preventDefault();
     event.stopImmediatePropagation();
   };

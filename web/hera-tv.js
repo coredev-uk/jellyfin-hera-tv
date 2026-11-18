@@ -95,13 +95,12 @@
     window.location.hash = hash;
   };
 
-  // Play on this browser by sending the server's PlayNow command to our own session.
-  let sessionId = null;
+  // Play on this browser by sending the server's PlayNow command to our own session. Looked up
+  // each time: a server restart gives this browser a new session, and a remembered id would send
+  // the command nowhere.
   const ownSession = async () => {
-    if (sessionId) return sessionId;
-    const sessions = await getJSON("Sessions", { deviceId: api().deviceId() });
-    sessionId = sessions?.[0]?.Id ?? null;
-    return sessionId;
+    const sessions = (await getJSON("Sessions", { deviceId: api().deviceId() })) ?? [];
+    return (sessions.find((s) => s.UserId === userId()) ?? sessions[0])?.Id ?? null;
   };
 
   const play = async (item) => {

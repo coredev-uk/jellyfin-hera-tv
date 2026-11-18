@@ -1,6 +1,335 @@
-# Hera TV design
+---
+name: Hera TV
+description: The Apple TV app's look for Jellyfin's web client, with the household's request and download tools built in.
+colors:
+  background: "#000000"
+  surface: "#121214"
+  surface-2: "#1c1c1e"
+  fill: "rgba(118, 118, 128, 0.24)"
+  fill-strong: "rgba(118, 118, 128, 0.36)"
+  hover: "rgba(255, 255, 255, 0.1)"
+  glass: "rgba(30, 30, 34, 0.62)"
+  glass-hover: "rgba(70, 70, 76, 0.85)"
+  glass-light: "rgba(255, 255, 255, 0.14)"
+  glass-edge: "rgba(255, 255, 255, 0.16)"
+  label: "#ffffff"
+  label-2: "rgba(235, 235, 245, 0.64)"
+  label-3: "rgba(235, 235, 245, 0.52)"
+  separator: "rgba(84, 84, 88, 0.55)"
+  select: "#ffffff"
+  select-hover: "rgba(255, 255, 255, 0.86)"
+  on-select: "#000000"
+  focus: "#ffffff"
+  track: "rgba(255, 255, 255, 0.28)"
+  light-background: "#ffffff"
+  light-surface: "#f5f5f7"
+  light-surface-2: "#ebebf0"
+  light-fill: "rgba(120, 120, 128, 0.12)"
+  light-glass: "rgba(238, 238, 243, 0.86)"
+  light-label: "#1d1d1f"
+  light-label-2: "rgba(60, 60, 67, 0.85)"
+  light-label-3: "rgba(60, 60, 67, 0.78)"
+  light-separator: "rgba(60, 60, 67, 0.18)"
+  light-select: "#1d1d1f"
+  light-on-select: "#ffffff"
+typography:
+  display:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Display, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "clamp(34px, 4vw, 56px)"
+    fontWeight: 800
+    lineHeight: 1.02
+    letterSpacing: "-0.03em"
+  headline:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Display, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "28px"
+    fontWeight: 700
+    lineHeight: 1.15
+    letterSpacing: "-0.02em"
+  title:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Display, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "22px"
+    fontWeight: 700
+    letterSpacing: "-0.015em"
+  body:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "15px"
+    fontWeight: 400
+    lineHeight: 1.5
+  body-large:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "17px"
+    fontWeight: 400
+    lineHeight: 1.45
+  button:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "16px"
+    fontWeight: 600
+    lineHeight: 1
+  label:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+    lineHeight: 1.3
+  subtitle:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "13px"
+    fontWeight: 500
+    lineHeight: 1.35
+  caption:
+    fontFamily: "-apple-system, BlinkMacSystemFont, SF Pro Text, Hera Inter, Segoe UI, Roboto, sans-serif"
+    fontSize: "11px"
+    fontWeight: 700
+    lineHeight: 1.3
+    letterSpacing: "0.01em"
+rounded:
+  badge: "4px"
+  small: "6px"
+  row: "10px"
+  card: "12px"
+  wide: "14px"
+  dialog: "16px"
+  float: "20px"
+  panel: "24px"
+  sheet: "28px"
+  capsule: "999px"
+spacing:
+  edge: "clamp(24px, 4vw, 72px)"
+  gap: "20px"
+components:
+  button-primary:
+    backgroundColor: "{colors.select}"
+    textColor: "{colors.on-select}"
+    typography: "{typography.button}"
+    rounded: "{rounded.capsule}"
+    padding: "0 26px 0 20px"
+    height: "48px"
+  button-primary-hover:
+    backgroundColor: "{colors.select-hover}"
+  button-glass:
+    backgroundColor: "{colors.glass}"
+    textColor: "{colors.label}"
+    typography: "{typography.button}"
+    rounded: "{rounded.capsule}"
+    size: "48px"
+  button-glass-hover:
+    backgroundColor: "{colors.glass-hover}"
+  button-glass-pressed:
+    backgroundColor: "{colors.select}"
+    textColor: "{colors.on-select}"
+  tab-bar:
+    backgroundColor: "{colors.glass}"
+    rounded: "{rounded.capsule}"
+    padding: "4px"
+  tab-active:
+    backgroundColor: "{colors.select}"
+    textColor: "{colors.on-select}"
+    rounded: "{rounded.capsule}"
+  card-art:
+    backgroundColor: "{colors.surface-2}"
+    rounded: "{rounded.card}"
+  card-art-wide:
+    backgroundColor: "{colors.surface-2}"
+    rounded: "{rounded.wide}"
+  card-badge:
+    backgroundColor: "{colors.glass-hover}"
+    textColor: "{colors.label}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.capsule}"
+    padding: "3px 8px"
+  chip-quality:
+    backgroundColor: "{colors.fill-strong}"
+    textColor: "{colors.label}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.badge}"
+    padding: "0 6px"
+    height: "18px"
+  segmented:
+    backgroundColor: "{colors.glass}"
+    rounded: "{rounded.capsule}"
+    padding: "3px"
+  segmented-selected:
+    backgroundColor: "{colors.select}"
+    textColor: "{colors.on-select}"
+    rounded: "{rounded.capsule}"
+  input-search:
+    backgroundColor: "{colors.fill}"
+    textColor: "{colors.label}"
+    rounded: "{rounded.capsule}"
+    padding: "0 6px 0 14px"
+    height: "44px"
+  sheet:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.label}"
+    rounded: "{rounded.sheet}"
+---
 
-Hera TV is a Jellyfin web-client theme and script modelled on Apple's TV app: tvOS 26 for the look, tv.apple.com for how a mouse uses it. It covers the desktop and TV layouts. Phones keep Jellyfin's own layout, which the colours and type still restyle.
+# Design System: Hera TV
+
+## Overview
+
+**Creative North Star: "The Lights-Down Room"**
+
+Hera TV is the household's Jellyfin library made to behave like the Apple TV app (tvOS 26 for the look, tv.apple.com for how a mouse uses it). It is a room with the lights down: a black ground, the artwork the only colour in it, and every control dimmed back until a hand reaches for it. The interface whispers and the artwork speaks. Type is white in three strengths, the selected thing is simply white, and glass appears only where tvOS puts it, on the chrome that floats over the picture.
+
+The mood is hushed, cinematic and exact. Density is generous: one edge column (`{spacing.edge}`) for every title, row and first card, shelves of rounded artwork with titles under them, and nothing ornamental between them. Controls are quiet capsules that turn white when chosen. Depth is mostly flat, with artwork lifting on hover or focus, and one lifted level for floating cards and sheets. Light mode exists and mirrors every token, but anything whose text sits on artwork keeps the dark set, as the Apple TV app does.
+
+It covers the desktop and TV layouts; phones keep Jellyfin's own layout, which the colours and type still restyle. The surface-by-surface comparison with the Apple TV app, the Plex-style extras and the rules for surviving Jellyfin updates follow the standard sections below.
+
+**Key Characteristics:**
+- A black ground with no accent colour; artwork carries every hue.
+- White type in three strengths, never a fourth.
+- Selection is the inverse of the ground: white with black text on dark, near-black with white text on light.
+- Glass and blur on chrome only: the tab bar, secondary buttons, menus, the player.
+- Rounded artwork that lifts 2px on hover and zooms 3% inside its frame; no tilt.
+- Capsules for everything pressable that isn't artwork.
+
+## Colors
+
+A monochrome system on a black ground, named after Apple's own UI roles, where the artwork is the only colour on the screen.
+
+### Primary
+- **Selection** (`{colors.select}`, with `{colors.on-select}` on it): the focused tab, the primary button (Play, Request), a pressed glass button, the selected segment, the focus ring (`{colors.focus}`). On tvOS the selected thing is white; here too. Light mode inverts it to near-black (`{colors.light-select}`) with white text.
+
+### Neutral
+- **System Background** (`{colors.background}`): the page ground. Pure black, so artwork and its blurred ambient light do all the colouring.
+- **Secondary System Background** (`{colors.surface}`): sheets, inset grouped lists, cards that hold text rather than artwork.
+- **Tertiary System Background** (`{colors.surface-2}`): the placeholder behind artwork while it loads, and nested surfaces.
+- **Label** (`{colors.label}`): titles and primary text.
+- **Secondary Label** (`{colors.label-2}`): synopses, meta lines, subtitles under cards.
+- **Tertiary Label** (`{colors.label-3}`): the quietest text (episode numbers, captions, placeholders). 52% is the lowest strength that still holds 4.5:1 on black.
+- **Fill** (`{colors.fill}`) and **Strong Fill** (`{colors.fill-strong}`): flat control backgrounds (search fields, quality chips, the active row of a list).
+- **Glass** (`{colors.glass}`, hover `{colors.glass-hover}`, edge `{colors.glass-edge}`): the translucent material of chrome, always with the 30px blur and a 1px top highlight.
+- **Separator** (`{colors.separator}`): hairlines between list rows.
+- **Track** (`{colors.track}`): the unfilled part of progress bars, scrubbers and pager dots.
+- **Light set** (`{colors.light-background}`, `{colors.light-surface}`, `{colors.light-label}` and the rest): the same roles on a white page, Apple's light system colours.
+
+### Named Rules
+**The No Accent Rule.** Hera has no brand colour. White (near-black in light mode) is the only selection colour; anything coloured on screen came from the artwork.
+
+**The Token Only Rule.** Components use the `--hera-*` scheme tokens and never raw white or black, so one scheme switch restyles everything, Jellyfin's own components included.
+
+**The Dark Over Art Rule.** Text that sits on artwork (the home hero, detail banners, the player, sheet headers, Discover's feature) keeps the dark set in light mode, over its own scrim.
+
+## Typography
+
+**Display Font:** SF Pro Display (system on Apple devices), with self-hosted Inter ("Hera Inter") elsewhere
+**Body Font:** SF Pro Text, with the same Inter fallback
+
+**Character:** Apple's own pairing, set tight at large sizes and plain at small ones; the type never decorates, it labels.
+
+### Hierarchy
+- **Display** (800, clamp(34px, 4vw, 56px), 1.02, -0.03em): the home hero's title when a title has no logo artwork.
+- **Headline** (700, 28px, 1.15, -0.02em): page titles in a library page's header row ("Collections", "Discover").
+- **Title** (700, 22px, -0.015em): section and shelf titles ("Up Next", "Episodes").
+- **Body** (400, 15px, 1.5): synopses, capped at 52ch in the hero and three lines on cards.
+- **Body Large** (400, 17px, 1.45): the synopsis on the pause and post-play screens, and text typed into search fields.
+- **Button** (600, 16px, 1): text in capsules.
+- **Label** (600, 14px, 1.3): card titles and meta lines.
+- **Subtitle** (500, 13px, 1.35): the line under a card's title and an episode's synopsis, in Secondary Label.
+- **Caption** (700, 11px, 0.01em): badges and quality chips ("4K", "Awaiting Release").
+
+Material Icons sit at 20px in small controls and 24px in 48px buttons.
+
+The TV layout steps every size up (card titles 18px, page titles 36px, synopses 19 to 22px) for reading across a room.
+
+### Named Rules
+**The No Eyebrow Rule.** Nothing sits in small caps above a heading. An episode's number leads its title on the same line, in Tertiary Label.
+
+**The Three Strengths Rule.** Text colour is Label, Secondary Label or Tertiary Label. Hierarchy comes from size and weight first, strength second, never from colour.
+
+## Layout
+
+One left edge for the whole page: `{spacing.edge}` (24px on a narrow window, 72px on a wide one). Every page title, shelf title and first card sits on it, and shelves bleed past it to the window's edge so rows read as continuing off screen. Cards in a shelf sit `{spacing.gap}` apart; posters are clamp(132px, 11.5vw, 196px) wide and wide cards clamp(240px, 22vw, 340px).
+
+Rows scroll sideways, with hover paddles for a mouse and focus movement for a remote. Pages that are a browse of everything (the Collections page's groups, a collection's own films) wrap into a grid of the same card widths instead. The home page opens on a full-bleed hero whose foot the first shelf overlaps; detail pages open on a banner with the logo, meta, synopsis and buttons at its lower left, the buttons always 48px above the banner's foot. Library pages share a header row: the title at the left, its tools level with it at the right.
+
+Breakpoints are few: the tab bar shortens its labels under 1440px; Jellyfin's own phone layout takes over under 900px; a collection's grid drops to one column under 720px. The TV layout (`.layout-tv`) is a mode, not a width: larger type, a white focus ring and remote navigation.
+
+### Named Rules
+**The One Edge Rule.** If it's a title or the first thing in a row, it starts on `{spacing.edge}`.
+
+## Elevation & Depth
+
+Mostly flat, with two exceptions. Chrome is glass (`{colors.glass}` plus a 30px blur and a 1px top highlight) floating over the picture. Content gains a shadow only when it lifts: artwork rises 2px with the lifted shadow on hover or focus, and floating cards, sheets and menus sit at that one lifted level. Behind detail pages and the home rows, the title's key art is blurred and dimmed into the ground, so the page sits in the light of the art rather than on a slab. When content scrolls under the tab bar it fades into the ground with a gradient, not a blur, so scrolling stays at full frame rate.
+
+### Shadow Vocabulary
+- **Rest** (`box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.8)`): chrome at rest, such as the tab bar and paddles.
+- **Lift** (`box-shadow: 0 24px 40px -14px rgba(0, 0, 0, 0.9)`): artwork on hover or focus, floating cards (Discover's feature), menus and sheets.
+- **Glass edge** (`box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16)`): the top highlight on every glass surface.
+- **Focus ring** (`box-shadow: 0 0 0 3px #fff` with Lift): a focused card on a remote, which also scales 6% in the TV layout.
+
+### Named Rules
+**The Glass Is Chrome Rule.** Blur belongs to the tab bar, secondary buttons, menus and the player. No card carries a standing backdrop-filter; badges and overlay buttons on artwork are solid translucent fills.
+
+**The Lift Rule.** Content is flat at rest. A shadow is the answer to hover or focus, never a decoration.
+
+## Shapes
+
+Soft rectangles for artwork and capsules for controls. Posters and stills round at `{rounded.card}`, wide cards and Hera's menus at `{rounded.wide}`, Jellyfin's own dialogs and action sheets at `{rounded.dialog}`, floating glass cards (Up Next, the notification panel) at `{rounded.float}`, Discover's feature card at `{rounded.panel}` and sheets at `{rounded.sheet}`. Rows inside menus and lists take `{rounded.row}`, small fills inside controls `{rounded.small}`. Badges inside meta lines (certificates, quality chips) are nearly square at `{rounded.badge}`. Everything pressable that isn't artwork, from the tab bar to a quality switch, is a full capsule (`{rounded.capsule}`). People are circles. There are no borders on content; hairline separators appear only between rows of a list.
+
+### Named Rules
+**The Capsule Rule.** If you can press it and it isn't a picture, it's a capsule.
+
+## Components
+
+### Buttons
+Quiet capsules that turn white when chosen.
+- **Shape:** full capsule (`{rounded.capsule}`), 48px tall.
+- **Primary:** Selection white with black text (`{components.button-primary}`), an icon then the verb: Play, Resume, Request, Play Next Episode. One per group.
+- **Glass:** round 48px glass discs for secondary actions (info, favourite, shuffle), widened with a label when the action needs words ("More Info", "Trailer").
+- **Hover / Focus:** primary dims to `{colors.select-hover}`; glass brightens to `{colors.glass-hover}`; a pressed toggle (a favourite) turns Selection white. Focus shows a 2px white outline 3px out. Every button presses to 95% on click.
+
+### Chips
+- **Badge:** Caption type in a glass-hover capsule at a card's corner ("In Library", "Awaiting Release", "New").
+- **Quality chip:** Caption type on Strong Fill, nearly square (`{rounded.badge}`), in meta lines and on cards ("4K", "DV", "Atmos").
+
+### Cards / Containers
+- **Corner Style:** `{rounded.card}` for posters (2:3) and stills (16:9 at `{rounded.wide}`).
+- **Background:** Tertiary System Background while the artwork loads.
+- **Shadow Strategy:** none at rest; Lift on hover or focus, with the artwork zooming 3% inside the frame.
+- **Border:** none.
+- **Text:** title and subtitle under the artwork, left-aligned, never on it, except where a card's artwork is a logo or wordmark (streaming services).
+- **Menu:** a 32px glass disc of three dots across, 8px in from the artwork's top right corner, shown on hover.
+
+### Inputs / Fields
+- **Style:** a Fill capsule 44px tall with a leading search glyph, no stroke.
+- **Focus:** Strong Fill and a 2px white ring; the header's search field and Discover's both widen while in use.
+
+### Navigation
+- **Tab bar:** a floating glass capsule centred at the top; the active tab is a white capsule with black text, the rest Secondary Label. No bar behind it; the server's name stands at the left in white.
+- **Segmented switch:** a glass capsule of options with the chosen one as the white pill (Groups | All, 1080p | 4K, series tabs).
+- **Pager:** a glass capsule of dots where the active dot stretches and fills with progress (the home hero, Discover's feature), with paddles either side and a pause.
+
+### Shelf
+The signature component: a titled row of rounded artwork that scrolls sideways under hover paddles (44px glass discs at the card edges, level with the art), or wraps into a grid where the page is a browse of everything.
+
+### Sheets and Overlays
+- **Title sheet:** a centred Secondary System Background panel at `{rounded.sheet}` with the title's backdrop at its head under the dark set.
+- **Pause screen and post-play:** the picture dims (or shrinks into the top left corner at the credits) and the title's logo, a line, the synopsis and a pair of capsules settle at the lower left; post-play adds a glass back arrow at the top left and, over a trailer, a glass capsule of mute and volume at the lower right.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** let artwork carry the colour: black ground, white type, Selection white for whatever is chosen.
+- **Do** use only the `--hera-*` tokens, and re-declare the dark set (`.hera-dark`) wherever text sits on artwork.
+- **Do** keep text to three strengths: Label, Secondary Label (64%) and Tertiary Label (52%).
+- **Do** make every pressable non-artwork control a capsule, and press it to 95%.
+- **Do** lift artwork 2px with the Lift shadow on hover and focus, zooming the image 3% inside its frame.
+- **Do** keep focus visible everywhere: a white ring on dark, near-black on light; a 3px ring and 6% scale on a TV.
+- **Do** honour reduced motion (no autoplay, no slides, crossfades only) and reduced transparency (no blur).
+- **Do** use Material Icons for every glyph.
+
+### Don't:
+- **Don't** introduce an accent colour, gradient text or a brand hue; the violet Jellyfin mark is gone for that reason.
+- **Don't** put glass or a standing backdrop-filter on a card, badge or overlay button.
+- **Don't** tilt artwork under the pointer; tvOS's parallax reads as a gimmick with a mouse.
+- **Don't** set an eyebrow label above a heading.
+- **Don't** move an element when it's hovered; its artwork lifts and zooms, the element stays put.
+- **Don't** use emoji.
+
+---
+
+The sections below are the working reference: how each surface maps to the Apple TV app, where Hera departs from it, what it adds from Plex, and how it survives Jellyfin updates.
 
 ## What the Apple TV app does, and what Hera TV takes from it
 
@@ -16,7 +345,7 @@ Hera TV is a Jellyfin web-client theme and script modelled on Apple's TV app: tv
 | Show page      | Key art fills the top with the logo, meta, synopsis and buttons at its lower left; then a season picker over a horizontal shelf of episode stills, the same shelf wherever you are in the show                                                                       | The same order: banner, logo, meta, synopsis, buttons, then plugin-rendered series tabs over an episode shelf, then credits. Film, series, season and episode pages share one layout: the same series art in the banner, the buttons always 48px above the banner's foot (the text above them grows upwards), and the same blurred art as the ground below. Series, season and episode pages all show that one Episodes shelf first under the banner: a series opens on the series it's up to, a season on itself, an episode on its own series with itself marked by a quiet 2px edge; Jellyfin's season list and "More from Series N" carousel are hidden. Every episode still hovers the way every poster does: a light frost and a centred play disc. Moving between episodes from the shelf keeps your place (page scroll and shelf position), and a show's series, episodes and banner art are kept for a minute so the next page paints whole in its first frame, whether or not Jellyfin had it cached |
 | Collections    | A bundle's key art and title, then its films in order on the same row of stills as a season's episodes; Play starts the first                                                                                                                                        | The collection's banner, then its Films in release order, in the Episodes grammar: wide key art with the film's logo, numbered, with the synopsis (up to three lines) and year · runtime (the certificate only when the films differ). The next film to watch carries the 2px edge, and the banner's Play names it and starts it ("Play Batman Begins", or Resume for one in progress). The banner's meta reads "3 films · 2005–2012 · 7 hr 37 min". Up to three films share the width (each at most 600px); four or more wrap into a grid, so a mouse, a trackpad and a remote reach every film. With Seerr, films the library lacks take their place in the order, dimmed with a Request disc, and open the title sheet; a linked user also gets "Request N Missing Films" by the title. Jellyfin's poster grid steps aside                                                                                                                                                                                                                               |
 | Cast           | Round portraits, centred names                                                                                                                                                                                                                                       | `personCard` made circular                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Player         | A thin white scrubber that thickens on hover, monochrome controls, a dark scrim; tv.apple.com puts the title and a capsule of controls over the scrubber and the transport in the middle. Paused, tvOS shows the title, synopsis and time left over a dimmed picture. At the credits the picture shrinks into the top left corner over what comes next | `web/hera-player.*`: always dark, in light mode too. The title ("S1, E3 · The Slump") and a glass capsule of controls sit over a full-width scrubber, with centred glass transport discs; menus opened from it are glass; Skip Intro rises above the capsule while the controls show. After 3 s paused the pause screen dims the picture and shows the logo, episode line, synopsis, time left and "Ends at", Resume and Restart, and the cast. A key brings the OSD back; a mouse can travel to its buttons, and a click on the picture brings the OSD back, still paused. Post-play, at the credits (Intro Skipper's outro segment; for an episode without one, when Jellyfin raises Up Next): the playing picture shrinks into the top left corner and the next title fills the screen in the pause screen's type. An episode shows the next one's still and "Play Next Episode", which fills as the episode runs out when autoplay is on (Jellyfin's own Up Next still plays it). A film shows the next unwatched film in its collection ("Next in The Dark Knight Collection"), or an unwatched one like it, with its trailer muted behind, and never starts on its own. Watch Credits, the picture, Escape or Back give the credits back |
+| Player         | A thin white scrubber that thickens on hover, monochrome controls, a dark scrim; tv.apple.com puts the title and a capsule of controls over the scrubber and the transport in the middle. Paused, tvOS shows the title, synopsis and time left over a dimmed picture. At the credits the picture shrinks into the top left corner over what comes next; a film's credits give way to a trailer | `web/hera-player.*`: always dark, in light mode too. The title ("S1, E3 · The Slump") and a glass capsule of controls sit over a full-width scrubber, with centred glass transport discs; menus opened from it are glass; Skip Intro rises above the capsule while the controls show. After 3 s paused the pause screen dims the picture and shows the logo, episode line, synopsis, time left and "Ends at", Resume and Restart, and the cast. A key brings the OSD back; a mouse can travel to its buttons, and a click on the picture brings the OSD back, still paused. Post-play, at the credits (Intro Skipper's outro segment; for an episode without one, when Jellyfin raises Up Next): the playing picture shrinks into the top left corner and the next title fills the screen in the pause screen's type. An episode shows the next one's still and "Play Next Episode", which fills as the episode runs out when autoplay is on. A film shows the next unwatched film in its collection ("Next in The Dark Knight Collection"), or an unwatched one like it, and its trailer: the credits' music fades out as the trailer's comes up, a mute and volume capsule sits at the lower right, and 30 s in the credits fade from their corner and pause, leaving the film the screen. A film never starts on its own. Play starts the next title through the server's PlayNow (an episode keeps Jellyfin's queue of the rest of the series). Watch Credits, the picture, Escape or the remote's Back give the credits back (sound and all); the back arrow at the top left leaves the player |
 | Control Center | A glass panel of round-icon tiles that turn white when on, the signed-in profile at the top                                                                                                                                                                          | The profile button opens it: subtitles, autoplay, appearance and Recently Added tiles saved to the user's settings, Quick Connect, what is playing elsewhere, an admin library scan, and links; "All options" opens Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Settings       | A split view: a sidebar of sections beside inset grouped lists of rows (icon, label, value, chevron or switch); changes apply at once                                                                                                                                | `web/hera-settings.*` replaces Jellyfin's settings menu with that: Profile, Appearance, Playback, Subtitles, Home and More, saving on change with a "Saved" capsule. Jellyfin's own settings pages and the admin Dashboard wear the same grouped cards and tokens. Layout, language and intro skipping are kept per browser, where Jellyfin keeps them, and the page says so                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Type           | SF Pro Display for headings, SF Pro Text for body; tight tracking on large sizes                                                                                                                                                                                     | System SF on Apple devices; self-hosted Inter (OFL) elsewhere                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
