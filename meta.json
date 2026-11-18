@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "Notifications: a bell in the header and \"New\" on titles for your requests (approved, downloading, ready to watch), new episodes of shows you're watching, and a daily summary of new arrivals; each can be turned off in Settings.",
+  "changelog": "Collections the Kometa way: Hera builds real collections nightly (universes, award winners, UK streaming services, UK seasonal, homegrown, decades, genres), the Collections page groups them on shelves, and the home page gains rows that change daily: newly released, popular, highly rated, a streaming service, genres, a decade and more.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
@@ -8,7 +8,7 @@
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
   "timestamp": "2026-11-18T00:00:00.0000000Z",
-  "version": "1.8.0.0",
+  "version": "1.9.0.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

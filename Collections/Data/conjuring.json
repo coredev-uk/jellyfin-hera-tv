@@ -1,0 +1,69 @@
+{
+ "id": "conjuring",
+ "name": "The Conjuring Universe",
+ "group": "Universes",
+ "source": "https://en.wikipedia.org/wiki/The_Conjuring_Universe",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 138843,
+   "type": "movie",
+   "title": "The Conjuring",
+   "year": 2013
+  },
+  {
+   "tmdb": 250546,
+   "type": "movie",
+   "title": "Annabelle",
+   "year": 2014
+  },
+  {
+   "tmdb": 259693,
+   "type": "movie",
+   "title": "The Conjuring 2",
+   "year": 2016
+  },
+  {
+   "tmdb": 396422,
+   "type": "movie",
+   "title": "Annabelle: Creation",
+   "year": 2017
+  },
+  {
+   "tmdb": 439079,
+   "type": "movie",
+   "title": "The Nun",
+   "year": 2018
+  },
+  {
+   "tmdb": 521029,
+   "type": "movie",
+   "title": "Annabelle Comes Home",
+   "year": 2019
+  },
+  {
+   "tmdb": 480414,
+   "type": "movie",
+   "title": "The Curse of La Llorona",
+   "year": 2019
+  },
+  {
+   "tmdb": 423108,
+   "type": "movie",
+   "title": "The Conjuring: The Devil Made Me Do It",
+   "year": 2021
+  },
+  {
+   "tmdb": 968051,
+   "type": "movie",
+   "title": "The Nun II",
+   "year": 2023
+  },
+  {
+   "tmdb": 1038392,
+   "type": "movie",
+   "title": "The Conjuring: Last Rites",
+   "year": 2025
+  }
+ ]
+}

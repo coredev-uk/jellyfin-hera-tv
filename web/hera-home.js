@@ -479,7 +479,7 @@
     if (id === "trending") {
       return !!store.match("interest", [`tmdb:${entry.item.mediaType}:${entry.item.tmdbId}`, entry.item.jellyfinId ? plainId(entry.item.jellyfinId) : null]);
     }
-    return id.startsWith("picks") && !!store.match("interest", [plainId(entry.id)]);
+    return (id.startsWith("picks") || id.startsWith(SERVER_ROW)) && !!store.match("interest", [plainId(entry.id)]);
   };
 
   /** Shows a row, or removes it when it has nothing. Unchanged data leaves the row alone. */
@@ -611,6 +611,44 @@
     ["trending", trendingRow],
   ];
 
+  // ---------- collection rows (server: HeraTV/collections/rows) ----------------------------
+  // The server decides which rows today's home shows; this only places and draws them. Rank by
+  // kind: Newly Released and Popular sit straight after Recently Added, the seasonal row before
+  // Top Picks, the rest between Your Requests and Trending to Request. The server's order breaks ties.
+
+  const SERVER_ROW = "c:";
+
+  const serverRank = (id, index) => {
+    const kind = id.toLowerCase();
+    const base = /^(new|release|recent)/.test(kind) ? 5
+      : /^pop/.test(kind) ? 6
+      : /^season|^holiday/.test(kind) ? 9
+      : /^(stream|network|service)/.test(kind) ? 31
+      : /^genre/.test(kind) ? 32
+      : /^decade/.test(kind) ? 34
+      : /^(award|oscar|bafta)/.test(kind) ? 35
+      : /^(home|uk)/.test(kind) ? 36
+      : /^(rated|top)/.test(kind) ? 7
+      : 37;
+    return base + index / 100;
+  };
+
+  const serverEntry = (item) => ({
+    id: item.id,
+    title: item.name,
+    subtitle: item.year ? String(item.year) : null,
+    image: item.imageTags?.Primary ? kit.imageUrl(item.id, "Primary", { maxWidth: 400, tag: item.imageTags.Primary }) : null,
+    kind: item.type === "Series" || item.type === "tv" ? "TV Show" : "Film",
+  });
+
+  const collectionRows = async () => {
+    const { features } = await kit.integrations();
+    if (features?.homeRows === false) return [];
+    const data = await load("collection-rows", 5 * 60 * 1000, () => kit.hera("collections/rows"));
+    // A failed request leaves the page as it was.
+    return data?.rows ? data.rows : null;
+  };
+
   const hiddenReady = () => (heraTv.hidden ? heraTv.hidden.ready() : Promise.resolve([]));
 
   const refreshHome = (page) => {
@@ -646,6 +684,21 @@
         clearTimeout(release);
         if (run === state.run && container.isConnected) tidyStock(container);
       });
+    collectionRows()
+      .then(async (rows) => {
+        if (!rows) return;
+        await hiddenReady();
+        if (run !== state.run || state.user !== kit.userId() || !page.isConnected) return;
+        const keep = new Set();
+        rows.forEach((row, index) => {
+          const id = SERVER_ROW + row.id;
+          keep.add(id);
+          RANK[id] = serverRank(String(row.id), index);
+          show(id, { title: row.title, href: row.href || undefined, entries: (row.items ?? []).map(serverEntry) });
+        });
+        for (const id of [...state.shown.keys()]) if (id.startsWith(SERVER_ROW) && !keep.has(id)) removeRow(id);
+      })
+      .catch((error) => console.error("[Hera TV:home] collections", error));
     for (const [id, job] of jobs) {
       job()
         .then(async (spec) => {

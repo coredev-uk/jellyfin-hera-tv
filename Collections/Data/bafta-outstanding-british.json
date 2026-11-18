@@ -1,0 +1,339 @@
+{
+ "id": "bafta-outstanding-british",
+ "name": "BAFTA Outstanding British Film Winners",
+ "group": "Awards",
+ "source": "https://en.wikipedia.org/wiki/BAFTA_Award_for_Outstanding_British_Film",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 43461,
+   "type": "movie",
+   "title": "Odd Man Out",
+   "year": 1947
+  },
+  {
+   "tmdb": 21631,
+   "type": "movie",
+   "title": "The Fallen Idol",
+   "year": 1948
+  },
+  {
+   "tmdb": 1092,
+   "type": "movie",
+   "title": "The Third Man",
+   "year": 1949
+  },
+  {
+   "tmdb": 54392,
+   "type": "movie",
+   "title": "The Blue Lamp",
+   "year": 1950
+  },
+  {
+   "tmdb": 32961,
+   "type": "movie",
+   "title": "The Lavender Hill Mob",
+   "year": 1951
+  },
+  {
+   "tmdb": 51619,
+   "type": "movie",
+   "title": "The Sound Barrier",
+   "year": 1952
+  },
+  {
+   "tmdb": 43346,
+   "type": "movie",
+   "title": "Genevieve",
+   "year": 1953
+  },
+  {
+   "tmdb": 16410,
+   "type": "movie",
+   "title": "Hobson's Choice",
+   "year": 1954
+  },
+  {
+   "tmdb": 43323,
+   "type": "movie",
+   "title": "Richard III",
+   "year": 1955
+  },
+  {
+   "tmdb": 22350,
+   "type": "movie",
+   "title": "Reach for the Sky",
+   "year": 1956
+  },
+  {
+   "tmdb": 826,
+   "type": "movie",
+   "title": "The Bridge on the River Kwai",
+   "year": 1957
+  },
+  {
+   "tmdb": 43103,
+   "type": "movie",
+   "title": "Room at the Top",
+   "year": 1958
+  },
+  {
+   "tmdb": 64291,
+   "type": "movie",
+   "title": "Sapphire",
+   "year": 1959
+  },
+  {
+   "tmdb": 37230,
+   "type": "movie",
+   "title": "Saturday Night and Sunday Morning",
+   "year": 1960
+  },
+  {
+   "tmdb": 25062,
+   "type": "movie",
+   "title": "A Taste of Honey",
+   "year": 1961
+  },
+  {
+   "tmdb": 947,
+   "type": "movie",
+   "title": "Lawrence of Arabia",
+   "year": 1962
+  },
+  {
+   "tmdb": 5769,
+   "type": "movie",
+   "title": "Tom Jones",
+   "year": 1963
+  },
+  {
+   "tmdb": 935,
+   "type": "movie",
+   "title": "Dr. Strangelove or: How I Learned to Stop Worrying and Love the Bomb",
+   "year": 1964
+  },
+  {
+   "tmdb": 15247,
+   "type": "movie",
+   "title": "The Ipcress File",
+   "year": 1965
+  },
+  {
+   "tmdb": 13580,
+   "type": "movie",
+   "title": "The Spy Who Came In from the Cold",
+   "year": 1965
+  },
+  {
+   "tmdb": 874,
+   "type": "movie",
+   "title": "A Man for All Seasons",
+   "year": 1966
+  },
+  {
+   "tmdb": 11386,
+   "type": "movie",
+   "title": "The Crying Game",
+   "year": 1992
+  },
+  {
+   "tmdb": 10445,
+   "type": "movie",
+   "title": "Shadowlands",
+   "year": 1993
+  },
+  {
+   "tmdb": 9905,
+   "type": "movie",
+   "title": "Shallow Grave",
+   "year": 1994
+  },
+  {
+   "tmdb": 11318,
+   "type": "movie",
+   "title": "The Madness of King George",
+   "year": 1994
+  },
+  {
+   "tmdb": 11159,
+   "type": "movie",
+   "title": "Secrets & Lies",
+   "year": 1996
+  },
+  {
+   "tmdb": 21252,
+   "type": "movie",
+   "title": "Nil by Mouth",
+   "year": 1997
+  },
+  {
+   "tmdb": 4518,
+   "type": "movie",
+   "title": "Elizabeth",
+   "year": 1998
+  },
+  {
+   "tmdb": 10557,
+   "type": "movie",
+   "title": "East Is East",
+   "year": 1999
+  },
+  {
+   "tmdb": 71,
+   "type": "movie",
+   "title": "Billy Elliot",
+   "year": 2000
+  },
+  {
+   "tmdb": 5279,
+   "type": "movie",
+   "title": "Gosford Park",
+   "year": 2001
+  },
+  {
+   "tmdb": 23305,
+   "type": "movie",
+   "title": "The Warrior",
+   "year": 2001
+  },
+  {
+   "tmdb": 11194,
+   "type": "movie",
+   "title": "Touching the Void",
+   "year": 2003
+  },
+  {
+   "tmdb": 9709,
+   "type": "movie",
+   "title": "My Summer of Love",
+   "year": 2005
+  },
+  {
+   "tmdb": 533,
+   "type": "movie",
+   "title": "Wallace & Gromit: The Curse of the Were-Rabbit",
+   "year": 2005
+  },
+  {
+   "tmdb": 1523,
+   "type": "movie",
+   "title": "The Last King of Scotland",
+   "year": 2006
+  },
+  {
+   "tmdb": 11798,
+   "type": "movie",
+   "title": "This Is England",
+   "year": 2007
+  },
+  {
+   "tmdb": 14048,
+   "type": "movie",
+   "title": "Man on Wire",
+   "year": 2008
+  },
+  {
+   "tmdb": 24469,
+   "type": "movie",
+   "title": "Fish Tank",
+   "year": 2009
+  },
+  {
+   "tmdb": 45269,
+   "type": "movie",
+   "title": "The King's Speech",
+   "year": 2010
+  },
+  {
+   "tmdb": 49517,
+   "type": "movie",
+   "title": "Tinker Tailor Soldier Spy",
+   "year": 2011
+  },
+  {
+   "tmdb": 37724,
+   "type": "movie",
+   "title": "Skyfall",
+   "year": 2012
+  },
+  {
+   "tmdb": 49047,
+   "type": "movie",
+   "title": "Gravity",
+   "year": 2013
+  },
+  {
+   "tmdb": 266856,
+   "type": "movie",
+   "title": "The Theory of Everything",
+   "year": 2014
+  },
+  {
+   "tmdb": 167073,
+   "type": "movie",
+   "title": "Brooklyn",
+   "year": 2015
+  },
+  {
+   "tmdb": 374473,
+   "type": "movie",
+   "title": "I, Daniel Blake",
+   "year": 2016
+  },
+  {
+   "tmdb": 359940,
+   "type": "movie",
+   "title": "Three Billboards Outside Ebbing, Missouri",
+   "year": 2017
+  },
+  {
+   "tmdb": 375262,
+   "type": "movie",
+   "title": "The Favourite",
+   "year": 2018
+  },
+  {
+   "tmdb": 530915,
+   "type": "movie",
+   "title": "1917",
+   "year": 2019
+  },
+  {
+   "tmdb": 582014,
+   "type": "movie",
+   "title": "Promising Young Woman",
+   "year": 2020
+  },
+  {
+   "tmdb": 777270,
+   "type": "movie",
+   "title": "Belfast",
+   "year": 2021
+  },
+  {
+   "tmdb": 674324,
+   "type": "movie",
+   "title": "The Banshees of Inisherin",
+   "year": 2022
+  },
+  {
+   "tmdb": 467244,
+   "type": "movie",
+   "title": "The Zone of Interest",
+   "year": 2023
+  },
+  {
+   "tmdb": 974576,
+   "type": "movie",
+   "title": "Conclave",
+   "year": 2024
+  },
+  {
+   "tmdb": 858024,
+   "type": "movie",
+   "title": "Hamnet",
+   "year": 2025
+  }
+ ]
+}

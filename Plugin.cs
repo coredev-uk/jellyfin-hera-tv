@@ -107,6 +107,42 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the hour (0 to 23, server time) from which the daily summary of new arrivals is written.</summary>
     public int ArrivalsHour { get; set; } = 18;
 
+    /// <summary>Gets or sets a value indicating whether Hera builds its collections (BoxSets) on a schedule. Off removes the ones it built.</summary>
+    public bool CollectionsEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the home page shows the rows <c>/HeraTV/collections/rows</c> serves.</summary>
+    public bool HomeRowsEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether Universes (Marvel, Star Wars, ...) become collections.</summary>
+    public bool CollectionsUniverses { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether Awards (Best Picture, BAFTA) become collections.</summary>
+    public bool CollectionsAwards { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether streaming services ("On Netflix") become collections.</summary>
+    public bool CollectionsStreaming { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether seasonal sets (Christmas, Bonfire Night, ...) become collections while in season.</summary>
+    public bool CollectionsSeasonal { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether Homegrown (British-made) sets become collections.</summary>
+    public bool CollectionsHomegrown { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether the best of each decade becomes a collection.</summary>
+    public bool CollectionsDecades { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether genres become collections.</summary>
+    public bool CollectionsGenres { get; set; } = true;
+
+    /// <summary>Gets or sets a value indicating whether film studios become collections. Off by default: there are many and they crowd the list.</summary>
+    public bool CollectionsStudios { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether TV networks become collections. Off by default: a series' studios mix networks with production companies, and the real networks repeat the Streaming sets.</summary>
+    public bool CollectionsNetworks { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether certificates (U, PG, 12A, 15, 18) become collections. Off by default: they add clutter.</summary>
+    public bool CollectionsCertificates { get; set; }
+
     // Integrations. HERATV_* environment variables take precedence over these.
 
     /// <summary>Gets or sets the Seerr URL the server calls.</summary>

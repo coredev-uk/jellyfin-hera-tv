@@ -1,0 +1,57 @@
+{
+ "id": "middle-earth",
+ "name": "Middle-earth",
+ "group": "Universes",
+ "source": "https://en.wikipedia.org/wiki/Middle-earth_in_film_and_television",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 120,
+   "type": "movie",
+   "title": "The Lord of the Rings: The Fellowship of the Ring",
+   "year": 2001
+  },
+  {
+   "tmdb": 121,
+   "type": "movie",
+   "title": "The Lord of the Rings: The Two Towers",
+   "year": 2002
+  },
+  {
+   "tmdb": 122,
+   "type": "movie",
+   "title": "The Lord of the Rings: The Return of the King",
+   "year": 2003
+  },
+  {
+   "tmdb": 49051,
+   "type": "movie",
+   "title": "The Hobbit: An Unexpected Journey",
+   "year": 2012
+  },
+  {
+   "tmdb": 57158,
+   "type": "movie",
+   "title": "The Hobbit: The Desolation of Smaug",
+   "year": 2013
+  },
+  {
+   "tmdb": 122917,
+   "type": "movie",
+   "title": "The Hobbit: The Battle of the Five Armies",
+   "year": 2014
+  },
+  {
+   "tmdb": 839033,
+   "type": "movie",
+   "title": "The Lord of the Rings: The War of the Rohirrim",
+   "year": 2024
+  },
+  {
+   "tmdb": 84773,
+   "type": "tv",
+   "title": "The Lord of the Rings: The Rings of Power",
+   "year": 2022
+  }
+ ]
+}

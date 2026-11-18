@@ -334,6 +334,8 @@
     loginStack: ".margin-auto-y",
     loginActions: ".readOnlyContent",
     loginUsers: ".visualLoginForm",
+    // The Collections library page (#boxsetsPage): the box holding the alphabet picker and grid.
+    libraryBody: ".libraryPage .padded-bottom-page",
   });
   // Pages every module may lean on without saying so: if these are gone, Hera's built-ins stand
   // aside on that page too.

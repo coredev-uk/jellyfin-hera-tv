@@ -1,3 +1,5 @@
+using Jellyfin.Plugin.HeraTv.Collections;
+using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +15,7 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 [ApiController]
 [Authorize(Policy = "RequiresElevation")]
 [Route("HeraTV/settings")]
-public class SettingsController(UpstreamClient upstream) : ControllerBase
+public class SettingsController(UpstreamClient upstream, ICollectionBuilder collectionBuilder, ICollectionsView collectionsView, ITaskManager taskManager) : ControllerBase
 {
     [HttpGet]
     public IActionResult Get() => Ok(Describe());
@@ -138,6 +140,16 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
         config.ActivityEnabled = body.ActivityEnabled ?? config.ActivityEnabled;
         config.NotificationsEnabled = body.NotificationsEnabled ?? config.NotificationsEnabled;
         config.ArrivalsHour = Math.Clamp(body.ArrivalsHour ?? config.ArrivalsHour, 0, 23);
+        config.CollectionsEnabled = body.CollectionsEnabled ?? config.CollectionsEnabled;
+        config.HomeRowsEnabled = body.HomeRowsEnabled ?? config.HomeRowsEnabled;
+        foreach (var group in CollectionGroups.InOrder.Where(g => g.Builds()))
+        {
+            if (body.CollectionGroups is not null && body.CollectionGroups.TryGetValue(group.Id(), out var on))
+            {
+                group.Set(config, on);
+            }
+        }
+
         if (!string.IsNullOrEmpty(region))
         {
             config.WatchRegion = region.ToUpperInvariant();
@@ -145,6 +157,7 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
 
         plugin.SaveConfiguration();
         upstream.ClearCache();
+        collectionsView.Clear();
         return Ok(Describe());
     }
 
@@ -233,7 +246,36 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
         return Ok(new { ok = true, message = (string?)null, users });
     }
 
-    private static object Describe()
+    /// <summary>Starts the Build Hera TV collections task now, unless it is already running.</summary>
+    [HttpPost("collections/build")]
+    public IActionResult BuildCollections()
+    {
+        if (collectionBuilder.Status.Running)
+        {
+            return Ok(new { ok = true, message = "A build is already running." });
+        }
+
+        taskManager.QueueIfNotRunning<BuildCollectionsTask>();
+        return Ok(new { ok = true, message = "Building collections. This takes a minute or two for a larger library." });
+    }
+
+    /// <summary>Whether the collections build is running, and how the last one went.</summary>
+    [HttpGet("collections/status")]
+    public IActionResult CollectionsStatus() => Ok(DescribeBuild());
+
+    private object DescribeBuild()
+    {
+        var status = collectionBuilder.Status;
+        return new
+        {
+            running = status.Running,
+            last = status.Last is { } last
+                ? new { at = last.At, created = last.Created, updated = last.Updated, removed = last.Removed, unchanged = last.Unchanged, failed = last.Failed, seconds = last.Seconds, note = last.Note }
+                : null,
+        };
+    }
+
+    private object Describe()
     {
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
         var key = IntegrationSettings.Inspect(IntegrationSettings.SeerrApiKeyVariable, config.SeerrApiKey);
@@ -268,6 +310,13 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
             features = IntegrationSettings.Features(config),
             elsewhere = new { region = string.IsNullOrWhiteSpace(config.WatchRegion) ? "GB" : config.WatchRegion.ToUpperInvariant() },
             notifications = new { arrivalsHour = Math.Clamp(config.ArrivalsHour, 0, 23) },
+            collections = new
+            {
+                enabled = config.CollectionsEnabled,
+                homeRows = config.HomeRowsEnabled,
+                groups = CollectionGroups.InOrder.Where(g => g.Builds()).ToDictionary(g => g.Id(), g => g.Enabled(config)),
+                build = DescribeBuild(),
+            },
         };
     }
 
@@ -460,6 +509,13 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
         public int? ArrivalsHour { get; set; }
 
         public string? WatchRegion { get; set; }
+
+        public bool? CollectionsEnabled { get; set; }
+
+        public bool? HomeRowsEnabled { get; set; }
+
+        /// <summary>Gets or sets which groups become collections, by group id: "genres", "awards", ...</summary>
+        public Dictionary<string, bool>? CollectionGroups { get; set; }
     }
 
     public sealed class ServiceBody
