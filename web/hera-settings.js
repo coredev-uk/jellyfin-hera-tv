@@ -362,6 +362,55 @@
     return node;
   };
 
+  // Which of the server's notices reach this person's bell (hera-notify.js). Saved per user on the
+  // server, so they follow the person between browsers, and all on until switched off.
+  const NOTIFY_SWITCHES = [
+    ["requests", "playlist_add_check", "Your requests", "When one is approved, downloading, ready to watch or declined."],
+    ["episodes", "tv", "New episodes", "Of shows you have watched in the last 90 days."],
+    ["arrivals", "new_releases", "New arrivals", "A daily summary of the films and series added to the library."],
+  ];
+  const notificationsGroup = () => {
+    const title = "Notifications";
+    if (!ctx.notifyPrefs) {
+      return group({
+        title,
+        rows: [
+          row({
+            icon: "refresh",
+            label: "Couldn't load your notification settings",
+            description: "Try again",
+            onclick: async () => {
+              ctx.notifyPrefs = await kit.hera("notifications/prefs").catch(() => null);
+              renderPane();
+            },
+          }),
+        ],
+      });
+    }
+    return group({
+      title,
+      rows: NOTIFY_SWITCHES.map(([key, iconName, label, description]) =>
+        switchRow({
+          icon: iconName,
+          label,
+          description,
+          checked: ctx.notifyPrefs[key] !== false,
+          save: async (on) => {
+            const before = ctx.notifyPrefs;
+            ctx.notifyPrefs = { ...before, [key]: on };
+            try {
+              await kit.hera("notifications/prefs", { method: "POST", body: ctx.notifyPrefs });
+            } catch (error) {
+              ctx.notifyPrefs = before;
+              throw error;
+            }
+          },
+        }),
+      ),
+      footer: "Notices wait under the bell in the header, and only show while Jellyfin is open.",
+    });
+  };
+
   // ---------- sheets and pickers -------------------------------------------------------------
 
   /** A glass sheet over the page. Focus returns to what opened it. */
@@ -794,6 +843,7 @@
             ],
           }),
           libraries.length ? group({ title: "Libraries in Recently Added", rows: libraries }) : null,
+          notificationsGroup(),
           // Titles hidden from Up Next or marked Not Interested, with Unhide (hera-extras.js).
           window.HeraTV.hidden ? window.HeraTV.hidden.settingsGroup() : null,
           group({ rows: [row({ icon: "tune", label: "More home screen options", description: "Library order", href: `${STOCK.home}?userId=${ctx.user.Id}`, chevron: true })] }),
@@ -940,11 +990,12 @@
     const release = setTimeout(() => {
       if (token === mountToken && !(ctx && ctx.page === page && ctx.root.isConnected)) page.classList.remove("hera-set-page");
     }, HOLD_MS);
-    const [full, cultures, views, quickConnect] = await Promise.all([
+    const [full, cultures, views, quickConnect, notifyPrefs] = await Promise.all([
       loadUser(user),
       getJSON("Localization/Cultures").catch(() => []),
       getJSON("UserViews", { userId: user }).then((r) => (r && r.Items) || []).catch(() => []),
       getJSON("QuickConnect/Enabled").catch(() => false),
+      kit.hera("notifications/prefs").catch(() => null),
     ]).finally(() => clearTimeout(release));
     if (token !== mountToken || !page.isConnected) return;
     unmount();
@@ -968,6 +1019,7 @@
       cultures: cultures || [],
       views,
       quickConnect: quickConnect === true,
+      notifyPrefs: notifyPrefs && typeof notifyPrefs === "object" ? notifyPrefs : null,
       section: sections.some((s) => s.id === remembered) ? remembered : "profile",
       mountedAt: Date.now(),
     };

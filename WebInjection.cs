@@ -22,6 +22,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Stats.IItemCatalogue, Stats.ItemCatalogue>();
         serviceCollection.AddSingleton<Stats.IStatsReports, Stats.StatsReports>();
         serviceCollection.AddHostedService<Stats.StreamRecorder>();
+        serviceCollection.AddSingleton<Integrations.UserRequests>();
+        serviceCollection.AddSingleton<Notifications.NotificationStore>();
+        serviceCollection.AddHostedService<Notifications.NotificationCentre>();
     }
 }
 

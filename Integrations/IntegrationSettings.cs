@@ -107,6 +107,7 @@ public sealed class IntegrationSettings
         ratings = config.RatingsEnabled,
         qualityBadges = config.QualityBadgesEnabled,
         activity = config.ActivityEnabled,
+        notifications = config.NotificationsEnabled,
     };
 
     public static IntegrationSettings Current

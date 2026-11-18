@@ -101,6 +101,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets a value indicating whether requests show live download progress from Sonarr, Radarr and SABnzbd.</summary>
     public bool ActivityEnabled { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether the header's bell and its notices are on: request progress, new episodes of shows being watched, and the daily summary of arrivals.</summary>
+    public bool NotificationsEnabled { get; set; } = true;
+
+    /// <summary>Gets or sets the hour (0 to 23, server time) from which the daily summary of new arrivals is written.</summary>
+    public int ArrivalsHour { get; set; } = 18;
+
     // Integrations. HERATV_* environment variables take precedence over these.
 
     /// <summary>Gets or sets the Seerr URL the server calls.</summary>
