@@ -94,11 +94,12 @@ jobs:
         if: ${{ steps.version.outputs.released == 'false' || github.event_name == 'workflow_dispatch' }}
         run: |
           remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git init -q manifest-branch
           cp manifest.json manifest-branch/
           cd manifest-branch
+          # A fresh repository: the identity has to be set here, not in the checkout above.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -q --orphan manifest
           if git fetch -q "$remote" manifest; then
             git reset -q FETCH_HEAD
