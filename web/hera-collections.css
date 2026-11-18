@@ -183,7 +183,7 @@ html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collectio
   font-size: 28px;
 }
 
-/* A service's wordmark replaces its name; a service shown by app icon keeps a smaller name under it. */
+/* A service's wordmark or app icon replaces its name. */
 .hera-collections__face.has-logo .hera-collections__name {
   display: none;
 }
@@ -195,21 +195,14 @@ html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collectio
   object-fit: contain;
   filter: drop-shadow(0 1px 8px rgba(0, 0, 0, 0.45));
 }
-.hera-collections__face.has-icon {
-  flex-direction: column;
-  gap: 12px;
-}
 .hera-collections__face .hera-collections__icon {
   display: block;
-  width: clamp(52px, 4.2vw, 72px);
+  width: clamp(64px, 5.6vw, 96px);
   height: auto;
   aspect-ratio: 1;
   border-radius: 22%;
   object-fit: cover;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-.hera-collections__face.has-icon .hera-collections__name {
-  font-size: clamp(17px, 1.4vw, 22px);
 }
 
 /* ---------- Motion -------------------------------------------------------------------------- */

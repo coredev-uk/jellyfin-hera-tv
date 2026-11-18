@@ -108,13 +108,17 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--hera-focus);
 }
-.hera-elsewhere__source {
+/* The credit is a caption under the logos, not a peer of them. Doubled up to outrank the detail
+ * page's own link colour. */
+.hera-elsewhere .hera-elsewhere__source {
+  flex-basis: 100%;
+  margin-top: -4px;
   color: var(--hera-label-3);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
   text-decoration: none;
 }
-.hera-elsewhere__source:hover {
+.hera-elsewhere .hera-elsewhere__source:hover {
   color: var(--hera-label-2);
 }
 
