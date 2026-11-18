@@ -1,0 +1,231 @@
+{
+ "id": "halloween-classics",
+ "name": "Halloween Classics",
+ "group": "Seasonal",
+ "source": "Hand-picked, well-known Halloween films",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 948,
+   "type": "movie",
+   "title": "Halloween",
+   "year": 1978
+  },
+  {
+   "tmdb": 4232,
+   "type": "movie",
+   "title": "Scream",
+   "year": 1996
+  },
+  {
+   "tmdb": 10439,
+   "type": "movie",
+   "title": "Hocus Pocus",
+   "year": 1993
+  },
+  {
+   "tmdb": 642885,
+   "type": "movie",
+   "title": "Hocus Pocus 2",
+   "year": 2022
+  },
+  {
+   "tmdb": 4011,
+   "type": "movie",
+   "title": "Beetlejuice",
+   "year": 1988
+  },
+  {
+   "tmdb": 917496,
+   "type": "movie",
+   "title": "Beetlejuice Beetlejuice",
+   "year": 2024
+  },
+  {
+   "tmdb": 9479,
+   "type": "movie",
+   "title": "The Nightmare Before Christmas",
+   "year": 1993
+  },
+  {
+   "tmdb": 620,
+   "type": "movie",
+   "title": "Ghostbusters",
+   "year": 1984
+  },
+  {
+   "tmdb": 2907,
+   "type": "movie",
+   "title": "The Addams Family",
+   "year": 1991
+  },
+  {
+   "tmdb": 2758,
+   "type": "movie",
+   "title": "Addams Family Values",
+   "year": 1993
+  },
+  {
+   "tmdb": 8839,
+   "type": "movie",
+   "title": "Casper",
+   "year": 1995
+  },
+  {
+   "tmdb": 14836,
+   "type": "movie",
+   "title": "Coraline",
+   "year": 2009
+  },
+  {
+   "tmdb": 3933,
+   "type": "movie",
+   "title": "Corpse Bride",
+   "year": 2005
+  },
+  {
+   "tmdb": 9297,
+   "type": "movie",
+   "title": "Monster House",
+   "year": 2006
+  },
+  {
+   "tmdb": 77174,
+   "type": "movie",
+   "title": "ParaNorman",
+   "year": 2012
+  },
+  {
+   "tmdb": 76492,
+   "type": "movie",
+   "title": "Hotel Transylvania",
+   "year": 2012
+  },
+  {
+   "tmdb": 62214,
+   "type": "movie",
+   "title": "Frankenweenie",
+   "year": 2012
+  },
+  {
+   "tmdb": 27850,
+   "type": "movie",
+   "title": "Halloweentown",
+   "year": 1998
+  },
+  {
+   "tmdb": 6435,
+   "type": "movie",
+   "title": "Practical Magic",
+   "year": 1998
+  },
+  {
+   "tmdb": 9552,
+   "type": "movie",
+   "title": "The Exorcist",
+   "year": 1973
+  },
+  {
+   "tmdb": 694,
+   "type": "movie",
+   "title": "The Shining",
+   "year": 1980
+  },
+  {
+   "tmdb": 377,
+   "type": "movie",
+   "title": "A Nightmare on Elm Street",
+   "year": 1984
+  },
+  {
+   "tmdb": 4488,
+   "type": "movie",
+   "title": "Friday the 13th",
+   "year": 1980
+  },
+  {
+   "tmdb": 138843,
+   "type": "movie",
+   "title": "The Conjuring",
+   "year": 2013
+  },
+  {
+   "tmdb": 419430,
+   "type": "movie",
+   "title": "Get Out",
+   "year": 2017
+  },
+  {
+   "tmdb": 447332,
+   "type": "movie",
+   "title": "A Quiet Place",
+   "year": 2018
+  },
+  {
+   "tmdb": 493922,
+   "type": "movie",
+   "title": "Hereditary",
+   "year": 2018
+  },
+  {
+   "tmdb": 346364,
+   "type": "movie",
+   "title": "It",
+   "year": 2017
+  },
+  {
+   "tmdb": 2668,
+   "type": "movie",
+   "title": "Sleepy Hollow",
+   "year": 1999
+  },
+  {
+   "tmdb": 3034,
+   "type": "movie",
+   "title": "Young Frankenstein",
+   "year": 1974
+  },
+  {
+   "tmdb": 36685,
+   "type": "movie",
+   "title": "The Rocky Horror Picture Show",
+   "year": 1975
+  },
+  {
+   "tmdb": 747,
+   "type": "movie",
+   "title": "Shaun of the Dead",
+   "year": 2004
+  },
+  {
+   "tmdb": 539,
+   "type": "movie",
+   "title": "Psycho",
+   "year": 1960
+  },
+  {
+   "tmdb": 1933,
+   "type": "movie",
+   "title": "The Others",
+   "year": 2001
+  },
+  {
+   "tmdb": 745,
+   "type": "movie",
+   "title": "The Sixth Sense",
+   "year": 1999
+  },
+  {
+   "tmdb": 23202,
+   "type": "movie",
+   "title": "Trick 'r Treat",
+   "year": 2007
+  },
+  {
+   "tmdb": 609,
+   "type": "movie",
+   "title": "Poltergeist",
+   "year": 1982
+  }
+ ]
+}

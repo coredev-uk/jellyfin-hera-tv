@@ -1,0 +1,165 @@
+{
+  "id": "star-trek",
+  "name": "Star Trek",
+  "group": "Universes",
+  "source": "https://en.wikipedia.org/wiki/Star_Trek (films and series)",
+  "updated": "2026-11",
+  "items": [
+    {
+      "tmdb": 152,
+      "type": "movie",
+      "title": "Star Trek: The Motion Picture",
+      "year": 1979
+    },
+    {
+      "tmdb": 154,
+      "type": "movie",
+      "title": "Star Trek II: The Wrath of Khan",
+      "year": 1982
+    },
+    {
+      "tmdb": 157,
+      "type": "movie",
+      "title": "Star Trek III: The Search for Spock",
+      "year": 1984
+    },
+    {
+      "tmdb": 168,
+      "type": "movie",
+      "title": "Star Trek IV: The Voyage Home",
+      "year": 1986
+    },
+    {
+      "tmdb": 172,
+      "type": "movie",
+      "title": "Star Trek V: The Final Frontier",
+      "year": 1989
+    },
+    {
+      "tmdb": 174,
+      "type": "movie",
+      "title": "Star Trek VI: The Undiscovered Country",
+      "year": 1991
+    },
+    {
+      "tmdb": 193,
+      "type": "movie",
+      "title": "Star Trek: Generations",
+      "year": 1994
+    },
+    {
+      "tmdb": 199,
+      "type": "movie",
+      "title": "Star Trek: First Contact",
+      "year": 1996
+    },
+    {
+      "tmdb": 200,
+      "type": "movie",
+      "title": "Star Trek: Insurrection",
+      "year": 1998
+    },
+    {
+      "tmdb": 201,
+      "type": "movie",
+      "title": "Star Trek: Nemesis",
+      "year": 2002
+    },
+    {
+      "tmdb": 13475,
+      "type": "movie",
+      "title": "Star Trek",
+      "year": 2009
+    },
+    {
+      "tmdb": 54138,
+      "type": "movie",
+      "title": "Star Trek Into Darkness",
+      "year": 2013
+    },
+    {
+      "tmdb": 188927,
+      "type": "movie",
+      "title": "Star Trek Beyond",
+      "year": 2016
+    },
+    {
+      "tmdb": 1114894,
+      "type": "movie",
+      "title": "Star Trek: Section 31",
+      "year": 2025
+    },
+    {
+      "tmdb": 253,
+      "type": "tv",
+      "title": "Star Trek",
+      "year": 1966
+    },
+    {
+      "tmdb": 655,
+      "type": "tv",
+      "title": "Star Trek: The Next Generation",
+      "year": 1987
+    },
+    {
+      "tmdb": 580,
+      "type": "tv",
+      "title": "Star Trek: Deep Space Nine",
+      "year": 1993
+    },
+    {
+      "tmdb": 1855,
+      "type": "tv",
+      "title": "Star Trek: Voyager",
+      "year": 1995
+    },
+    {
+      "tmdb": 314,
+      "type": "tv",
+      "title": "Star Trek: Enterprise",
+      "year": 2001
+    },
+    {
+      "tmdb": 67198,
+      "type": "tv",
+      "title": "Star Trek: Discovery",
+      "year": 2017
+    },
+    {
+      "tmdb": 85949,
+      "type": "tv",
+      "title": "Star Trek: Picard",
+      "year": 2020
+    },
+    {
+      "tmdb": 85948,
+      "type": "tv",
+      "title": "Star Trek: Lower Decks",
+      "year": 2020
+    },
+    {
+      "tmdb": 106393,
+      "type": "tv",
+      "title": "Star Trek: Prodigy",
+      "year": 2021
+    },
+    {
+      "tmdb": 103516,
+      "type": "tv",
+      "title": "Star Trek: Strange New Worlds",
+      "year": 2022
+    },
+    {
+      "tmdb": 223530,
+      "type": "tv",
+      "title": "Star Trek: Starfleet Academy",
+      "year": 2026
+    },
+    {
+      "tmdb": 1992,
+      "type": "tv",
+      "title": "Star Trek: The Animated Series",
+      "year": 1973
+    }
+  ]
+}

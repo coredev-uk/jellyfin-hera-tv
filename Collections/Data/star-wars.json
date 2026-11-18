@@ -1,0 +1,171 @@
+{
+  "id": "star-wars",
+  "name": "Star Wars",
+  "group": "Universes",
+  "source": "https://en.wikipedia.org/wiki/Star_Wars (live-action films, animated and live-action series)",
+  "updated": "2026-11",
+  "items": [
+    {
+      "tmdb": 11,
+      "type": "movie",
+      "title": "Star Wars",
+      "year": 1977
+    },
+    {
+      "tmdb": 1891,
+      "type": "movie",
+      "title": "The Empire Strikes Back",
+      "year": 1980
+    },
+    {
+      "tmdb": 1892,
+      "type": "movie",
+      "title": "Return of the Jedi",
+      "year": 1983
+    },
+    {
+      "tmdb": 1893,
+      "type": "movie",
+      "title": "Star Wars: Episode I - The Phantom Menace",
+      "year": 1999
+    },
+    {
+      "tmdb": 1894,
+      "type": "movie",
+      "title": "Star Wars: Episode II - Attack of the Clones",
+      "year": 2002
+    },
+    {
+      "tmdb": 1895,
+      "type": "movie",
+      "title": "Star Wars: Episode III - Revenge of the Sith",
+      "year": 2005
+    },
+    {
+      "tmdb": 140607,
+      "type": "movie",
+      "title": "Star Wars: The Force Awakens",
+      "year": 2015
+    },
+    {
+      "tmdb": 330459,
+      "type": "movie",
+      "title": "Rogue One: A Star Wars Story",
+      "year": 2016
+    },
+    {
+      "tmdb": 181808,
+      "type": "movie",
+      "title": "Star Wars: The Last Jedi",
+      "year": 2017
+    },
+    {
+      "tmdb": 348350,
+      "type": "movie",
+      "title": "Solo: A Star Wars Story",
+      "year": 2018
+    },
+    {
+      "tmdb": 181812,
+      "type": "movie",
+      "title": "Star Wars: The Rise of Skywalker",
+      "year": 2019
+    },
+    {
+      "tmdb": 1228710,
+      "type": "movie",
+      "title": "The Mandalorian and Grogu",
+      "year": 2026
+    },
+    {
+      "tmdb": 12180,
+      "type": "movie",
+      "title": "Star Wars: The Clone Wars",
+      "year": 2008
+    },
+    {
+      "tmdb": 82856,
+      "type": "tv",
+      "title": "The Mandalorian",
+      "year": 2019
+    },
+    {
+      "tmdb": 4194,
+      "type": "tv",
+      "title": "Star Wars: The Clone Wars",
+      "year": 2008
+    },
+    {
+      "tmdb": 60554,
+      "type": "tv",
+      "title": "Star Wars Rebels",
+      "year": 2014
+    },
+    {
+      "tmdb": 79093,
+      "type": "tv",
+      "title": "Star Wars Resistance",
+      "year": 2018
+    },
+    {
+      "tmdb": 105971,
+      "type": "tv",
+      "title": "Star Wars: The Bad Batch",
+      "year": 2021
+    },
+    {
+      "tmdb": 114478,
+      "type": "tv",
+      "title": "Star Wars: Visions",
+      "year": 2021
+    },
+    {
+      "tmdb": 115036,
+      "type": "tv",
+      "title": "The Book of Boba Fett",
+      "year": 2021
+    },
+    {
+      "tmdb": 92830,
+      "type": "tv",
+      "title": "Obi-Wan Kenobi",
+      "year": 2022
+    },
+    {
+      "tmdb": 83867,
+      "type": "tv",
+      "title": "Andor",
+      "year": 2022
+    },
+    {
+      "tmdb": 203085,
+      "type": "tv",
+      "title": "Star Wars: Tales of the Jedi",
+      "year": 2022
+    },
+    {
+      "tmdb": 114461,
+      "type": "tv",
+      "title": "Ahsoka",
+      "year": 2023
+    },
+    {
+      "tmdb": 202879,
+      "type": "tv",
+      "title": "Star Wars: Skeleton Crew",
+      "year": 2024
+    },
+    {
+      "tmdb": 251091,
+      "type": "tv",
+      "title": "Star Wars: Tales of the Empire",
+      "year": 2024
+    },
+    {
+      "tmdb": 114479,
+      "type": "tv",
+      "title": "The Acolyte",
+      "year": 2024
+    }
+  ]
+}

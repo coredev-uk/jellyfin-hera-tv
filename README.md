@@ -34,6 +34,7 @@ The plugin restyles Jellyfin's own pages and adds sections of its own. Jellyfin'
 | Navigation | A floating glass capsule of tabs, search in the header, and a profile menu |
 | Films and TV shows | Key art fills the top with the logo, meta, synopsis and buttons, then one Episodes shelf with series tabs, wherever you are in a show |
 | Collections | The films in release order on the Episodes shelf. Play starts the next one you haven't watched, and films the collection is missing sit in their place, ready to request |
+| Collection shelves | Real Jellyfin collections that Hera TV builds every morning, so Swiftfin and Android TV see them too: universes, awards, streaming services, seasons, homegrown, decades, genres and more. The Collections page groups them into shelves, and the home page adds rows for what is new, popular and highly rated, and a service, two genres and a decade that change daily. Each group can be switched off, and a button builds them now |
 | Player | A thin scrubber, a glass capsule of controls, and a tvOS-style pause screen |
 | People | The role, the biography and a filmography from Seerr, with the library's titles first |
 | Discover | Trending, popular and upcoming titles from Seerr, requestable from a title sheet |

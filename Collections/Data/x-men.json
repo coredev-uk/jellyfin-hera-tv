@@ -1,0 +1,105 @@
+{
+ "id": "x-men",
+ "name": "X-Men",
+ "group": "Universes",
+ "source": "https://en.wikipedia.org/wiki/X-Men_(film_series) (Deadpool & Wolverine sits in the MCU set)",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 36657,
+   "type": "movie",
+   "title": "X-Men",
+   "year": 2000
+  },
+  {
+   "tmdb": 36658,
+   "type": "movie",
+   "title": "X2",
+   "year": 2003
+  },
+  {
+   "tmdb": 36668,
+   "type": "movie",
+   "title": "X-Men: The Last Stand",
+   "year": 2006
+  },
+  {
+   "tmdb": 2080,
+   "type": "movie",
+   "title": "X-Men Origins: Wolverine",
+   "year": 2009
+  },
+  {
+   "tmdb": 49538,
+   "type": "movie",
+   "title": "X-Men: First Class",
+   "year": 2011
+  },
+  {
+   "tmdb": 76170,
+   "type": "movie",
+   "title": "The Wolverine",
+   "year": 2013
+  },
+  {
+   "tmdb": 127585,
+   "type": "movie",
+   "title": "X-Men: Days of Future Past",
+   "year": 2014
+  },
+  {
+   "tmdb": 293660,
+   "type": "movie",
+   "title": "Deadpool",
+   "year": 2016
+  },
+  {
+   "tmdb": 246655,
+   "type": "movie",
+   "title": "X-Men: Apocalypse",
+   "year": 2016
+  },
+  {
+   "tmdb": 263115,
+   "type": "movie",
+   "title": "Logan",
+   "year": 2017
+  },
+  {
+   "tmdb": 383498,
+   "type": "movie",
+   "title": "Deadpool 2",
+   "year": 2018
+  },
+  {
+   "tmdb": 320288,
+   "type": "movie",
+   "title": "Dark Phoenix",
+   "year": 2019
+  },
+  {
+   "tmdb": 340102,
+   "type": "movie",
+   "title": "The New Mutants",
+   "year": 2020
+  },
+  {
+   "tmdb": 67195,
+   "type": "tv",
+   "title": "Legion",
+   "year": 2017
+  },
+  {
+   "tmdb": 69629,
+   "type": "tv",
+   "title": "The Gifted",
+   "year": 2017
+  },
+  {
+   "tmdb": 138502,
+   "type": "tv",
+   "title": "X-Men '97",
+   "year": 2024
+  }
+ ]
+}

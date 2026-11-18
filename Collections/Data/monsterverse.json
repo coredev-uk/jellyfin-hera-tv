@@ -1,0 +1,45 @@
+{
+ "id": "monsterverse",
+ "name": "MonsterVerse",
+ "group": "Universes",
+ "source": "https://en.wikipedia.org/wiki/MonsterVerse",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 124905,
+   "type": "movie",
+   "title": "Godzilla",
+   "year": 2014
+  },
+  {
+   "tmdb": 293167,
+   "type": "movie",
+   "title": "Kong: Skull Island",
+   "year": 2017
+  },
+  {
+   "tmdb": 373571,
+   "type": "movie",
+   "title": "Godzilla: King of the Monsters",
+   "year": 2019
+  },
+  {
+   "tmdb": 399566,
+   "type": "movie",
+   "title": "Godzilla vs. Kong",
+   "year": 2021
+  },
+  {
+   "tmdb": 823464,
+   "type": "movie",
+   "title": "Godzilla x Kong: The New Empire",
+   "year": 2024
+  },
+  {
+   "tmdb": 202411,
+   "type": "tv",
+   "title": "Monarch: Legacy of Monsters",
+   "year": 2023
+  }
+ ]
+}

@@ -1,0 +1,182 @@
+/* Hera TV: grouped collections. Loaded after hera-tv.css; shelves and cards are the shared ones. */
+
+/* Jellyfin's grid and its A-Z picker step aside only while our shelves are on the page. */
+html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collections) {
+  display: none !important;
+}
+
+.hera-collections {
+  padding-bottom: 24px;
+}
+/* The Groups view keeps its height while it loads, so the page doesn't jump; All hands the page back to Jellyfin's grid. */
+.hera-collections[data-mode="groups"] {
+  min-height: 40vh;
+}
+.hera-collections__groups[hidden] {
+  display: none;
+}
+
+/* ---------- Groups | All: the capsule switch ------------------------------------------------ */
+
+.hera-collections__bar {
+  display: flex;
+  padding: 4px var(--hera-edge) 14px;
+}
+.hera-collections__switch {
+  display: inline-flex;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--hera-glass);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+}
+.hera-collections__mode {
+  flex: 0 1 auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--hera-label-2);
+  font: 600 14px/1 var(--hera-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-collections__mode:hover {
+  color: var(--hera-label);
+  background: var(--hera-hover);
+}
+.hera-collections__mode[aria-pressed="true"] {
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+}
+.hera-collections__mode:active {
+  transform: scale(0.95);
+}
+.hera-collections__mode:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- Wide cards: a service's backdrop, dimmed, with its name over it ----------------- */
+
+.hera-collections__face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 20px;
+  text-align: center;
+  /* A member's backdrop is only texture here; dense enough that the name leads on a pale one. */
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.72) 55%, rgba(0, 0, 0, 0.6));
+  color: var(--hera-label);
+}
+.hera-collections__art.is-bare .hera-collections__face {
+  background: linear-gradient(160deg, var(--hera-surface-2), var(--hera-surface));
+}
+.hera-collections__name {
+  max-height: 2.5em;
+  overflow: hidden;
+  font: 800 clamp(22px, 2vw, 30px) / 1.2 var(--hera-font-display);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- Loading ------------------------------------------------------------------------- */
+
+.hera-collections__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.hera-collections__skeleton {
+  padding: 8px 0 0;
+}
+.hera-collections__bones {
+  margin: 0 0 28px;
+  padding: 0 var(--hera-edge);
+}
+.hera-collections__bone {
+  display: block;
+  border-radius: var(--hera-r-card);
+  background: var(--hera-fill);
+}
+.hera-collections__bone--title {
+  width: min(220px, 50%);
+  height: 24px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+}
+.hera-collections__bones-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: clamp(132px, 11.5vw, 196px);
+  gap: var(--hera-gap);
+  overflow: hidden;
+}
+.hera-collections__bones-row.is-wide {
+  grid-auto-columns: clamp(240px, 22vw, 340px);
+}
+.hera-collections__bones-row .hera-collections__bone--card {
+  aspect-ratio: 2 / 3;
+}
+.hera-collections__bones-row.is-wide .hera-collections__bone--card {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--hera-r-wide);
+}
+
+/* ---------- TV layout ----------------------------------------------------------------------- */
+
+.layout-tv .hera-collections__bar {
+  padding-bottom: 20px;
+}
+.layout-tv .hera-collections__mode {
+  min-height: 52px;
+  padding: 0 24px;
+  font-size: 18px;
+}
+.layout-tv .hera-collections__mode:focus {
+  outline: none !important;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  transform: scale(1.08);
+  box-shadow: var(--hera-shadow-lift);
+}
+/* One control lit at a time: the resting selection steps back while the other holds focus. */
+.layout-tv .hera-collections__switch:focus-within .hera-collections__mode[aria-pressed="true"]:not(:focus) {
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+}
+.layout-tv .hera-collections__name {
+  font-size: 28px;
+}
+
+/* ---------- Motion -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hera-collections__bone {
+    animation: hera-collections-pulse 1.6s ease-in-out infinite;
+  }
+}
+@keyframes hera-collections-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-collections__mode {
+    transition: none;
+  }
+}

@@ -1,0 +1,489 @@
+{
+ "id": "bafta-best-film",
+ "name": "BAFTA Best Film Winners",
+ "group": "Awards",
+ "source": "https://en.wikipedia.org/wiki/BAFTA_Award_for_Best_Film",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 887,
+   "type": "movie",
+   "title": "The Best Years of Our Lives",
+   "year": 1946
+  },
+  {
+   "tmdb": 23383,
+   "type": "movie",
+   "title": "Hamlet",
+   "year": 1948
+  },
+  {
+   "tmdb": 5156,
+   "type": "movie",
+   "title": "Bicycle Thieves",
+   "year": 1948
+  },
+  {
+   "tmdb": 705,
+   "type": "movie",
+   "title": "All About Eve",
+   "year": 1950
+  },
+  {
+   "tmdb": 50030,
+   "type": "movie",
+   "title": "La Ronde",
+   "year": 1950
+  },
+  {
+   "tmdb": 51619,
+   "type": "movie",
+   "title": "The Sound Barrier",
+   "year": 1952
+  },
+  {
+   "tmdb": 5000,
+   "type": "movie",
+   "title": "Forbidden Games",
+   "year": 1952
+  },
+  {
+   "tmdb": 204,
+   "type": "movie",
+   "title": "The Wages of Fear",
+   "year": 1953
+  },
+  {
+   "tmdb": 43323,
+   "type": "movie",
+   "title": "Richard III",
+   "year": 1955
+  },
+  {
+   "tmdb": 52726,
+   "type": "movie",
+   "title": "Gervaise",
+   "year": 1956
+  },
+  {
+   "tmdb": 826,
+   "type": "movie",
+   "title": "The Bridge on the River Kwai",
+   "year": 1957
+  },
+  {
+   "tmdb": 43103,
+   "type": "movie",
+   "title": "Room at the Top",
+   "year": 1958
+  },
+  {
+   "tmdb": 665,
+   "type": "movie",
+   "title": "Ben-Hur",
+   "year": 1959
+  },
+  {
+   "tmdb": 284,
+   "type": "movie",
+   "title": "The Apartment",
+   "year": 1960
+  },
+  {
+   "tmdb": 46592,
+   "type": "movie",
+   "title": "Ballad of a Soldier",
+   "year": 1959
+  },
+  {
+   "tmdb": 990,
+   "type": "movie",
+   "title": "The Hustler",
+   "year": 1961
+  },
+  {
+   "tmdb": 947,
+   "type": "movie",
+   "title": "Lawrence of Arabia",
+   "year": 1962
+  },
+  {
+   "tmdb": 5769,
+   "type": "movie",
+   "title": "Tom Jones",
+   "year": 1963
+  },
+  {
+   "tmdb": 935,
+   "type": "movie",
+   "title": "Dr. Strangelove or: How I Learned to Stop Worrying and Love the Bomb",
+   "year": 1964
+  },
+  {
+   "tmdb": 11113,
+   "type": "movie",
+   "title": "My Fair Lady",
+   "year": 1964
+  },
+  {
+   "tmdb": 396,
+   "type": "movie",
+   "title": "Who's Afraid of Virginia Woolf?",
+   "year": 1966
+  },
+  {
+   "tmdb": 874,
+   "type": "movie",
+   "title": "A Man for All Seasons",
+   "year": 1966
+  },
+  {
+   "tmdb": 37247,
+   "type": "movie",
+   "title": "The Graduate",
+   "year": 1967
+  },
+  {
+   "tmdb": 3116,
+   "type": "movie",
+   "title": "Midnight Cowboy",
+   "year": 1969
+  },
+  {
+   "tmdb": 642,
+   "type": "movie",
+   "title": "Butch Cassidy and the Sundance Kid",
+   "year": 1969
+  },
+  {
+   "tmdb": 45938,
+   "type": "movie",
+   "title": "Sunday Bloody Sunday",
+   "year": 1971
+  },
+  {
+   "tmdb": 10784,
+   "type": "movie",
+   "title": "Cabaret",
+   "year": 1972
+  },
+  {
+   "tmdb": 1675,
+   "type": "movie",
+   "title": "Day for Night",
+   "year": 1973
+  },
+  {
+   "tmdb": 55368,
+   "type": "movie",
+   "title": "Lacombe, Lucien",
+   "year": 1974
+  },
+  {
+   "tmdb": 16153,
+   "type": "movie",
+   "title": "Alice Doesn't Live Here Anymore",
+   "year": 1974
+  },
+  {
+   "tmdb": 510,
+   "type": "movie",
+   "title": "One Flew Over the Cuckoo's Nest",
+   "year": 1975
+  },
+  {
+   "tmdb": 703,
+   "type": "movie",
+   "title": "Annie Hall",
+   "year": 1977
+  },
+  {
+   "tmdb": 42222,
+   "type": "movie",
+   "title": "Julia",
+   "year": 1977
+  },
+  {
+   "tmdb": 696,
+   "type": "movie",
+   "title": "Manhattan",
+   "year": 1979
+  },
+  {
+   "tmdb": 1955,
+   "type": "movie",
+   "title": "The Elephant Man",
+   "year": 1980
+  },
+  {
+   "tmdb": 9443,
+   "type": "movie",
+   "title": "Chariots of Fire",
+   "year": 1981
+  },
+  {
+   "tmdb": 783,
+   "type": "movie",
+   "title": "Gandhi",
+   "year": 1982
+  },
+  {
+   "tmdb": 38291,
+   "type": "movie",
+   "title": "Educating Rita",
+   "year": 1983
+  },
+  {
+   "tmdb": 625,
+   "type": "movie",
+   "title": "The Killing Fields",
+   "year": 1984
+  },
+  {
+   "tmdb": 10849,
+   "type": "movie",
+   "title": "The Purple Rose of Cairo",
+   "year": 1985
+  },
+  {
+   "tmdb": 11257,
+   "type": "movie",
+   "title": "A Room with a View",
+   "year": 1986
+  },
+  {
+   "tmdb": 4480,
+   "type": "movie",
+   "title": "Jean de Florette",
+   "year": 1986
+  },
+  {
+   "tmdb": 746,
+   "type": "movie",
+   "title": "The Last Emperor",
+   "year": 1987
+  },
+  {
+   "tmdb": 207,
+   "type": "movie",
+   "title": "Dead Poets Society",
+   "year": 1989
+  },
+  {
+   "tmdb": 769,
+   "type": "movie",
+   "title": "GoodFellas",
+   "year": 1990
+  },
+  {
+   "tmdb": 11663,
+   "type": "movie",
+   "title": "The Commitments",
+   "year": 1991
+  },
+  {
+   "tmdb": 8293,
+   "type": "movie",
+   "title": "Howards End",
+   "year": 1992
+  },
+  {
+   "tmdb": 424,
+   "type": "movie",
+   "title": "Schindler's List",
+   "year": 1993
+  },
+  {
+   "tmdb": 712,
+   "type": "movie",
+   "title": "Four Weddings and a Funeral",
+   "year": 1994
+  },
+  {
+   "tmdb": 4584,
+   "type": "movie",
+   "title": "Sense and Sensibility",
+   "year": 1995
+  },
+  {
+   "tmdb": 409,
+   "type": "movie",
+   "title": "The English Patient",
+   "year": 1996
+  },
+  {
+   "tmdb": 9427,
+   "type": "movie",
+   "title": "The Full Monty",
+   "year": 1997
+  },
+  {
+   "tmdb": 1934,
+   "type": "movie",
+   "title": "Shakespeare in Love",
+   "year": 1998
+  },
+  {
+   "tmdb": 14,
+   "type": "movie",
+   "title": "American Beauty",
+   "year": 1999
+  },
+  {
+   "tmdb": 98,
+   "type": "movie",
+   "title": "Gladiator",
+   "year": 2000
+  },
+  {
+   "tmdb": 120,
+   "type": "movie",
+   "title": "The Lord of the Rings: The Fellowship of the Ring",
+   "year": 2001
+  },
+  {
+   "tmdb": 423,
+   "type": "movie",
+   "title": "The Pianist",
+   "year": 2002
+  },
+  {
+   "tmdb": 122,
+   "type": "movie",
+   "title": "The Lord of the Rings: The Return of the King",
+   "year": 2003
+  },
+  {
+   "tmdb": 2567,
+   "type": "movie",
+   "title": "The Aviator",
+   "year": 2004
+  },
+  {
+   "tmdb": 142,
+   "type": "movie",
+   "title": "Brokeback Mountain",
+   "year": 2005
+  },
+  {
+   "tmdb": 1165,
+   "type": "movie",
+   "title": "The Queen",
+   "year": 2006
+  },
+  {
+   "tmdb": 4347,
+   "type": "movie",
+   "title": "Atonement",
+   "year": 2007
+  },
+  {
+   "tmdb": 12405,
+   "type": "movie",
+   "title": "Slumdog Millionaire",
+   "year": 2008
+  },
+  {
+   "tmdb": 12162,
+   "type": "movie",
+   "title": "The Hurt Locker",
+   "year": 2008
+  },
+  {
+   "tmdb": 45269,
+   "type": "movie",
+   "title": "The King's Speech",
+   "year": 2010
+  },
+  {
+   "tmdb": 74643,
+   "type": "movie",
+   "title": "The Artist",
+   "year": 2011
+  },
+  {
+   "tmdb": 68734,
+   "type": "movie",
+   "title": "Argo",
+   "year": 2012
+  },
+  {
+   "tmdb": 76203,
+   "type": "movie",
+   "title": "12 Years a Slave",
+   "year": 2013
+  },
+  {
+   "tmdb": 85350,
+   "type": "movie",
+   "title": "Boyhood",
+   "year": 2014
+  },
+  {
+   "tmdb": 281957,
+   "type": "movie",
+   "title": "The Revenant",
+   "year": 2015
+  },
+  {
+   "tmdb": 313369,
+   "type": "movie",
+   "title": "La La Land",
+   "year": 2016
+  },
+  {
+   "tmdb": 359940,
+   "type": "movie",
+   "title": "Three Billboards Outside Ebbing, Missouri",
+   "year": 2017
+  },
+  {
+   "tmdb": 426426,
+   "type": "movie",
+   "title": "Roma",
+   "year": 2018
+  },
+  {
+   "tmdb": 530915,
+   "type": "movie",
+   "title": "1917",
+   "year": 2019
+  },
+  {
+   "tmdb": 581734,
+   "type": "movie",
+   "title": "Nomadland",
+   "year": 2021
+  },
+  {
+   "tmdb": 600583,
+   "type": "movie",
+   "title": "The Power of the Dog",
+   "year": 2021
+  },
+  {
+   "tmdb": 49046,
+   "type": "movie",
+   "title": "All Quiet on the Western Front",
+   "year": 2022
+  },
+  {
+   "tmdb": 872585,
+   "type": "movie",
+   "title": "Oppenheimer",
+   "year": 2023
+  },
+  {
+   "tmdb": 974576,
+   "type": "movie",
+   "title": "Conclave",
+   "year": 2024
+  },
+  {
+   "tmdb": 1054867,
+   "type": "movie",
+   "title": "One Battle After Another",
+   "year": 2025
+  }
+ ]
+}

@@ -108,6 +108,7 @@ public sealed class IntegrationSettings
         qualityBadges = config.QualityBadgesEnabled,
         activity = config.ActivityEnabled,
         notifications = config.NotificationsEnabled,
+        homeRows = config.HomeRowsEnabled,
     };
 
     public static IntegrationSettings Current

@@ -1,0 +1,63 @@
+{
+  "id": "bonfire-night",
+  "name": "Bonfire Night",
+  "group": "Seasonal",
+  "source": "Hand-picked: Gunpowder Plot, Guy Fawkes, fire and fireworks",
+  "updated": "2026-11",
+  "items": [
+    {
+      "tmdb": 752,
+      "type": "movie",
+      "title": "V for Vendetta",
+      "year": 2006
+    },
+    {
+      "tmdb": 4518,
+      "type": "movie",
+      "title": "Elizabeth",
+      "year": 1998
+    },
+    {
+      "tmdb": 4517,
+      "type": "movie",
+      "title": "Elizabeth: The Golden Age",
+      "year": 2007
+    },
+    {
+      "tmdb": 1934,
+      "type": "movie",
+      "title": "Shakespeare in Love",
+      "year": 1998
+    },
+    {
+      "tmdb": 457136,
+      "type": "movie",
+      "title": "Mary Queen of Scots",
+      "year": 2018
+    },
+    {
+      "tmdb": 16307,
+      "type": "movie",
+      "title": "The Wicker Man",
+      "year": 1973
+    },
+    {
+      "tmdb": 2668,
+      "type": "movie",
+      "title": "Sleepy Hollow",
+      "year": 1999
+    },
+    {
+      "tmdb": 18066,
+      "type": "movie",
+      "title": "The Gunpowder Plot: Exploding the Legend",
+      "year": 2005
+    },
+    {
+      "tmdb": 73550,
+      "type": "tv",
+      "title": "Gunpowder",
+      "year": 2017
+    }
+  ]
+}

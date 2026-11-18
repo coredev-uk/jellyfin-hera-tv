@@ -80,6 +80,20 @@ const TITLE_SWITCHES = [
   ["qualityBadges", "qualityBadgesEnabled", "high_quality", "Quality badges", "4K, HDR, Dolby Vision and Atmos on title pages and on posters."],
 ];
 
+// The groups Hera can build as collections: [id in /HeraTV/settings, icon, label, description]. Franchises are the TMDb Box Sets plugin's and have no switch.
+const COLLECTION_GROUPS = [
+  ["universes", "hub", "Universes", "Marvel, Star Wars, Star Trek and other shared worlds, from a list built into Hera TV."],
+  ["awards", "emoji_events", "Awards", "Best Picture and the BAFTAs, from a list built into Hera TV."],
+  ["streaming", "connected_tv", "Streaming", "What you have that streams on Netflix, Prime Video, Disney+, Apple TV+, NOW, Paramount+, ITVX, BBC iPlayer, Channel 4 and Sky Go. Needs Seerr."],
+  ["seasonal", "celebration", "Seasonal", "Christmas, Halloween, Bonfire Night, Mothering Sunday, Easter and more, only while they are on."],
+  ["homegrown", "flag", "Homegrown", "British-made films and series, with Classic Cinema, Contemporary Cinema, Comedy Greats and Crime Drama."],
+  ["decades", "history", "Decades", "The best rated titles of each decade, from the 1950s to the 2020s."],
+  ["genres", "category", "Genres", "One collection for each genre with enough titles."],
+  ["studios", "movie", "Studios", "One collection for each film studio with enough films. There can be a lot of these."],
+  ["networks", "tv", "Networks", "One collection for each TV network or producer with enough series."],
+  ["certificates", "shield", "Certificates", "Rated U, PG, 12A, 15 and 18, with US ratings mapped across."],
+];
+
 export default function (view) {
   const root = view.querySelector("#heraCfg");
   let server = null;
@@ -507,6 +521,86 @@ export default function (view) {
     return group("Notifications", el("div", { class: "hera-set-list" }, [refs.notifySwitch, hour.row]), foot("These apply to everyone on this server."));
   };
 
+  // ---------- collections ---------------------------------------------------------------------
+
+  let buildWatch = 0; // Bumped to stop a status poll when the page is left or another build starts.
+
+  /** What the last build did, from /HeraTV/settings's `collections.build.last`. */
+  const buildSentence = (last) => {
+    if (!last) return "Not built since the server started. It runs every morning at 04:00.";
+    if (last.note) return `${when(last.at)}: ${last.note}`;
+    const parts = [`${last.created} created`, `${last.updated} updated`, `${last.removed} removed`, `${last.unchanged} unchanged`];
+    if (last.failed) parts.push(`${last.failed} failed, see the server log`);
+    return `Last built ${when(last.at)}: ${parts.join(", ")}.`;
+  };
+
+  const collectionsSection = () => {
+    const c = server.collections;
+    refs.collectionsSwitch = switchRow(
+      "folder_special",
+      "Build collections",
+      "Every morning Hera TV makes real Jellyfin collections, so Swiftfin, the Android TV app and the rest show them too. Turning this off removes the ones it made; collections you made yourself are never touched.",
+      c.enabled,
+    );
+    refs.homeRowsSwitch = switchRow(
+      "view_carousel",
+      "Collection rows on Home",
+      "Newly Released, Popular This Month, Highly Rated, a streaming service, two genres, a decade, award winners and Homegrown, with a new pick each day. These are live lists, not collections.",
+      c.homeRows,
+    );
+    refs.collectionGroups = {};
+    const groupRows = COLLECTION_GROUPS.map(([id, iconName, label, description]) => {
+      const node = switchRow(iconName, label, description, c.groups[id] === true);
+      refs.collectionGroups[id] = node;
+      return node;
+    });
+
+    const lastLine = el("p", { class: "hera-set-status", role: "status" }, [icon("history"), el("span", { text: buildSentence(c.build.last) })]);
+    const setLast = (last) => lastLine.querySelector("span:last-child").replaceChildren(buildSentence(last));
+    const result = verdict();
+    const run = button("Build collections now", {
+      iconName: "play_arrow",
+      onclick: async () => {
+        if (dirty) {
+          showVerdict(result, false, "Save your changes first. The build uses what is saved.");
+          return;
+        }
+        run.disabled = true;
+        showVerdict(result, "pending", "Starting…");
+        const token = ++buildWatch;
+        try {
+          const answer = await send("POST", "/collections/build");
+          showVerdict(result, "pending", answer.message);
+          // The task is queued, not started: wait for it to show as running, then for it to finish.
+          let started = false;
+          for (let tick = 0; tick < 120; tick += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            if (token !== buildWatch || !root.isConnected) return;
+            const status = await send("GET", "/collections/status");
+            if (status.running) {
+              started = true;
+              showVerdict(result, "pending", "Building…");
+            } else if (started || tick >= 3) {
+              setLast(status.last);
+              showVerdict(result, !status.last || status.last.failed === 0, status.last && status.last.failed ? "Built, with some failures." : "Built.");
+              break;
+            }
+          }
+        } catch (error) {
+          showVerdict(result, false, await reason(error));
+        } finally {
+          if (token === buildWatch) run.disabled = false;
+        }
+      },
+    });
+
+    return group(
+      "Collections",
+      el("div", { class: "hera-set-list" }, [refs.collectionsSwitch, refs.homeRowsSwitch, ...groupRows]),
+      el("div", { class: "hera-cfg-compat" }, [el("div", { class: "hera-cfg-test" }, [run, result]), lastLine]),
+    );
+  };
+
   // ---------- compatibility -------------------------------------------------------------------
 
   const compatRow = (iconName, label, value) =>
@@ -678,6 +772,7 @@ export default function (view) {
         homeSection(),
         rowsSection(),
         notifySection(),
+        collectionsSection(),
         titleSection(),
         sections.compat,
         bar,
@@ -728,6 +823,9 @@ export default function (view) {
       body[bodyKey] = refs.switches[key].getAttribute("aria-checked") === "true";
     }
     body.notificationsEnabled = refs.notifySwitch.getAttribute("aria-checked") === "true";
+    body.collectionsEnabled = refs.collectionsSwitch.getAttribute("aria-checked") === "true";
+    body.homeRowsEnabled = refs.homeRowsSwitch.getAttribute("aria-checked") === "true";
+    body.collectionGroups = Object.fromEntries(Object.entries(refs.collectionGroups).map(([id, node]) => [id, node.getAttribute("aria-checked") === "true"]));
     body.arrivalsHour = refs.arrivalsHour.value === "" ? undefined : Number(refs.arrivalsHour.value);
     body.watchRegion = refs.region.value.trim();
     const open = (input) => !input.readOnly;
@@ -780,5 +878,8 @@ export default function (view) {
     window.addEventListener("resize", centre);
     load();
   });
-  view.addEventListener("viewhide", () => window.removeEventListener("resize", centre));
+  view.addEventListener("viewhide", () => {
+    buildWatch += 1;
+    window.removeEventListener("resize", centre);
+  });
 }

@@ -1,0 +1,141 @@
+{
+ "id": "dc",
+ "name": "DC (DCEU and DCU)",
+ "group": "Universes",
+ "source": "https://en.wikipedia.org/wiki/DC_Extended_Universe and https://en.wikipedia.org/wiki/DC_Universe_(franchise) (one combined set; Elseworlds films such as Joker excluded)",
+ "updated": "2026-11",
+ "items": [
+  {
+   "tmdb": 49521,
+   "type": "movie",
+   "title": "Man of Steel",
+   "year": 2013
+  },
+  {
+   "tmdb": 209112,
+   "type": "movie",
+   "title": "Batman v Superman: Dawn of Justice",
+   "year": 2016
+  },
+  {
+   "tmdb": 297761,
+   "type": "movie",
+   "title": "Suicide Squad",
+   "year": 2016
+  },
+  {
+   "tmdb": 297762,
+   "type": "movie",
+   "title": "Wonder Woman",
+   "year": 2017
+  },
+  {
+   "tmdb": 141052,
+   "type": "movie",
+   "title": "Justice League",
+   "year": 2017
+  },
+  {
+   "tmdb": 297802,
+   "type": "movie",
+   "title": "Aquaman",
+   "year": 2018
+  },
+  {
+   "tmdb": 287947,
+   "type": "movie",
+   "title": "Shazam!",
+   "year": 2019
+  },
+  {
+   "tmdb": 495764,
+   "type": "movie",
+   "title": "Birds of Prey (and the Fantabulous Emancipation of One Harley Quinn)",
+   "year": 2020
+  },
+  {
+   "tmdb": 464052,
+   "type": "movie",
+   "title": "Wonder Woman 1984",
+   "year": 2020
+  },
+  {
+   "tmdb": 791373,
+   "type": "movie",
+   "title": "Zack Snyder's Justice League",
+   "year": 2021
+  },
+  {
+   "tmdb": 436969,
+   "type": "movie",
+   "title": "The Suicide Squad",
+   "year": 2021
+  },
+  {
+   "tmdb": 436270,
+   "type": "movie",
+   "title": "Black Adam",
+   "year": 2022
+  },
+  {
+   "tmdb": 594767,
+   "type": "movie",
+   "title": "Shazam! Fury of the Gods",
+   "year": 2023
+  },
+  {
+   "tmdb": 298618,
+   "type": "movie",
+   "title": "The Flash",
+   "year": 2023
+  },
+  {
+   "tmdb": 565770,
+   "type": "movie",
+   "title": "Blue Beetle",
+   "year": 2023
+  },
+  {
+   "tmdb": 572802,
+   "type": "movie",
+   "title": "Aquaman and the Lost Kingdom",
+   "year": 2023
+  },
+  {
+   "tmdb": 1061474,
+   "type": "movie",
+   "title": "Superman",
+   "year": 2025
+  },
+  {
+   "tmdb": 1081003,
+   "type": "movie",
+   "title": "Supergirl",
+   "year": 2026
+  },
+  {
+   "tmdb": 1400940,
+   "type": "movie",
+   "title": "Clayface",
+   "year": 2026
+  },
+  {
+   "tmdb": 110492,
+   "type": "tv",
+   "title": "Peacemaker",
+   "year": 2022
+  },
+  {
+   "tmdb": 219543,
+   "type": "tv",
+   "title": "Creature Commandos",
+   "year": 2024
+  },
+  {
+   "tmdb": 95350,
+   "type": "tv",
+   "title": "Lanterns",
+   "year": 2026
+  }
+ ]
+}
