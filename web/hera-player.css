@@ -762,12 +762,14 @@ html.layout-tv .hera-pause__button {
 :root {
   --hera-post-scale: 0.3;
   --hera-post-top: clamp(72px, 10vh, 104px);
+  /* Video is black in both schemes. */
+  --hera-video: #000;
 }
 .hera-post-backdrop {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  background: #000;
+  background: var(--hera-video);
   opacity: 0;
   transition: opacity 180ms ease;
 }
@@ -1106,7 +1108,7 @@ html.layout-tv .hera-post__reason {
   position: fixed;
   inset: 0;
   z-index: 1250;
-  background: #000;
+  background: var(--hera-video);
   color: var(--hera-label);
   opacity: 0;
   transition: opacity var(--hera-fast) var(--hera-ease);

@@ -121,6 +121,12 @@ html.hera-stats-on #slides-container {
 .hera-stats__title-link:hover {
   text-decoration-color: var(--hera-label);
 }
+.hera-stats__title-link:focus-visible,
+.layout-tv .hera-stats__title-link:focus {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
 .hera-stats__sub {
   margin: 0;
   color: var(--hera-label-2);
@@ -549,5 +555,30 @@ html.hera-stats-on #slides-container {
   .hera-stats__range-btn,
   .hera-stats__title-link {
     transition: none;
+  }
+}
+
+/* A phone: the sentence takes the card's width (it is a column beside the art on a wide window), clear
+ * of the header; the year calendar keeps readable cells and scrolls sideways instead of shrinking. */
+@media (max-width: 720px) {
+  .hera-stats__banner {
+    min-height: 380px;
+  }
+  .hera-stats__intro {
+    max-width: 100%;
+    padding-top: 80px;
+  }
+  .hera-stats__banner.is-plain .hera-stats__intro {
+    padding-top: 0;
+  }
+  .hera-stats__lead {
+    font-size: 30px;
+  }
+  .hera-stats__year {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .hera-stats__cal {
+    min-width: calc(2.8em + var(--weeks) * 14px);
   }
 }

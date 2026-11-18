@@ -91,7 +91,7 @@
         const percent = Math.round(a.progress ?? 0);
         const left = a.etaSeconds ? `${eta(a.etaSeconds)} left` : null;
         const detail = [`${percent}%`, left].filter(Boolean).join(" · ");
-        const done = a.sizeBytes ? `${bytes(a.sizeBytes - (a.sizeLeftBytes ?? 0))} of ${bytes(a.sizeBytes)}` : null;
+        const done = a.sizeBytes ? `${bytes(a.sizeBytes - (a.sizeLeftBytes ?? 0)) || "0 B"} of ${bytes(a.sizeBytes)}` : null;
         const speed = a.speedBps > 0 ? `${bytes(a.speedBps)}/s` : null;
         return {
           ...base,
@@ -148,8 +148,7 @@
         return { state: "available", label: "Available", full: "Available", icon: "check_circle", progress: null, detail: null, extra: null, final: true };
       default: {
         const processing = request.item?.status === "processing";
-        const word = processing ? "Processing" : "Approved";
-        return { state: processing ? "processing" : "approved", label: word, full: word, icon: processing ? "sync" : "check_circle_outline", progress: null, detail: null, extra: null, final: false };
+        return { state: processing ? "processing" : "approved", label: "Approved", full: "Approved", icon: processing ? "sync" : "check_circle_outline", progress: null, detail: null, extra: null, final: false };
       }
     }
   };

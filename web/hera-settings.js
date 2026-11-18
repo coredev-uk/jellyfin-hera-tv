@@ -181,6 +181,8 @@
       return "auto";
     }
   };
+  // What these two held when the client started, i.e. what the running page was built with.
+  const startedWith = {};
 
   const languages = () => {
     const seen = new Map();
@@ -359,6 +361,7 @@
       foot,
     ]);
     node.foot = foot;
+    node.footText = footer;
     return node;
   };
 
@@ -465,13 +468,14 @@
 
     let search = null;
     if (searchable) {
-      search = el("input", { class: "hera-set-input hera-set-search", type: "search", placeholder: "Search", "aria-label": `Search ${title.toLowerCase()}`, autocomplete: "off" });
+      search = el("input", { class: "hera-set-search__input", type: "search", placeholder: "Search", "aria-label": `Search ${title.toLowerCase()}`, autocomplete: "off" });
       search.addEventListener("input", () => {
         const query = search.value.trim().toLowerCase();
         items.forEach((node) => (node.hidden = !!query && !node.dataset.search.includes(query)));
       });
     }
-    const body = el("div", { class: "hera-set-sheet__body" }, [search, list]);
+    const field = search ? el("div", { class: "hera-set-search" }, [icon("search"), search]) : null;
+    const body = el("div", { class: "hera-set-sheet__body" }, [field, list]);
     const dialog = sheet({ title, body });
     dialog.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -867,7 +871,14 @@
       title: "Appearance",
       build() {
         // These two are read when the client starts, so each says so and offers the reload.
-        const needsReload = (list, what) => {
+        startedWith.Layout ??= readLayout();
+        startedWith.Language ??= readLanguage();
+        const needsReload = (list, what, now) => {
+          // Back on what the page started with, the group's own footer returns.
+          if (now === startedWith[what]) {
+            list.foot.replaceChildren(document.createTextNode(list.footText));
+            return;
+          }
           list.foot.replaceChildren(document.createTextNode(`${what} changes after Hera TV reloads. `), button("Reload Now", { onclick: () => window.location.reload() }));
         };
         const display = group({
@@ -890,7 +901,7 @@
               save: async (key) => {
                 if (key === "auto") localStorage.removeItem("layout");
                 else localStorage.setItem("layout", key);
-                needsReload(display, "Layout");
+                needsReload(display, "Layout", readLayout());
               },
             }),
           ],
@@ -908,7 +919,7 @@
               save: async (value) => {
                 if (value) localStorage.setItem(languageKey(), value);
                 else localStorage.removeItem(languageKey());
-                needsReload(language, "Language");
+                needsReload(language, "Language", readLanguage());
               },
               searchable: true,
             }),
@@ -1266,6 +1277,15 @@
       e.preventDefault();
       e.stopPropagation();
       to.focus();
+    });
+    // On a remote, Left from a row goes to the selected section, not whichever one sits level with it.
+    pane.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" || !isTv() || e.target.closest("dialog")) return;
+      const selected = nav.querySelector('[aria-current="page"]');
+      if (!selected) return;
+      e.preventDefault();
+      e.stopPropagation();
+      selected.focus();
     });
     page.append(root);
     page.classList.add("hera-set-page");

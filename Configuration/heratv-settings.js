@@ -787,7 +787,7 @@ export default function (view) {
       return node;
     });
 
-    const lastLine = el("p", { class: "hera-set-status", role: "status" }, [icon("history"), el("span", { text: buildSentence(c.build.last) })]);
+    const lastLine = el("p", { class: "hera-set-status hera-cfg-verdict", role: "status" }, [icon("history"), el("span", { text: buildSentence(c.build.last) })]);
     const setLast = (last) => lastLine.querySelector("span:last-child").replaceChildren(buildSentence(last));
     const result = verdict();
     const run = button("Build collections now", {

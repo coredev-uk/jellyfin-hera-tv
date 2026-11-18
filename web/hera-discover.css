@@ -9,6 +9,7 @@ html.hera-discover-on .headerTabs .emby-tab-button.emby-tab-button-active:not(.h
   color: var(--hera-label-2) !important;
 }
 .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root > a.hera-discover-tab {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -27,9 +28,6 @@ html.hera-discover-on #slides-container {
 
 .hera-discover {
   padding: 66px 0 64px;
-}
-.layout-tv .hera-discover {
-  padding-top: 24px;
 }
 
 /* The header row every library page has: the title at the left, its tools at the right, level. */
@@ -164,6 +162,7 @@ html.hera-discover-on #slides-container {
 /* The titles take turns: all in one grid cell, so the card is as tall as the tallest, crossfading. */
 .hera-discover__feature-slides {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 .hera-discover__feature-slide {
   grid-area: 1 / 1;
@@ -191,8 +190,8 @@ html.hera-discover-on #slides-container {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.5) 42%, rgba(0, 0, 0, 0) 75%),
-    linear-gradient(0deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0) 55%);
+    linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.7) 42%, rgba(0, 0, 0, 0) 80%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0) 60%);
 }
 /* The home hero's pager, in the card's lower right corner. */
 .hera-hero__controls.hera-discover__controls {
@@ -345,11 +344,15 @@ html.hera-discover-on #slides-container {
   height: clamp(200px, 30vw, 300px);
   background: var(--hera-surface-2);
 }
+/* The art ends at the head's edge; in the dark set it fades into the sheet. */
 .hera-sheet__head::after {
   content: "";
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, transparent 35%, var(--hera-surface) 100%);
+}
+:root[data-hera-scheme="light"] .hera-sheet__head::after {
+  display: none;
 }
 .hera-sheet__backdrop {
   width: 100%;
@@ -364,9 +367,10 @@ html.hera-discover-on #slides-container {
   margin-top: -72px;
   padding: 0 clamp(20px, 4vw, 40px) 36px;
 }
-/* Light sheet: the title sits on the clean surface just under the artwork's fade, not over it. */
+/* Light sheet: the header keeps its art to a clean edge, and the title sits on the surface below it. */
 :root[data-hera-scheme="light"] .hera-sheet__body {
-  margin-top: -20px;
+  margin-top: 0;
+  padding-top: 24px;
 }
 .hera-sheet__title {
   margin: 0 0 8px;
@@ -732,4 +736,28 @@ html.hera-discover-on #slides-container {
     padding-right: 11px !important;
     font-size: 14px !important;
   }
+}
+
+/* A phone: the search field takes the line under the title and shrinks to fit beside Requests; the
+ * feature keeps its pager clear of the buttons (the controls sit at the card's foot). */
+@media (max-width: 720px) {
+  .hera-discover__tools {
+    flex: 1 1 100%;
+  }
+  .hera-discover__field {
+    min-width: 0;
+  }
+}
+@media (max-width: 900px) {
+  .hera-discover__feature-body {
+    padding-bottom: 84px;
+  }
+  .hera-discover__feature-body .hera-hero__actions {
+    flex-wrap: wrap;
+  }
+}
+
+/* The note for an account Seerr doesn't know already links to Seerr; the pill under it would be a second. */
+.hera-sheet__actions:has(.hera-sheet__note a) ~ .hera-sheet__ext .hera-ext__link[title="Open in Seerr"] {
+  display: none;
 }

@@ -241,7 +241,7 @@
       item.Type === "BoxSet"
         ? KIND.BoxSet
         : mixed
-          ? [KIND[item.Type], item.ProductionYear].filter(Boolean).join(" · ")
+          ? [item.ProductionYear, KIND[item.Type]].filter(Boolean).join(" · ")
           : item.ProductionYear
             ? String(item.ProductionYear)
             : null;
@@ -250,8 +250,11 @@
     return kit.card({ href, image: art(item, "Primary", 400), title: item.Name, subtitle, action });
   };
 
-  const SEERR_BADGE = { partial: "Partly Available", processing: "Processing", pending: "Requested" };
+  // Statuses and their words are Discover's, so a title reads the same wherever it shows: Seerr's
+  // "Processing" never does. Without Discover, Seerr's own status in the same words.
+  const SEERR_BADGE = { partial: "Partly Available", processing: "Approved", pending: "Requested" };
   const seerrBadge = (item) => {
+    if (HT.discover?.badgeOf) return HT.discover.badgeOf(item);
     const status = item.status ?? "none";
     if (status === "available") return item.jellyfinId ? "In Library" : "Available";
     return SEERR_BADGE[status] ?? null;
@@ -259,12 +262,12 @@
   const seerrKind = (item) => (item.mediaType === "tv" ? "TV Show" : "Film");
 
   // Seerr titles share a data-hera-key with Discover's cards, so a request made from the sheet
-  // updates the badge here too.
+  // updates the badge here too. Discover draws them, with the download stack's word on each.
   const seerrCard = (item) => {
+    if (HT.discover?.itemCard) return HT.discover.itemCard(item);
     const available = (item.status ?? "none") === "available";
     const card = kit.card({
       href: item.jellyfinId ? `#/details?id=${item.jellyfinId}` : null,
-      onClick: item.jellyfinId ? null : (event) => HT.discover?.openTitle?.(item, { opener: event.currentTarget }),
       image: item.poster,
       title: item.title,
       subtitle: [item.year, seerrKind(item)].filter(Boolean).join(" · "),
