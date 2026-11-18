@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "Post-play fixes: Play and Play Next Episode now start the next title (by the server's PlayNow, which also stopped working after a server restart until the page was reloaded). A film's trailer now plays with sound as the credits' music fades out, with mute and volume at the lower right, and after 30 seconds the credits leave the screen. A back arrow at the top left leaves the player.",
+  "changelog": "The volume popup (the wheel or a volume key in the player) is a glass capsule with a white level, like the rest of the player. In post-play the wheel turns the trailer up and down with the same popup, the trailer's sound control is drawn like the player's own, and the trailer plays once: when it ends, the film's artwork takes the screen.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
@@ -8,7 +8,7 @@
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
   "timestamp": "2026-11-19T00:00:00.0000000Z",
-  "version": "1.10.1.0",
+  "version": "1.10.2.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

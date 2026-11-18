@@ -346,6 +346,45 @@ html.hera-osd-up .skip-button-container {
   bottom: var(--hera-skip-clear, 180px) !important;
 }
 
+/* The popup the wheel or a volume key raises (Jellyfin's iconOsd, and post-play's own for the
+ * trailer): a glass capsule at the top right under the header's discs, the speaker glyph and a
+ * level drawn as the scrubber is, a white line on its track. */
+.iconOsd {
+  top: 72px !important;
+  right: var(--hera-edge) !important;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 10px 14px !important;
+  border-radius: 999px !important;
+  color: var(--hera-label);
+  background: var(--hera-glass) !important;
+  backdrop-filter: var(--hera-blur);
+  -webkit-backdrop-filter: var(--hera-blur);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge), var(--hera-shadow);
+}
+.iconOsd.hide {
+  display: none;
+}
+.iconOsd .iconOsdIcon {
+  margin: 0 !important;
+  font-size: 22px !important;
+  color: var(--hera-label);
+}
+.iconOsd .iconOsdProgressOuter {
+  width: 120px;
+  height: 5px !important;
+  margin: 0 !important;
+  border-radius: 999px !important;
+  overflow: hidden;
+  background: var(--hera-track) !important;
+}
+.iconOsd .iconOsdProgressInner {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hera-select) !important;
+}
+
 /* Up Next: the card that offers the next episode as one ends. */
 .upNextContainer.upNextDialog {
   right: var(--hera-edge) !important;
@@ -909,17 +948,17 @@ html.hera-postplay-on .skip-button-container {
   outline-offset: 3px;
 }
 
-/* The trailer's sound, lower right on the line of the buttons: a mute toggle and a level, as the
- * player's own volume control is drawn. It appears once the trailer is playing. */
+/* The trailer's sound, lower right on the line of the buttons, drawn as the player's own volume
+ * control is in its capsule: a 40px speaker button, then a 96px white level on the scrubber's
+ * track that thickens and shows its thumb on hover or focus. It appears once the trailer plays. */
 .hera-post__sound {
   position: absolute;
   right: var(--hera-edge);
   bottom: clamp(48px, 9vh, 96px);
   display: none;
   align-items: center;
-  gap: 10px;
-  height: 48px;
-  padding: 0 18px 0 6px;
+  gap: 6px;
+  padding: 4px 16px 4px 4px;
   border-radius: 999px;
   background: var(--hera-glass);
   backdrop-filter: var(--hera-blur);
@@ -930,8 +969,8 @@ html.hera-postplay-on .skip-button-container {
   display: flex;
 }
 .hera-post__mute {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -947,19 +986,21 @@ html.hera-postplay-on .skip-button-container {
   font-size: 22px;
 }
 .hera-post__mute:hover {
-  background: var(--hera-hover);
+  background: var(--hera-glass-light);
 }
 .hera-post__mute:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
+/* Focus is the selection colour, as on the player's buttons. */
 .hera-post__mute:focus-visible {
-  outline: 2px solid var(--hera-focus);
-  outline-offset: 2px;
+  outline: none;
+  color: var(--hera-on-select);
+  background: var(--hera-select);
 }
-/* A thin white level on a translucent track; --hera-level is the filled share. */
+/* --hera-level is the filled share, set by hera-player.js. */
 .hera-post__volume {
-  width: 112px;
-  height: 20px;
+  width: 96px;
+  height: 24px;
   margin: 0;
   background: transparent;
   cursor: pointer;
@@ -967,39 +1008,74 @@ html.hera-postplay-on .skip-button-container {
   appearance: none;
 }
 .hera-post__volume::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 5px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--hera-label) var(--hera-level, 80%), var(--hera-track) var(--hera-level, 80%));
+  background: linear-gradient(to right, var(--hera-select) var(--hera-level, 80%), var(--hera-glass-light) var(--hera-level, 80%));
 }
 .hera-post__volume::-moz-range-track {
-  height: 4px;
+  height: 5px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--hera-label) var(--hera-level, 80%), var(--hera-track) var(--hera-level, 80%));
+  background: linear-gradient(to right, var(--hera-select) var(--hera-level, 80%), var(--hera-glass-light) var(--hera-level, 80%));
+}
+.hera-post__volume:hover::-webkit-slider-runnable-track,
+.hera-post__volume:focus-visible::-webkit-slider-runnable-track {
+  height: 8px;
+}
+.hera-post__volume:hover::-moz-range-track,
+.hera-post__volume:focus-visible::-moz-range-track {
+  height: 8px;
 }
 .hera-post__volume::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
-  margin-top: -5px;
+  margin-top: -4.5px;
   border: 0;
   border-radius: 50%;
-  background: var(--hera-label);
+  background: var(--hera-select);
+  transform: scale(0);
+  transition: transform var(--hera-fast) var(--hera-ease);
   -webkit-appearance: none;
   appearance: none;
+}
+.hera-post__volume:hover::-webkit-slider-thumb,
+.hera-post__volume:focus-visible::-webkit-slider-thumb {
+  margin-top: -3px;
+  transform: scale(1);
 }
 .hera-post__volume::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border: 0;
   border-radius: 50%;
-  background: var(--hera-label);
+  background: var(--hera-select);
+  transform: scale(0);
+  transition: transform var(--hera-fast) var(--hera-ease);
+}
+.hera-post__volume:hover::-moz-range-thumb,
+.hera-post__volume:focus-visible::-moz-range-thumb {
+  transform: scale(1);
 }
 .hera-post__volume:focus-visible {
-  outline: 2px solid var(--hera-focus);
-  outline-offset: 4px;
-  border-radius: 999px;
+  outline: none;
 }
 html.layout-tv .hera-post__volume {
-  width: 160px;
+  width: 140px;
+}
+
+/* While post-play has the screen, the wheel is the trailer's, and so is the popup. */
+html.hera-postplay-on .iconOsd:not(.hera-volume-hud) {
+  display: none !important;
+}
+/* The trailer's own volume popup shows and fades as Jellyfin's does. */
+.hera-volume-hud {
+  position: fixed;
+  z-index: 1001;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease-out;
+}
+.hera-volume-hud.is-on {
+  opacity: 1;
 }
 html.layout-tv .hera-post__info {
   width: min(760px, 60vw);
