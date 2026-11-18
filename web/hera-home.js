@@ -201,6 +201,8 @@
       subtitle: entry.subtitle,
       progress: entry.progress,
       label: `Play ${entry.title}${entry.subtitle ? `, ${entry.subtitle}` : ""}`,
+      // The whole card plays; its disc only shows that it does.
+      action: { icon: "play_arrow", label: `Play ${entry.title}` },
     });
     // hera-extras.js reads this: the card's "more" button, right click and (on a remote) a long press.
     main.heraId = entry.id;
@@ -260,15 +262,19 @@
 
   const posterEntry = (item) => ({
     id: item.Id,
+    type: item.Type,
     title: item.Name,
     subtitle: item.ProductionYear ? String(item.ProductionYear) : null,
     image: posterOf(item),
     kind: item.Type === "Series" ? "TV Show" : "Film",
   });
 
+  /** Every row here holds the library's own titles: their posters play from the row, as Jellyfin's do. */
+  const posterPlay = (entry) => kit.playAction({ Id: entry.id, Type: entry.type, Name: entry.title });
+
   // A title from a taste row can be marked Not Interested: hera-extras.js reads this off the card.
   const posterCard = (entry) => {
-    const card = kit.card({ href: `#/details?id=${entry.id}`, image: entry.image, title: entry.title, subtitle: entry.subtitle });
+    const card = kit.card({ href: `#/details?id=${entry.id}`, image: entry.image, title: entry.title, subtitle: entry.subtitle, action: posterPlay(entry) });
     card.heraHide = { scope: "interest", keys: [plainId(entry.id)], title: entry.title, year: entry.subtitle, kind: entry.kind, image: entry.image };
     return card;
   };
@@ -332,7 +338,7 @@
           badge: `Leaving ${kit.shortDate(entry.leavesOn)}`,
         }));
     });
-    return entries?.length ? { title: "Leaving Soon", entries, card: (e) => kit.card({ href: `#/details?id=${e.id}`, image: e.image, title: e.title, subtitle: e.subtitle, badge: e.badge }) } : null;
+    return entries?.length ? { title: "Leaving Soon", entries, card: (e) => kit.card({ href: `#/details?id=${e.id}`, image: e.image, title: e.title, subtitle: e.subtitle, badge: e.badge, action: posterPlay(e) }) } : null;
   };
 
   // ---------- Seerr rows -------------------------------------------------------------------
@@ -625,6 +631,7 @@
 
   const serverEntry = (item) => ({
     id: item.id,
+    type: item.type,
     title: item.name,
     subtitle: item.year ? String(item.year) : null,
     image: item.imageTags?.Primary ? kit.imageUrl(item.id, "Primary", { maxWidth: 400, tag: item.imageTags.Primary }) : null,

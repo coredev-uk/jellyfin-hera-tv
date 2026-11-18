@@ -309,6 +309,8 @@ The signature component: a titled row of rounded artwork that scrolls sideways u
 - **Title sheet:** a centred Secondary System Background panel at `{rounded.sheet}` with the title's backdrop at its head under the dark set.
 - **Pause screen and post-play:** the picture dims (or shrinks into the top left corner at the credits) and the title's logo, a line, the synopsis and a pair of capsules settle at the lower left; post-play adds a glass back arrow at the top left and, over a trailer, the player's own volume control (a speaker button and a white level) at the lower right.
 - **Volume popup:** a glass capsule at the top right, under the header's discs, with the speaker glyph and a white level on the scrubber's track; raised by the wheel or a volume key, for the player and for a post-play trailer alike.
+- **Trailer layer:** a title page's Trailer opens it over the whole screen: the title's backdrop dimmed on black until a trailer is playing, then that trailer at 16:9 with YouTube's own controls, post-play's back disc at the top left; Back, Escape or the trailer's end close it. Only trailers YouTube lets other sites play are offered (asked through `/HeraTV/trailers`), and a frame shows only once it is playing, so YouTube's "Video unavailable" page never does. A title with none loses its Trailer button.
+- **Play disc:** every poster or still of something the library holds (Hera's rows, Jellyfin's, search, Seerr's In Your Library) shows the same 52px glass disc with a 28px glyph over a light frost on hover or focus.
 
 ## Do's and Don'ts
 

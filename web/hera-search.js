@@ -229,7 +229,7 @@
   const libraryCard = (item, { mixed = false } = {}) => {
     const href = `#/details?id=${item.Id}`;
     if (item.Type === "Episode") {
-      return kit.card({ href, shape: "wide", image: episodeArt(item), title: item.Name, subtitle: episodeLine(item) });
+      return kit.card({ href, shape: "wide", image: episodeArt(item), title: item.Name, subtitle: episodeLine(item), action: kit.playAction(item) });
     }
     if (item.Type === "Person") {
       const card = kit.card({ href, shape: "person", image: art(item, "Primary", 320), title: item.Name, subtitle: mixed ? KIND.Person : null });
@@ -245,7 +245,9 @@
           : item.ProductionYear
             ? String(item.ProductionYear)
             : null;
-    return kit.card({ href, image: art(item, "Primary", 400), title: item.Name, subtitle });
+    // Films, shows and episodes play from the results, as the library's posters do everywhere.
+    const action = item.Type === "Movie" || item.Type === "Series" ? kit.playAction(item) : undefined;
+    return kit.card({ href, image: art(item, "Primary", 400), title: item.Name, subtitle, action });
   };
 
   const SEERR_BADGE = { partial: "Partly Available", processing: "Processing", pending: "Requested" };
