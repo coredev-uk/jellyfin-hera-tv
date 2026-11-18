@@ -125,6 +125,22 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         });
     }
 
+    /// <summary>Gets the qualities this person may pick for a request of this kind, default first; empty when there's no choice.</summary>
+    [HttpGet("discover/qualities/{mediaType}")]
+    public async Task<IActionResult> GetQualities([FromRoute] string mediaType)
+    {
+        var settings = IntegrationSettings.Current;
+        var user = CurrentUser();
+        var seerrUser = user is null ? null : settings.SeerrUserFor(user.Username);
+        if (!settings.SeerrEnabled || seerrUser is null)
+        {
+            return Ok(new { qualities = Array.Empty<object>() });
+        }
+
+        var qualities = await QualitiesAsync(mediaType == "tv" ? "tv" : "movie", seerrUser.Value).ConfigureAwait(false);
+        return Ok(new { qualities = qualities.Select(q => new { profileId = q.ProfileId, label = q.Label, isDefault = q.IsDefault }) });
+    }
+
     [HttpPost("discover/requests")]
     public async Task<IActionResult> CreateRequest([FromBody] RequestBody body)
     {
@@ -150,6 +166,20 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
                 : JsonValue.Create("all");
         }
 
+        // A chosen quality is one of the profiles this person was offered; Seerr takes the server's
+        // root folder and language profile as they are.
+        if (body.ProfileId is int profileId)
+        {
+            var quality = (await QualitiesAsync(type, seerrUser.Value).ConfigureAwait(false)).Find(q => q.ProfileId == profileId);
+            if (quality is null)
+            {
+                return BadRequest(new { message = "That quality isn't available for requests." });
+            }
+
+            payload["serverId"] = quality.ServerId;
+            payload["profileId"] = quality.ProfileId;
+        }
+
         var (status, response) = await upstream.SeerrPostAsync("api/v1/request", payload, seerrUser.Value).ConfigureAwait(false);
         if (status is >= 200 and < 300)
         {
@@ -161,6 +191,74 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
             message = (string?)response?["message"] ?? "Seerr did not accept the request.",
         });
     }
+
+    // Seerr's permission bits that let a request name its own server and profile.
+    private const long AdminPermission = 2;
+    private const long ManageRequestsPermission = 16;
+    private const long AdvancedRequestPermission = 8192;
+
+    /// <summary>
+    /// The qualities a request may pick: the default Radarr or Sonarr server's profiles, one per
+    /// resolution (720p, 1080p, 4K) in that order, the server's own default marked. Empty when there
+    /// is only one, or when the person's Seerr account may not choose: Seerr ignores a profile from
+    /// anyone without Advanced Requests, so offering it would be a lie.
+    /// </summary>
+    private async Task<List<Quality>> QualitiesAsync(string type, int seerrUser)
+    {
+        var account = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}", TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+        var permissions = account?["permissions"]?.GetValue<long>() ?? 0;
+        if ((permissions & (AdminPermission | ManageRequestsPermission | AdvancedRequestPermission)) == 0)
+        {
+            return [];
+        }
+
+        var service = type == "tv" ? "sonarr" : "radarr";
+        var servers = await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+        var server = servers?.AsArray().FirstOrDefault(s => s?["isDefault"]?.GetValue<bool>() == true && s?["is4k"]?.GetValue<bool>() != true);
+        if (server?["id"]?.GetValue<int>() is not int serverId)
+        {
+            return [];
+        }
+
+        var activeProfile = server["activeProfileId"]?.GetValue<int>();
+        var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{serverId}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+        var byLabel = new Dictionary<string, Quality>(StringComparer.Ordinal);
+        foreach (var profile in detail?["profiles"]?.AsArray() ?? [])
+        {
+            if (profile?["id"]?.GetValue<int>() is not int id || Resolution((string?)profile["name"]) is not { } label)
+            {
+                continue;
+            }
+
+            var isDefault = id == activeProfile;
+            if (!byLabel.TryGetValue(label, out var known) || (isDefault && !known.IsDefault))
+            {
+                byLabel[label] = new Quality(serverId, id, label, isDefault);
+            }
+        }
+
+        return byLabel.Count < 2 ? [] : [.. byLabel.Values.OrderBy(q => Array.IndexOf(Resolutions, q.Label))];
+    }
+
+    private static readonly string[] Resolutions = ["720p", "1080p", "4K"];
+
+    /// <summary>Reads a profile's resolution from its name ("[SQP] SQP-1 (2160p)" is 4K), or null for one that names none.</summary>
+    private static string? Resolution(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return null;
+        }
+
+        if (name.Contains("2160", StringComparison.Ordinal) || name.Contains("4K", StringComparison.OrdinalIgnoreCase) || name.Contains("UHD", StringComparison.OrdinalIgnoreCase))
+        {
+            return "4K";
+        }
+
+        return name.Contains("1080", StringComparison.Ordinal) ? "1080p" : name.Contains("720", StringComparison.Ordinal) ? "720p" : null;
+    }
+
+    private sealed record Quality(int ServerId, int ProfileId, string Label, bool IsDefault);
 
     [HttpGet("leaving")]
     public async Task<IActionResult> GetLeaving()
@@ -261,5 +359,8 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         public int TmdbId { get; set; }
 
         public int[]? Seasons { get; set; }
+
+        /// <summary>Gets or sets the Radarr or Sonarr quality profile picked, one of those <c>discover/qualities</c> offered; null for the server's default.</summary>
+        public int? ProfileId { get; set; }
     }
 }

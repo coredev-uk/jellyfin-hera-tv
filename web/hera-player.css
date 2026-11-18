@@ -338,6 +338,13 @@ h2.chapterThumbText,
 .skip-button:active {
   transform: scale(0.95);
 }
+/* While the controls show, the button rises above their capsule (hera-player.js measures it). */
+.skip-button-container {
+  transition: bottom var(--hera-slow) var(--hera-ease);
+}
+html.hera-osd-up .skip-button-container {
+  bottom: var(--hera-skip-clear, 180px) !important;
+}
 
 /* Up Next: the card that offers the next episode as one ends. */
 .upNextContainer.upNextDialog {
@@ -705,5 +712,180 @@ html.layout-tv .hera-pause__button {
   .hera-pause__info,
   .hera-pause.is-on .hera-pause__info {
     transform: none;
+  }
+}
+
+/* ---------- Post-play -------------------------------------------------------------------------- */
+/* At the credits the picture keeps playing, shrunk into the top left corner, over what comes
+ * next: the next episode's still or the next film's backdrop, with the film's trailer fading in
+ * over it. The title, a line and the synopsis settle at the lower left, as on the pause screen,
+ * whose type and buttons these share. */
+:root {
+  --hera-post-scale: 0.3;
+  --hera-post-top: clamp(72px, 10vh, 104px);
+}
+.hera-post-backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.hera-post-backdrop.is-on {
+  opacity: 1;
+  transition: opacity 700ms var(--hera-ease);
+}
+.hera-post-backdrop__still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Cover the screen at 16:9 whatever its shape; YouTube draws nothing it can be clicked through to. */
+.hera-post-backdrop__trailer {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100vw, 177.78vh);
+  height: max(56.25vw, 100vh);
+  border: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 900ms var(--hera-ease);
+}
+.hera-post-backdrop__trailer.is-on {
+  opacity: 1;
+}
+.hera-post-backdrop__scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(0deg, rgba(0, 0, 0, 0.72) 0%, transparent 46%),
+    radial-gradient(120% 90% at 0% 100%, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.4) 46%, transparent 76%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0%, transparent 34%);
+}
+
+/* The picture itself: the whole player frame scaled from its top left corner, so Jellyfin's
+ * video element is never moved or replaced. Radius and shadow are divided by the scale. */
+.videoPlayerContainer {
+  transform-origin: 0 0;
+  transition:
+    transform 260ms var(--hera-ease),
+    border-radius 260ms var(--hera-ease),
+    box-shadow 260ms var(--hera-ease);
+}
+.videoPlayerContainer.hera-postplay-video {
+  transform: translate(var(--hera-edge), var(--hera-post-top)) scale(var(--hera-post-scale));
+  border-radius: calc(14px / var(--hera-post-scale));
+  overflow: hidden;
+  /* A hairline keeps the frame's edge when the credits and the art behind are both black. */
+  box-shadow:
+    0 0 0 calc(1px / var(--hera-post-scale)) rgba(255, 255, 255, 0.16),
+    0 calc(18px / var(--hera-post-scale)) calc(50px / var(--hera-post-scale)) rgba(0, 0, 0, 0.55);
+  transition:
+    transform 720ms var(--hera-ease),
+    border-radius 720ms var(--hera-ease),
+    box-shadow 720ms var(--hera-ease);
+}
+
+/* Jellyfin's controls, its Up Next card and the skip button step aside while post-play has the screen. */
+html.hera-postplay-on .videoOsdBottom,
+html.hera-postplay-on .skinHeader,
+html.hera-postplay-on .upNextDialog,
+html.hera-postplay-on .skip-button-container {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.hera-post {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  color: var(--hera-label);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.hera-post.is-on {
+  opacity: 1;
+  transition: opacity var(--hera-slow) var(--hera-ease) 240ms;
+}
+/* Over the shrunken picture: pressing it goes back to the credits. */
+.hera-post__frame {
+  position: absolute;
+  left: var(--hera-edge);
+  top: var(--hera-post-top);
+  width: calc(100vw * var(--hera-post-scale));
+  height: calc(100vh * var(--hera-post-scale));
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  transition: box-shadow var(--hera-fast) var(--hera-ease);
+}
+.hera-post__frame:hover {
+  box-shadow: 0 0 0 2px var(--hera-label-2);
+}
+.hera-post__frame:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 3px;
+}
+.hera-post__info {
+  position: absolute;
+  left: var(--hera-edge);
+  bottom: clamp(48px, 9vh, 96px);
+  width: min(620px, 56vw);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transform: translateY(14px);
+  transition: transform 180ms var(--hera-ease);
+}
+.hera-post.is-on .hera-post__info {
+  transform: none;
+  transition: transform var(--hera-slow) var(--hera-ease) 240ms;
+}
+.hera-post__reason {
+  margin: -4px 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--hera-label-2);
+}
+/* The Play button fills from the left as the episode runs out (hera-player.js sets the scale). */
+.hera-post__play {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.hera-post__fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(0, 0, 0, 0.14);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 250ms linear;
+}
+html.layout-tv .hera-post__info {
+  width: min(760px, 60vw);
+}
+html.layout-tv .hera-post__reason {
+  font-size: 19px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .videoPlayerContainer,
+  .videoPlayerContainer.hera-postplay-video,
+  .hera-post__info,
+  .hera-post.is-on .hera-post__info {
+    transition: none;
+  }
+  .hera-post__info {
+    transform: none;
+  }
+  .hera-post__fill {
+    transition: none;
   }
 }

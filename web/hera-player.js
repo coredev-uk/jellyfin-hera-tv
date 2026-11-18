@@ -4,13 +4,16 @@
  *  - The title block at the foot of the player ("Brooklyn Nine-Nine" / "S1, E1 · Pilot").
  *  - The pause screen: after a few quiet seconds paused, the picture dims and the title's logo,
  *    synopsis, time left and a Resume / Restart pair settle at the lower left, as on tvOS.
+ *  - Post-play: when the credits roll, the picture shrinks to the top left and what comes next
+ *    fills the screen, as on tvOS: the next episode's still, or for a film the next one in its
+ *    collection (or one like it) with its trailer playing.
  */
 (() => {
   "use strict";
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { api, el, icon, getJSON, imageUrl, runtime, userId } = heraTv.kit;
+  const { api, el, icon, getJSON, imageUrl, runtime, userId, hera, play, reduceMotion } = heraTv.kit;
   const { jf } = heraTv;
 
   const PAUSE_DELAY = 3000;
@@ -103,6 +106,41 @@
     dark.bodyObserver = null;
   };
 
+  // ---------- skip button --------------------------------------------------------------------
+  // Jellyfin parks Skip Intro / Skip Credits at a fixed height, which the control capsule covers
+  // when it shows. While the OSD is up the button rises to sit just above the capsule, as
+  // tv.apple.com lifts it over the scrubber; the gap is measured, so the TV layout's taller
+  // controls are cleared too.
+  const skipLift = { observer: null };
+
+  const liftSkip = (bar) => {
+    const shown = !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
+    const capsule = shown ? bar.querySelector(".osdControls .buttons") : null;
+    const top = capsule?.getBoundingClientRect().top;
+    const root = document.documentElement;
+    if (top > 0) root.style.setProperty("--hera-skip-clear", `${Math.round(window.innerHeight - top + 14)}px`);
+    root.classList.toggle("hera-osd-up", !!(top > 0));
+  };
+
+  const followSkip = (page) => {
+    stopSkip();
+    const bar = page.querySelector(jf.videoOsd);
+    if (!bar) return;
+    liftSkip(bar);
+    // Measured again once the OSD's slide-in has finished, so the gap is to where it settles.
+    skipLift.observer = new MutationObserver(() => {
+      liftSkip(bar);
+      setTimeout(() => liftSkip(bar), 400);
+    });
+    skipLift.observer.observe(bar, { attributes: true, attributeFilter: ["class"] });
+  };
+
+  const stopSkip = () => {
+    skipLift.observer?.disconnect();
+    skipLift.observer = null;
+    document.documentElement.classList.remove("hera-osd-up");
+  };
+
   // ---------- pause screen -----------------------------------------------------------------
   // Shown once the video has been paused for PAUSE_DELAY with the OSD out of the way (or the
   // moment the OSD hides while paused). A key, a touch or a click on the picture gives the OSD
@@ -130,7 +168,8 @@
     return !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
   };
 
-  const sheetOpen = () => !!document.querySelector(".dialogContainer .dialog");
+  // A sheet, or the post-play screen, already has the picture.
+  const sheetOpen = () => !!document.querySelector(".dialogContainer .dialog") || !!post.layer;
 
   const isPaused = () => {
     const v = video();
@@ -448,10 +487,299 @@
     pauseScreen.details.clear();
   };
 
+  // ---------- post-play ----------------------------------------------------------------------
+  // tvOS at the credits: the picture shrinks into the top left corner and keeps playing, and what
+  // comes next takes the screen. An episode offers the next one, its still filling the screen, and
+  // fills its Play button as the episode runs out when autoplay is on; Jellyfin's own Up Next still
+  // does the playing, so the queue and the person's autoplay setting hold. A film offers the next
+  // unwatched film in its collection, or else an unwatched one like it, with its trailer playing
+  // silently behind, and never starts it unasked. Watch Credits, the shrunken picture, Escape or
+  // Back put the credits back full screen (Jellyfin's own Up Next card stays for an episode).
+  // The credits start where Intro Skipper's outro segment says; an episode without one starts
+  // when Jellyfin raises its Up Next, and a film without one gets no post-play.
+
+  const post = {
+    page: null,
+    itemId: null,
+    item: null,
+    creditsAt: null,
+    dismissed: null,
+    preparing: null,
+    opening: false,
+    layer: null,
+    backdrop: null,
+    ticker: 0,
+    autoplay: null,
+    cleanups: [],
+  };
+
+  const playerFrame = () => document.querySelector(".videoPlayerContainer");
+  const jellyfinUpNext = () => document.querySelector(".upNextDialog:not(.hide)");
+
+  // The end credits: the last outro segment, and only one that runs to within a minute of the end.
+  const creditsStart = async (item) => {
+    const result = await getJSON(`MediaSegments/${item.Id}`, { includeSegmentTypes: "Outro" }).catch(() => null);
+    const total = (item.RunTimeTicks || 0) / 1e7;
+    const outro = (result?.Items || [])
+      .filter((segment) => !total || total - segment.EndTicks / 1e7 < 60)
+      .sort((a, b) => b.StartTicks - a.StartTicks)[0];
+    return outro ? outro.StartTicks / 1e7 : null;
+  };
+
+  const nextEpisode = async (item) => {
+    if (!item.SeriesId) return null;
+    const result = await getJSON(`Shows/${item.SeriesId}/Episodes`, { userId: userId(), startItemId: item.Id, limit: 2, Fields: "Overview" });
+    const next = result?.Items?.[1];
+    return next ? { kind: "episode", item: next } : null;
+  };
+
+  const nextFilm = async (item) => {
+    const chained = await hera(`collections/next/${item.Id}`).catch(() => null);
+    if (chained?.id) {
+      const film = await getJSON(`Users/${userId()}/Items/${chained.id}`).catch(() => null);
+      if (film) return { kind: "film", item: film, reason: `Next in ${chained.collection}` };
+    }
+    const similar = await getJSON(`Items/${item.Id}/Similar`, { userId: userId(), limit: 12 }).catch(() => null);
+    const pick = (similar?.Items || []).find((candidate) => candidate.Type === "Movie" && !candidate.UserData?.Played);
+    const film = pick ? await getJSON(`Users/${userId()}/Items/${pick.Id}`).catch(() => null) : null;
+    return film ? { kind: "film", item: film, reason: `Because you watched ${item.Name}` } : null;
+  };
+
+  const stillFor = (next) => {
+    const item = next.item;
+    if (next.kind === "episode" && item.ImageTags?.Primary) return imageUrl(item.Id, "Primary", { maxWidth: 1920, tag: item.ImageTags.Primary });
+    if (item.BackdropImageTags?.length) return imageUrl(item.Id, "Backdrop", { maxWidth: 1920, tag: item.BackdropImageTags[0] });
+    if (item.ParentBackdropItemId && item.ParentBackdropImageTags?.length) {
+      return imageUrl(item.ParentBackdropItemId, "Backdrop", { maxWidth: 1920, tag: item.ParentBackdropImageTags[0] });
+    }
+    return null;
+  };
+
+  const youTubeId = (url) => /(?:v=|youtu\.be\/|embed\/)([\w-]{11})/.exec(url || "")?.[1] ?? null;
+
+  // Under the shrunken picture: the next title's still or backdrop, and a film's trailer (muted,
+  // looping, no controls) fading in over it once it has started, so YouTube's loading frame never
+  // shows. Reduced motion keeps the still.
+  const buildBackdrop = (next) => {
+    const still = stillFor(next);
+    const node = el("div", { class: "hera-post-backdrop", "aria-hidden": "true" }, [
+      still ? el("img", { class: "hera-post-backdrop__still", src: still, alt: "" }) : null,
+      el("div", { class: "hera-post-backdrop__scrim" }),
+    ]);
+    const trailer = next.kind === "film" && !reduceMotion.matches ? youTubeId(next.item.RemoteTrailers?.[0]?.Url) : null;
+    if (trailer) {
+      const query = new URLSearchParams({ autoplay: "1", mute: "1", controls: "0", loop: "1", playlist: trailer, playsinline: "1", rel: "0", modestbranding: "1", iv_load_policy: "3", disablekb: "1" });
+      const frame = el("iframe", {
+        class: "hera-post-backdrop__trailer",
+        src: `https://www.youtube-nocookie.com/embed/${trailer}?${query}`,
+        title: `${next.item.Name} trailer`,
+        allow: "autoplay; encrypted-media",
+        tabindex: "-1",
+        referrerpolicy: "strict-origin-when-cross-origin",
+      });
+      frame.addEventListener("load", () => setTimeout(() => frame.classList.add("is-on"), 1800), { once: true });
+      node.insertBefore(frame, node.lastChild);
+    }
+    return node;
+  };
+
+  const buildPost = (next) => {
+    const item = next.item;
+    const episode = next.kind === "episode";
+    const logo = logoFor(item);
+    const name = episode ? item.SeriesName || item.Name : item.Name;
+    const line = episode
+      ? [episodeCode(item), item.Name].filter(Boolean).join(" · ")
+      : [item.ProductionYear, (item.Genres || []).slice(0, 2).join(", "), runtime(item.RunTimeTicks)].filter(Boolean).join(" · ");
+    const primary = el("button", { class: "hera-pause__button hera-pause__button--primary hera-post__play", type: "button" }, [
+      el("span", { class: "hera-post__fill", "aria-hidden": "true" }),
+      icon("play_arrow"),
+      el("span", { text: episode ? "Play Next Episode" : "Play" }),
+    ]);
+    const credits = el("button", { class: "hera-pause__button hera-post__credits", type: "button", text: "Watch Credits" });
+    const frame = el("button", { class: "hera-post__frame", type: "button", "aria-label": "Watch Credits", title: "Watch Credits" });
+    primary.addEventListener("click", () => startNext(next));
+    credits.addEventListener("click", () => hidePost({ dismiss: true }));
+    frame.addEventListener("click", () => hidePost({ dismiss: true }));
+    return el("div", { class: "hera-post hera-dark", role: "dialog", "aria-label": episode ? "Next episode" : "Up next" }, [
+      frame,
+      el("div", { class: "hera-post__info" }, [
+        logo ? el("img", { class: "hera-pause__logo", src: logo, alt: name }) : el("h2", { class: "hera-pause__name", text: name }),
+        line ? el("p", { class: "hera-pause__line", text: line }) : null,
+        next.reason ? el("p", { class: "hera-post__reason", text: next.reason }) : null,
+        item.Overview ? el("p", { class: "hera-pause__overview", text: item.Overview }) : null,
+        el("div", { class: "hera-pause__actions" }, [primary, credits]),
+      ]),
+    ]);
+  };
+
+  const startNext = (next) => {
+    // Jellyfin's own Start Now keeps its queue; without it (no queue, or autoplay off) Hera plays it.
+    const startNow = next.kind === "episode" ? document.querySelector(".upNextDialog .btnStartNow") : null;
+    hidePost({ dismiss: true });
+    if (startNow) startNow.click();
+    else play(next.item).catch(() => {});
+  };
+
+  const autoplayOn = async () => {
+    if (post.autoplay === null) {
+      const user = await getJSON(`Users/${userId()}`).catch(() => null);
+      post.autoplay = user?.Configuration?.EnableNextEpisodeAutoPlay !== false;
+    }
+    return post.autoplay;
+  };
+
+  // The Play button fills as the episode runs out, ending as Jellyfin starts the next one.
+  const startCountdown = (fill) => {
+    const v = video();
+    const total = (post.item?.RunTimeTicks || 0) / 1e7;
+    if (!v || !total) return;
+    const from = Math.max(1, total - v.currentTime);
+    clearInterval(post.ticker);
+    post.ticker = setInterval(() => {
+      const left = Math.max(0, total - (video()?.currentTime ?? total));
+      fill.style.transform = `scaleX(${Math.min(1, 1 - left / from)})`;
+    }, 250);
+  };
+
+  const showPost = async () => {
+    const item = post.item;
+    if (!item || post.layer || post.opening || post.dismissed === item.Id) return;
+    post.opening = true;
+    const next = await (item.Type === "Episode" ? nextEpisode(item) : item.Type === "Movie" ? nextFilm(item) : Promise.resolve(null)).catch(() => null);
+    post.opening = false;
+    // Nothing to offer (a finale, a film with no match): leave the credits alone for this item.
+    if (!next) post.dismissed = item.Id;
+    if (!next || post.itemId !== item.Id || post.dismissed === item.Id || !post.page || post.page.classList.contains("hide")) return;
+    const frame = playerFrame();
+    if (!frame) return;
+    const backdrop = buildBackdrop(next);
+    const layer = buildPost(next);
+    post.backdrop = backdrop;
+    post.layer = layer;
+    // The backdrop goes in before the player, so the shrunken picture paints over it; the layer
+    // goes over everything, Jellyfin's page included.
+    document.body.insertBefore(backdrop, frame);
+    document.body.append(layer);
+    document.documentElement.classList.add("hera-postplay-on");
+    frame.classList.add("hera-postplay-video");
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        backdrop.classList.add("is-on");
+        layer.classList.add("is-on");
+      }),
+    );
+    layer.querySelector(".hera-post__play")?.focus({ preventScroll: true });
+    if (next.kind === "episode" && (await autoplayOn()) && post.layer === layer) startCountdown(layer.querySelector(".hera-post__fill"));
+  };
+
+  const hidePost = ({ dismiss = false } = {}) => {
+    if (dismiss && post.itemId) post.dismissed = post.itemId;
+    clearInterval(post.ticker);
+    document.documentElement.classList.remove("hera-postplay-on");
+    playerFrame()?.classList.remove("hera-postplay-video");
+    const { layer, backdrop } = post;
+    post.layer = null;
+    post.backdrop = null;
+    if (layer?.contains(document.activeElement)) document.activeElement.blur();
+    for (const node of [layer, backdrop]) {
+      if (!node) continue;
+      node.classList.remove("is-on");
+      setTimeout(() => node.remove(), 360);
+    }
+  };
+
+  // What is playing, learnt once per item: the session's item, its details and where its credits start.
+  const preparePost = () => {
+    if (post.preparing) return post.preparing;
+    post.preparing = (async () => {
+      const playing = await nowPlaying().catch(() => null);
+      const item = playing ? await loadDetails(playing.item.Id) : null;
+      if (!item || item.Id === post.itemId) return;
+      hidePost();
+      post.itemId = item.Id;
+      post.item = item;
+      post.creditsAt = item.Type === "Episode" || item.Type === "Movie" ? await creditsStart(item) : null;
+    })().finally(() => {
+      post.preparing = null;
+    });
+    return post.preparing;
+  };
+
+  const onPostTime = (event) => {
+    if (!(event.target instanceof HTMLVideoElement) || !post.page) return;
+    const v = event.target;
+    if (!post.item || post.stale) {
+      post.stale = false;
+      preparePost().catch(() => {});
+      return;
+    }
+    if (post.layer) {
+      // Rewound out of the credits: back to the programme.
+      if (post.creditsAt !== null && v.currentTime < post.creditsAt - 2) hidePost();
+      return;
+    }
+    if (post.dismissed === post.itemId) return;
+    const total = (post.item.RunTimeTicks || 0) / 1e7;
+    const inCredits = post.creditsAt !== null && v.currentTime >= post.creditsAt && (!total || v.currentTime < total - 1);
+    const upNext = post.item.Type === "Episode" && post.creditsAt === null && !!jellyfinUpNext();
+    if (inCredits || upNext) showPost().catch(() => {});
+  };
+
+  // A new stream means a new item, or the same one again: learn it afresh on the next tick.
+  const onPostReset = (event) => {
+    if (!(event.target instanceof HTMLVideoElement)) return;
+    if (event.type === "ended") return hidePost();
+    post.stale = true;
+  };
+
+  const onPostKey = (event) => {
+    const layer = post.layer;
+    if (!layer) return;
+    const buttons = [...layer.querySelectorAll(".hera-pause__button")];
+    const index = buttons.indexOf(document.activeElement);
+    if (["Escape", "Backspace", "GoBack", "BrowserBack"].includes(event.key)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hidePost({ dismiss: true });
+      return;
+    }
+    if (["ArrowLeft", "ArrowRight", "Tab"].includes(event.key)) {
+      const step = event.key === "ArrowLeft" || (event.key === "Tab" && event.shiftKey) ? -1 : 1;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      buttons[Math.min(buttons.length - 1, Math.max(0, index < 0 ? 0 : index + step))]?.focus();
+      return;
+    }
+    // Enter on a button is that button's; nothing else reaches Jellyfin's player keys meanwhile.
+    if (event.key !== "Enter" && event.key !== " ") event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  const bindPost = (page) => {
+    if (post.page === page) return;
+    unbindPost();
+    post.page = page;
+    post.stale = true;
+    const on = (target, type, fn, capture) => {
+      target.addEventListener(type, fn, capture);
+      post.cleanups.push(() => target.removeEventListener(type, fn, capture));
+    };
+    on(document, "timeupdate", onPostTime, true);
+    for (const type of ["loadstart", "emptied", "ended"]) on(document, type, onPostReset, true);
+    on(window, "keydown", onPostKey, true);
+  };
+
+  const unbindPost = () => {
+    hidePost();
+    post.cleanups.splice(0).forEach((fn) => fn());
+    Object.assign(post, { page: null, itemId: null, item: null, creditsAt: null, dismissed: null, autoplay: null });
+  };
+
   // ---------- lifecycle --------------------------------------------------------------------
-  // Two modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
-  // scheme must hold even when the pause screen has stood aside (light mode would otherwise put
-  // dark text on the picture).
+  // Three modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
+  // scheme must hold even when the pause screen or post-play has stood aside (light mode would
+  // otherwise put dark text on the picture).
 
   heraTv.register({
     name: "player",
@@ -459,14 +787,17 @@
       if (page?.id !== "videoOsdPage") {
         clearInterval(osd.timer);
         stopDark();
+        stopSkip();
         return;
       }
       startDark(page);
       followPlayer(page);
+      followSkip(page);
     },
     teardown() {
       clearInterval(osd.timer);
       stopDark();
+      stopSkip();
     },
   });
 
@@ -480,6 +811,17 @@
     },
     teardown() {
       unbindPause();
+    },
+  });
+
+  heraTv.register({
+    name: "postplay",
+    onView(page) {
+      if (page?.id === "videoOsdPage") bindPost(page);
+      else unbindPost();
+    },
+    teardown() {
+      unbindPost();
     },
   });
 })();

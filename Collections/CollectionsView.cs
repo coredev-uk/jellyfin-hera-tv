@@ -20,6 +20,13 @@ public interface ICollectionsView
     /// <summary>Gets today's home rows for this person, as <c>{ rows: [...] }</c>.</summary>
     object Rows(User user);
 
+    /// <summary>
+    /// Gets the film that follows <paramref name="itemId"/> in a franchise collection (the TMDb Box
+    /// Sets plugin's), skipping any already watched, as <c>{ id, collection }</c>; null when the film
+    /// is in none or is the last unwatched one.
+    /// </summary>
+    object? NextInCollection(User user, Guid itemId);
+
     /// <summary>Forgets what was cached, so the next read sees a new build.</summary>
     void Clear();
 }
@@ -167,6 +174,30 @@ internal sealed class CollectionsView(
         => [.. libraryManager.GetItemList(new InternalItemsQuery { IncludeItemTypes = [BaseItemKind.BoxSet], Recursive = true })
             .OfType<BoxSet>()
             .Where(b => b.IsVisible(user))];
+
+    // ---------- next in a collection ---------------------------------------------------------
+
+    public object? NextInCollection(User user, Guid itemId)
+    {
+        // Only the TMDb Box Sets plugin's franchises run in an order; Hera's own sets are groupings.
+        foreach (var set in VisibleBoxSets(user).Where(s => !CollectionBuilder.IsHera(s)))
+        {
+            var films = set.GetChildren(user, true, null)
+                .OfType<Movie>()
+                .OrderBy(f => f.PremiereDate ?? (f.ProductionYear is int year ? new DateTime(year, 1, 1) : DateTime.MaxValue))
+                .ToList();
+            var index = films.FindIndex(f => f.Id == itemId);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var next = films.Skip(index + 1).FirstOrDefault(f => !IsPlayed(user, f));
+            return next is null ? null : new { id = Plain(next.Id), collection = set.Name };
+        }
+
+        return null;
+    }
 
     // ---------- rows ------------------------------------------------------------------------
 

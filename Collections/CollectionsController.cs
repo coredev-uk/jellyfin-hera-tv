@@ -25,6 +25,11 @@ public class CollectionsController(ICollectionsView view, IUserManager userManag
     public IActionResult GetRows()
         => CurrentUser() is { } user ? Ok(view.Rows(user)) : Unauthorized();
 
+    /// <summary>Gets the next unwatched film after this one in its franchise, or 204 when there is none.</summary>
+    [HttpGet("next/{itemId}")]
+    public IActionResult GetNext([FromRoute] Guid itemId)
+        => CurrentUser() is not { } user ? Unauthorized() : view.NextInCollection(user, itemId) is { } next ? Ok(next) : NoContent();
+
     private User? CurrentUser()
     {
         var claim = User.FindFirst("Jellyfin-UserId")?.Value;
