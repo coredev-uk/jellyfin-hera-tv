@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "The volume popup (the wheel or a volume key in the player) is a glass capsule with a white level, like the rest of the player. In post-play the wheel turns the trailer up and down with the same popup, the trailer's sound control is drawn like the player's own, and the trailer plays once: when it ends, the film's artwork takes the screen.",
+  "changelog": "A title's meta line is tidier: the certificate reads as the board writes it (15, not GB-15) in its own outlined badge between the line's dots, Rotten Tomatoes scores carry the tomato or splat and the popcorn bucket instead of boxed labels and thumbs, and the scores sit in the line's own grey. A post-play trailer starts at half volume, scaled to the player's own volume.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-19T00:00:00.0000000Z",
-  "version": "1.10.2.0",
+  "timestamp": "2026-11-19T00:10:00.0000000Z",
+  "version": "1.10.3.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

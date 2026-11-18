@@ -1094,21 +1094,21 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   border-radius: 0;
   font-size: 14px;
 }
-.itemMiscInfo .mediaInfoItem:not(.mediaInfoOfficialRating):not(:last-child)::after {
+.itemMiscInfo .mediaInfoItem:not(:last-child)::after {
   content: "·";
   margin-left: 10px;
   color: var(--hera-label-3);
 }
+/* The certificate is the badge hera-tv.js puts inside Jellyfin's item; the item stays plain text,
+ * so the line's separator dot sits outside the box. */
 .mediaInfoOfficialRating,
 .mediaInfoText.mediaInfoOfficialRating {
-  border: 1px solid var(--hera-label-3) !important;
-  border-radius: var(--hera-r-badge) !important;
-  padding: 0 5px !important;
-  font-size: 11px !important;
-  font-weight: 700 !important;
-  line-height: 18px;
-  color: var(--hera-label-2) !important;
+  border: 0 !important;
+  padding: 0 !important;
   background: none !important;
+}
+.mediaInfoOfficialRating .hera-badge {
+  vertical-align: 1px;
 }
 .mediaInfoCriticRating {
   background-size: 15px !important;

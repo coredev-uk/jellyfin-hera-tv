@@ -531,7 +531,29 @@
 
   const ratingText = (value) => `${value}%`;
 
-  const stateIcon = (fresh) => el("span", { class: "material-icons hera-rating__state", "aria-hidden": "true", text: fresh ? "thumb_up" : "thumb_down" });
+  // Rotten Tomatoes' own marks, drawn in one colour on a 24-unit grid: the Tomatometer's tomato
+  // (fresh) or splat (rotten), the Popcornmeter's bucket upright and full or tipped over with its
+  // popcorn spilled.
+  const BUCKET = "M4.4 11h15.2v2.2H4.4zM5 13.8h3.4l.6 8.2H6.4zM10.3 13.8h3.4l-.2 8.2h-3zM15.6 13.8H19l-1.4 8.2H15z";
+  const GLYPHS = {
+    fresh: [{ d: "M12 5.6c4.9 0 8.8 3.4 8.8 7.9S16.9 21.6 12 21.6s-8.8-3.6-8.8-8.1S7.1 5.6 12 5.6zM12 6.18L13 8.55L16.95 8.4L13.62 9.73L15.06 12.01L12 10.45L8.94 12.01L10.38 9.73L7.05 8.4L11 8.55z", "fill-rule": "evenodd" }],
+    rotten: [{ d: "M12.4 3.6l1.6 4.2 3.6-2.7-.9 4.4 4.5.2-3.7 2.6 3.4 2.9-4.5.3 1.3 4.3-3.8-2.4-.9 4.4-2.1-4-3.1 3.3.2-4.5-4.4 1 2.6-3.6L2.2 12l4.3-1.3-2.4-3.8 4.3 1.4z" }],
+    upright: [{ d: "M5 10.2a2.6 2.6 0 0 1 1.1-4.8a2.5 2.5 0 0 1 3.6-3a2.7 2.7 0 0 1 4.6 0a2.5 2.5 0 0 1 3.6 3A2.6 2.6 0 0 1 19 10.2z" }, { d: BUCKET }],
+    spilled: [{ d: BUCKET, transform: "translate(3 -1) rotate(-100 12 16)" }, { d: "M3 18.5a2.1 2.1 0 1 1 0 4.2a2.1 2.1 0 1 1 0-4.2zM7.4 20a1.6 1.6 0 1 1 0 3.2a1.6 1.6 0 1 1 0-3.2zM3.8 14.1a1.7 1.7 0 1 1 0 3.4a1.7 1.7 0 1 1 0-3.4z" }],
+  };
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const glyph = (name) => {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "hera-rating__icon");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    for (const attrs of GLYPHS[name]) {
+      const path = document.createElementNS(SVG_NS, "path");
+      for (const [key, value] of Object.entries(attrs)) path.setAttribute(key, value);
+      svg.append(path);
+    }
+    return svg;
+  };
 
   const ratingsNode = (ratings) => {
     const parts = [];
@@ -539,7 +561,7 @@
       const votes = ratings.imdb.votes ? ` from ${ratings.imdb.votes.toLocaleString()} votes` : "";
       parts.push(
         el("span", { class: "hera-rating", title: `IMDb rating ${ratings.imdb.score.toFixed(1)}${votes}`, "aria-label": `IMDb rating ${ratings.imdb.score.toFixed(1)} out of 10` }, [
-          el("span", { class: "hera-mark", "aria-hidden": "true", text: "IMDb" }),
+          el("span", { class: "hera-rating__mark", "aria-hidden": "true", text: "IMDb" }),
           el("span", { text: ratings.imdb.score.toFixed(1) }),
         ]),
       );
@@ -548,8 +570,7 @@
     if (rt?.critics) {
       parts.push(
         el("span", { class: "hera-rating", title: `Rotten Tomatoes critics ${ratingText(rt.critics.score)}, ${rt.critics.fresh ? "fresh" : "rotten"}`, "aria-label": `Rotten Tomatoes critics ${ratingText(rt.critics.score)}, ${rt.critics.fresh ? "fresh" : "rotten"}` }, [
-          el("span", { class: "hera-mark", "aria-hidden": "true", text: "RT" }),
-          stateIcon(rt.critics.fresh),
+          glyph(rt.critics.fresh ? "fresh" : "rotten"),
           el("span", { text: ratingText(rt.critics.score) }),
         ]),
       );
@@ -557,8 +578,7 @@
     if (rt?.audience) {
       parts.push(
         el("span", { class: "hera-rating", title: `Rotten Tomatoes audience ${ratingText(rt.audience.score)}, ${rt.audience.fresh ? "upright" : "spilled"}`, "aria-label": `Rotten Tomatoes audience ${ratingText(rt.audience.score)}, ${rt.audience.fresh ? "upright" : "spilled"}` }, [
-          el("span", { class: "hera-mark", "aria-hidden": "true", text: "RT Audience" }),
-          stateIcon(rt.audience.fresh),
+          glyph(rt.audience.fresh ? "upright" : "spilled"),
           el("span", { text: ratingText(rt.audience.score) }),
         ]),
       );
