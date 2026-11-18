@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.10.2.0",
+        "changelog": "The volume popup (the wheel or a volume key in the player) is a glass capsule with a white level, like the rest of the player. In post-play the wheel turns the trailer up and down with the same popup, the trailer's sound control is drawn like the player's own, and the trailer plays once: when it ends, the film's artwork takes the screen.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.10.2.0/hera-tv_1.10.2.0.zip",
+        "checksum": "9a33f28d738a4296c2bdcb3dd714de0f",
+        "timestamp": "2026-11-18T19:58:56Z"
+      },
+      {
         "version": "1.10.1.0",
         "changelog": "Post-play fixes: Play and Play Next Episode now start the next title (by the server's PlayNow, which also stopped working after a server restart until the page was reloaded). A film's trailer now plays with sound as the credits' music fades out, with mute and volume at the lower right, and after 30 seconds the credits leave the screen. A back arrow at the top left leaves the player.\n",
         "targetAbi": "12.4.0.0",
