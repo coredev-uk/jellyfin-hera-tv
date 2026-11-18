@@ -17,7 +17,7 @@
     <PackageReference Include="Jellyfin.Controller" Version="12.4.0" ExcludeAssets="runtime" />
     <PackageReference Include="Jellyfin.Model" Version="12.4.0" ExcludeAssets="runtime" />
     <!-- Reads Playback Reporting's database and keeps Hera's own samples. The server ships this assembly, with SQLitePCLRaw's e_sqlite3 behind it. -->
-    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.15" ExcludeAssets="runtime" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
