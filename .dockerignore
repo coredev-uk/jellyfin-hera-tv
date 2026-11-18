@@ -4,3 +4,7 @@ obj/
 DESIGN.md
 PRODUCT.md
 .impeccable/
+.github/
+.renovaterc.json5
+README.md
+assets/

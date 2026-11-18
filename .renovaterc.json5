@@ -1,0 +1,58 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":timezone(Europe/London)",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests",
+  ],
+  // A merge here only builds ghcr.io/coredev-uk/jellyfin-hera-tv:<sha>; what runs is pinned by
+  // digest in home-ops, so nothing Renovate merges reaches the server on its own.
+  automerge: false,
+  rebaseWhen: "conflicted",
+  prHourlyLimit: 4,
+  prConcurrentLimit: 10,
+  dependencyDashboardTitle: "📦 Renovate Dashboard",
+  // The project file's NuGet packages, the Containerfile's base images and the workflow actions
+  enabledManagers: ["nuget", "dockerfile", "github-actions"],
+  packageRules: [
+    {
+      description: "Let minor and patch releases settle before proposing them",
+      matchUpdateTypes: ["minor", "patch"],
+      minimumReleaseAge: "3 days",
+      // Container registries publish no release timestamp: without this, Renovate holds
+      // every image update as pending forever instead of proposing it.
+      minimumReleaseAgeBehaviour: "timestamp-optional",
+    },
+    {
+      // The plugin builds against the Jellyfin server it runs in. These move together, and only
+      // when home-ops moves the server: bump meta.json's targetAbi in the same pull request.
+      description: "Jellyfin packages, in step with the server",
+      groupName: "jellyfin",
+      matchPackageNames: ["Jellyfin.Controller", "Jellyfin.Model"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // The SDK image must stay on the major the project targets (net10.0).
+      description: ".NET SDK stays on the project's target framework",
+      matchPackageNames: ["mcr.microsoft.com/dotnet/sdk"],
+      allowedVersions: "/^10\\./",
+    },
+    {
+      matchUpdateTypes: ["major"],
+      addLabels: ["type/major"],
+    },
+    {
+      matchUpdateTypes: ["minor"],
+      addLabels: ["type/minor"],
+    },
+    {
+      matchUpdateTypes: ["patch"],
+      addLabels: ["type/patch"],
+    },
+    {
+      matchUpdateTypes: ["digest"],
+      addLabels: ["type/digest"],
+    },
+  ],
+}
