@@ -731,6 +731,7 @@
     updateCard,
     mountTitle,
     fetchRequests,
+    fetchTitle,
     keyOf,
     rankOf,
     hash: REQUESTS_HASH,

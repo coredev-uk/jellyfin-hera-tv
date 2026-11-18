@@ -56,6 +56,8 @@
   const fetchTitle = (mediaType, tmdbId) =>
     cached(`title:${mediaType}:${tmdbId}`, () => kit.hera(`discover/titles/${mediaType}/${tmdbId}`), 60 * 1000);
   const searchTitles = (query, page = 1) => kit.hera("discover/search", { query: { query, page } });
+  const qualitiesFor = (mediaType) =>
+    cached(`qualities:${mediaType === "tv" ? "tv" : "movie"}`, () => kit.hera(`discover/qualities/${mediaType === "tv" ? "tv" : "movie"}`), 10 * 60 * 1000);
 
   const errorStatus = (error) => error?.status ?? error?.response?.status ?? null;
   const errorMessage = async (error) => {
@@ -69,11 +71,58 @@
 
   // ---------- cards ---------------------------------------------------------------------
 
+  // Seerr says "Processing" for everything between approved and here. Where the download stack
+  // knows better (the person's own requests, as the home page's Your Requests row shows them) its
+  // word is used: "Awaiting Release", "Downloading", "Searching". A title still to come out reads
+  // Awaiting Release even without it.
   const BADGES = { partial: "Partly Available", processing: "Processing", pending: "Requested" };
+  const liveLabels = new Map();
+  const unreleased = (item) => !!item.releaseDate && new Date(`${item.releaseDate}T00:00:00`) > new Date();
   const badgeOf = (item) => {
     const status = statusOf(item);
     if (status === "available") return item.jellyfinId ? "In Library" : "Available";
+    if (status === "none") return null;
+    const live = liveLabels.get(keyOf(item));
+    if (live) return live;
+    if (status === "processing" && unreleased(item)) return "Awaiting Release";
     return BADGES[status] ?? null;
+  };
+
+  // Each title on screen that Seerr calls requested or processing is looked up with the download
+  // stack (a few at a time, once per visit), and its card redrawn with what that says.
+  const liveQueue = { keys: new Set(), waiting: [], running: 0 };
+  const LIVE_AT_ONCE = 3;
+  const IN_FLIGHT = new Set(["pending", "processing", "partial"]);
+
+  const pumpLive = () => {
+    const activity = HT.activity;
+    while (activity && liveQueue.running < LIVE_AT_ONCE && liveQueue.waiting.length) {
+      const item = liveQueue.waiting.shift();
+      liveQueue.running++;
+      activity
+        .fetchTitle(item.mediaType, item.tmdbId)
+        .then((reply) => {
+          const found = reply?.activity ? activity.describe(reply.activity) : null;
+          if (!found || found.final) return;
+          liveLabels.set(keyOf(item), found.label);
+          refreshCards(keyOf(item));
+        })
+        .catch(() => {})
+        .finally(() => {
+          liveQueue.running--;
+          pumpLive();
+        });
+    }
+  };
+
+  const askLive = (item) => {
+    if (!IN_FLIGHT.has(statusOf(item)) || liveQueue.keys.has(keyOf(item))) return;
+    liveQueue.keys.add(keyOf(item));
+    kit.integrations().then((ints) => {
+      if (!HT.activity?.activityOn(ints)) return;
+      liveQueue.waiting.push(item);
+      pumpLive();
+    });
   };
 
   const kindOf = (item) => (item.mediaType === "tv" ? "TV Show" : "Film");
@@ -91,13 +140,18 @@
       badgeTone: statusOf(item) === "available" ? "light" : undefined,
     });
     card.dataset.heraKey = keyOf(item);
+    askLive(item);
     card.heraItem = item;
     return card;
   };
 
-  // A request changes a title's status everywhere it is on screen.
+  // A request changes a title's status everywhere it is on screen: card badges, and the feature's
+  // primary button.
   const refreshCards = (key) => {
-    for (const card of document.querySelectorAll(`[data-hera-key="${CSS.escape(key)}"]`)) {
+    for (const slide of document.querySelectorAll(`.hera-discover__feature-slide[data-hera-key="${CSS.escape(key)}"]`)) {
+      slide.querySelector(".hera-hero__actions .hera-btn--primary")?.replaceWith(primaryButton(slide.heraItem));
+    }
+    for (const card of document.querySelectorAll(`.hera-card[data-hera-key="${CSS.escape(key)}"]`)) {
       const art = card.querySelector(".hera-card__art");
       if (!art || !card.heraItem) continue;
       art.querySelector(".hera-card__badge")?.remove();
@@ -171,6 +225,19 @@
       busy: false,
       notice: null,
       live: false,
+      // The resolutions this person may request in ("1080p", "4K"), and the one picked.
+      qualities: [],
+      quality: null,
+    };
+
+    const loadQualities = async () => {
+      if (!ctx.linked) return;
+      const reply = await qualitiesFor(item.mediaType).catch(() => null);
+      const list = reply?.qualities ?? [];
+      if (closed || list.length < 2) return;
+      ctx.qualities = list;
+      ctx.quality = (list.find((q) => q.isDefault) ?? list[0]).profileId;
+      paintActions();
     };
 
     const opener = options.opener ?? document.activeElement;
@@ -252,17 +319,20 @@
         d?.genres?.length ? el("span", { text: d.genres.slice(0, 3).join(", ") }) : null,
         d?.certification ? el("span", { class: "hera-badge", text: d.certification }) : null,
       ].filter(Boolean);
+      // replaceChildren writes a missing part as the text "null", so the parts are filtered first.
       body.replaceChildren(
-        el("h2", { class: "hera-sheet__title", text: current.title || "" }),
-        meta.length ? el("p", { class: "hera-sheet__meta" }, meta) : null,
-        activityBox,
-        // TMDB sometimes stores the word "null" as a title's tagline.
-        d?.tagline && d.tagline !== "null" ? el("p", { class: "hera-sheet__tagline", text: d.tagline }) : null,
-        current.overview ? el("p", { class: "hera-sheet__overview", text: current.overview }) : null,
-        actions,
-        externalBox,
-        seasonsBox,
-        castBox,
+        ...[
+          el("h2", { class: "hera-sheet__title", text: current.title || "" }),
+          meta.length ? el("p", { class: "hera-sheet__meta" }, meta) : null,
+          activityBox,
+          // TMDB sometimes stores the word "null" as a title's tagline.
+          d?.tagline && d.tagline !== "null" ? el("p", { class: "hera-sheet__tagline", text: d.tagline }) : null,
+          current.overview ? el("p", { class: "hera-sheet__overview", text: current.overview }) : null,
+          actions,
+          externalBox,
+          seasonsBox,
+          castBox,
+        ].filter(Boolean),
       );
       if (!d) body.append(el("p", { class: "hera-sheet__loading", role: "status", text: "Loading…" }));
     };
@@ -402,22 +472,26 @@
           );
         }
 
+        // The quality picker rides beside whichever Request button is shown.
+        const withQuality = (button) => (ctx.qualities.length ? [button, qualityPicker()] : [button]);
         if (ctx.requestable) {
           if (isTv) {
             const pickedNumbers = selectableSeasons().filter((season) => ctx.selected.has(season.seasonNumber)).map((season) => season.seasonNumber);
             const picked = pickedNumbers.length;
             if (selectableSeasons().length && ctx.linked) {
               buttons.push(
-                el(
-                  "button",
-                  {
-                    type: "button",
-                    class: `hera-btn ${current.jellyfinId ? "hera-btn--glass hera-btn--text" : "hera-btn--primary"} hera-sheet__request`,
-                    disabled: ctx.busy || !picked,
-                    "aria-busy": ctx.busy ? "true" : null,
-                    onclick: () => submit(),
-                  },
-                  [icon(ctx.busy ? "hourglass_top" : "add"), ctx.busy ? "Requesting…" : picked ? `Request ${seriesText(pickedNumbers)}` : "Request"],
+                ...withQuality(
+                  el(
+                    "button",
+                    {
+                      type: "button",
+                      class: `hera-btn ${current.jellyfinId ? "hera-btn--glass hera-btn--text" : "hera-btn--primary"} hera-sheet__request`,
+                      disabled: ctx.busy || !picked,
+                      "aria-busy": ctx.busy ? "true" : null,
+                      onclick: () => submit(),
+                    },
+                    [icon(ctx.busy ? "hourglass_top" : "add"), ctx.busy ? "Requesting…" : picked ? `Request ${seriesText(pickedNumbers)}` : "Request"],
+                  ),
                 ),
               );
             } else if (selectableSeasons().length && !ctx.linked) {
@@ -428,16 +502,18 @@
           } else if (status === "none") {
             if (ctx.linked) {
               buttons.push(
-                el(
-                  "button",
-                  {
-                    type: "button",
-                    class: "hera-btn hera-btn--primary hera-sheet__request",
-                    disabled: ctx.busy,
-                    "aria-busy": ctx.busy ? "true" : null,
-                    onclick: () => submit(),
-                  },
-                  [icon(ctx.busy ? "hourglass_top" : "add"), ctx.busy ? "Requesting…" : "Request"],
+                ...withQuality(
+                  el(
+                    "button",
+                    {
+                      type: "button",
+                      class: "hera-btn hera-btn--primary hera-sheet__request",
+                      disabled: ctx.busy,
+                      "aria-busy": ctx.busy ? "true" : null,
+                      onclick: () => submit(),
+                    },
+                    [icon(ctx.busy ? "hourglass_top" : "add"), ctx.busy ? "Requesting…" : "Request"],
+                  ),
                 ),
               );
             } else {
@@ -470,6 +546,41 @@
       actions.replaceChildren(el("div", { class: "hera-sheet__buttons" }, buttons), ...extras);
     };
 
+    // A capsule of the resolutions on offer, as the Collections page's Groups | All switch is drawn:
+    // the picked one is the white pill. Arrow keys move along it as a radio group.
+    const qualityPicker = () => {
+      const options = ctx.qualities.map((q) =>
+        el("button", {
+          type: "button",
+          class: "hera-sheet__quality-option",
+          role: "radio",
+          "aria-checked": String(q.profileId === ctx.quality),
+          tabindex: q.profileId === ctx.quality ? "0" : "-1",
+          disabled: ctx.busy,
+          text: q.label,
+          onclick: () => pickQuality(q.profileId),
+        }),
+      );
+      const group = el("div", { class: "hera-sheet__quality", role: "radiogroup", "aria-label": "Quality" }, options);
+      group.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const index = ctx.qualities.findIndex((q) => q.profileId === ctx.quality);
+        const next = ctx.qualities[index + (event.key === "ArrowRight" ? 1 : -1)];
+        if (!next) return;
+        event.preventDefault();
+        event.stopPropagation();
+        pickQuality(next.profileId, true);
+      });
+      return group;
+    };
+
+    const pickQuality = (profileId, keyboard = false) => {
+      if (ctx.busy || ctx.quality === profileId) return;
+      ctx.quality = profileId;
+      paintActions();
+      if (keyboard) actions.querySelector('.hera-sheet__quality-option[aria-checked="true"]')?.focus({ preventScroll: true });
+    };
+
     // Repainting replaces the focused control; keep focus inside the sheet.
     const keepFocus = () => {
       if (dialog.contains(document.activeElement) && document.activeElement !== dialog) return;
@@ -484,6 +595,7 @@
       if (ctx.busy) return;
       const current = info();
       const body = { mediaType: item.mediaType, tmdbId: item.tmdbId };
+      if (ctx.qualities.length && ctx.quality) body.profileId = ctx.quality;
       let picked = [];
       if (isTv) {
         picked = selectableSeasons()
@@ -566,6 +678,7 @@
     paintActions();
     document.body.append(dialog);
     dialog.showModal();
+    loadQualities().catch(() => {});
     // The download stack's word on where a request stands replaces Seerr's "Processing" pill.
     if (HT.activity?.titleInfoOn(ints)) {
       activityLine = HT.activity.mountTitle(activityBox, {
@@ -620,18 +733,34 @@
         "In Library",
       ]);
     }
-    const label = status === "none" ? "Request" : (STATUS_TEXT[status] ?? "Request");
+    const label = status === "none" ? "Request" : (badgeOf(item) ?? STATUS_TEXT[status] ?? "Request");
+    const glyph = status === "none" ? "add" : label === "Awaiting Release" ? "event" : (STATUS_ICON[status] ?? "check_circle");
     return el(
       "button",
       { type: "button", class: "hera-btn hera-btn--primary", onclick: (event) => openTitle(item, { opener: event.currentTarget }) },
-      [icon(status === "none" ? "add" : (STATUS_ICON[status] ?? "check_circle")), label],
+      [icon(glyph), label],
     );
   };
 
-  const buildFeature = (item) => {
-    const meta = [kindOf(item), item.year, item.rating ? `${item.rating.toFixed(1)} rating` : null].filter(Boolean);
-    const box = el("section", { class: "hera-discover__feature", "aria-label": item.title }, [
-      el("img", { class: "hera-discover__feature-art", src: item.backdrop, alt: "" }),
+  // The feature: what is trending this week that the library doesn't have, the way the Apple TV
+  // app's Watch Now leads with what's new to it. Up to six titles take turns in the card, with the
+  // home hero's pager (8 s each, held while the pointer or focus is on the card, paused for reduced
+  // motion). Each says why it is here ("Trending Now"), when it comes out if it hasn't yet, where a
+  // request for it stands, and offers its trailer once the title's details have loaded.
+  const FEATURED = 6;
+  const FEATURE_MS = 8000;
+
+  const longDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+  const featureSlide = (item) => {
+    const when = unreleased(item) ? `Out ${longDate(item.releaseDate)}` : item.year;
+    const meta = ["Trending Now", kindOf(item), when, item.rating ? `${item.rating.toFixed(1)} rating` : null].filter(Boolean);
+    const trailer = el("a", { class: "hera-btn hera-btn--glass hera-btn--text", target: "_blank", rel: "noopener noreferrer", hidden: true }, [
+      icon("smart_display"),
+      "Trailer",
+    ]);
+    const slide = el("div", { class: "hera-discover__feature-slide", "aria-label": item.title, "data-hera-key": keyOf(item) }, [
+      el("img", { class: "hera-discover__feature-art", src: item.backdrop, alt: "", loading: "lazy", decoding: "async" }),
       el("div", { class: "hera-discover__feature-body" }, [
         el("h2", { class: "hera-discover__feature-title", text: item.title }),
         el("p", { class: "hera-hero__meta" }, meta.map((text) => el("span", { text }))),
@@ -643,9 +772,100 @@
             { type: "button", class: "hera-btn hera-btn--glass hera-btn--text", onclick: (event) => openTitle(item, { opener: event.currentTarget }) },
             [icon("info_outline"), "More Info"],
           ),
+          trailer,
         ]),
       ]),
     ]);
+    slide.heraItem = item;
+    slide.heraTrailer = trailer;
+    return slide;
+  };
+
+  const buildFeature = (items, signal) => {
+    const slides = items.map(featureSlide);
+    const dots = items.map((item, i) =>
+      el("button", { type: "button", role: "tab", class: "hera-hero__dot", "aria-label": item.title, "aria-selected": "false", onclick: () => show(i, true) }),
+    );
+    const toggle = el("button", { type: "button", class: "hera-btn hera-btn--glass hera-hero__toggle", "aria-label": "Pause featured titles", onclick: () => setPaused(!paused) }, icon("pause"));
+    const paddle = (step, label, glyph) =>
+      el("button", { type: "button", class: "hera-hero__paddle", tabindex: "-1", "aria-label": label, onclick: () => show(index + step, true) }, icon(glyph));
+    const box = el("section", { class: "hera-discover__feature", "aria-roledescription": "carousel", "aria-label": "Trending now" }, [
+      el("div", { class: "hera-discover__feature-slides", "aria-live": "off" }, slides),
+      items.length > 1
+        ? el("div", { class: "hera-hero__controls hera-discover__controls" }, [
+            paddle(-1, "Previous title", "chevron_left"),
+            el("div", { class: "hera-hero__pager", role: "tablist", "aria-label": "Trending titles" }, dots),
+            paddle(1, "Next title", "chevron_right"),
+            toggle,
+          ])
+        : null,
+    ]);
+
+    let index = 0;
+    let elapsed = 0;
+    let last = 0;
+    let paused = false;
+    const holds = new Set();
+    const setPaused = (value) => {
+      paused = value;
+      toggle.setAttribute("aria-label", value ? "Play featured titles" : "Pause featured titles");
+      toggle.querySelector(".material-icons").textContent = value ? "play_arrow" : "pause";
+    };
+    // The trailer button appears once the title's details say it has one.
+    const loadTrailer = (slide) => {
+      if (slide.heraTrailerLoaded) return;
+      slide.heraTrailerLoaded = true;
+      fetchTitle(slide.heraItem.mediaType, slide.heraItem.tmdbId)
+        .then((details) => {
+          if (!details?.trailer || signal.aborted) return;
+          slide.heraTrailer.href = details.trailer;
+          slide.heraTrailer.hidden = false;
+        })
+        .catch(() => {});
+    };
+    const show = (target, fromUser = false) => {
+      index = (target + slides.length) % slides.length;
+      elapsed = 0;
+      slides.forEach((slide, i) => {
+        slide.classList.toggle("is-active", i === index);
+        slide.toggleAttribute("inert", i !== index);
+      });
+      dots.forEach((dot, i) => {
+        dot.setAttribute("aria-selected", String(i === index));
+        dot.style.removeProperty("--hera-progress");
+      });
+      if (fromUser && document.activeElement?.classList.contains("hera-hero__dot")) dots[index].focus();
+      loadTrailer(slides[index]);
+      const next = slides[(index + 1) % slides.length]?.querySelector("img");
+      if (next) next.loading = "eager";
+    };
+    const tick = (now) => {
+      if (signal.aborted || (last && !box.isConnected)) return;
+      const dt = last ? Math.min(now - last, 100) : 0;
+      last = now;
+      if (slides.length > 1 && !paused && holds.size === 0 && !document.hidden) {
+        elapsed += dt;
+        if (elapsed >= FEATURE_MS) show(index + 1);
+        else dots[index]?.style.setProperty("--hera-progress", (elapsed / FEATURE_MS).toFixed(4));
+      }
+      requestAnimationFrame(tick);
+    };
+    box.addEventListener("pointerenter", () => holds.add("hover"));
+    box.addEventListener("pointerleave", () => holds.delete("hover"));
+    box.addEventListener("focusin", () => holds.add("focus"));
+    box.addEventListener("focusout", (event) => {
+      if (!box.contains(event.relatedTarget)) holds.delete("focus");
+    });
+    box.addEventListener("keydown", (event) => {
+      if ((event.key === "ArrowRight" || event.key === "ArrowLeft") && event.target.closest(".hera-hero__pager")) {
+        event.preventDefault();
+        event.stopPropagation();
+        show(index + (event.key === "ArrowRight" ? 1 : -1), true);
+      }
+    });
+    show(0);
+    if (kit.reduceMotion.matches) setPaused(true);
+    requestAnimationFrame(tick);
     return box;
   };
 
@@ -703,14 +923,18 @@
     kit.integrations().then((ints) => {
       if (!signal.aborted && HT.activity?.requestsAvailable(ints)) requestsLink.hidden = false;
     });
+    // The page's header row, where every library page has its title and tools: "Discover" at the
+    // left, the search field and Requests at the right, level with it.
     const search = el("div", { class: "hera-discover__search" }, [
-      el("div", { class: "hera-discover__field", role: "search" }, [icon("search"), input, clear]),
-      requestsLink,
+      el("h1", { class: "hera-discover__title", text: "Discover" }),
+      el("div", { class: "hera-discover__tools" }, [el("div", { class: "hera-discover__field", role: "search" }, [icon("search"), input, clear]), requestsLink]),
     ]);
     const featureSlot = el("div", { class: "hera-discover__feature-slot" });
     const rows = el("div", { class: "hera-discover__rows" });
     const results = el("div", { class: "hera-discover__results", hidden: true });
     const rootEl = el("div", { class: "hera-discover", "data-hera-discover": "" }, [search, featureSlot, rows, results]);
+    // Each visit asks the download stack afresh.
+    liveQueue.keys.clear();
 
     // Rows in a fixed order, each arriving as soon as its list does.
     const slots = LISTS.map((def) => {
@@ -725,9 +949,10 @@
           if (signal.aborted || !data?.results?.length) return;
           slots[index].replaceChildren(buildRow(def, data));
           if (def.name === "trending" && !featureSlot.firstChild) {
-            // A feature worth discovering: one the library doesn't already have.
-            const lead = data.results.find((item) => item.backdrop && !item.jellyfinId) ?? data.results.find((item) => item.backdrop);
-            if (lead) featureSlot.replaceChildren(buildFeature(lead));
+            // Features worth discovering: ones the library doesn't already have.
+            const fresh = data.results.filter((item) => item.backdrop && !item.jellyfinId).slice(0, FEATURED);
+            const leads = fresh.length ? fresh : data.results.filter((item) => item.backdrop).slice(0, 1);
+            if (leads.length) featureSlot.replaceChildren(buildFeature(leads, signal));
           }
         })
         .catch((error) => {
@@ -755,7 +980,7 @@
         landed = true;
         return;
       }
-      const target = rootEl.querySelector(".hera-discover__feature .hera-btn--primary") ?? rootEl.querySelector(".hera-card");
+      const target = rootEl.querySelector(".hera-discover__feature-slide.is-active .hera-btn--primary") ?? rootEl.querySelector(".hera-card");
       if (!target) return;
       if (active === input) input.blur();
       target.focus({ preventScroll: true });

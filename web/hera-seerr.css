@@ -106,7 +106,7 @@
 .layout-tv .hera-person-role {
   font-size: 22px;
 }
-.hera-more {
+.hera-readmore {
   display: inline-block;
   margin: 6px 0 0;
   padding: 4px 0;
@@ -117,15 +117,15 @@
   font: 600 15px/1.3 var(--hera-font);
   cursor: pointer;
 }
-.hera-more:hover {
+.hera-readmore:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.hera-more:focus-visible {
+.hera-readmore:focus-visible {
   outline: 2px solid var(--hera-focus);
   outline-offset: 3px;
 }
-.layout-tv .hera-more {
+.layout-tv .hera-readmore {
   font-size: 19px;
 }
 .hera-detail-overview.is-open {

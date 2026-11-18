@@ -727,6 +727,30 @@ h3 {
 .cardOverlayButton-br > button:not([data-action="menu"]) {
   display: none !important;
 }
+/* The menu matches Hera's own card "more" button: a 32px disc of three dots across, set 8px in
+ * from the artwork's top right corner, clear of the quality chips at the foot. */
+.cardOverlayButton-br {
+  top: 8px !important;
+  right: 8px !important;
+  bottom: auto !important;
+  left: auto !important;
+  padding: 0 !important;
+}
+.cardOverlayButton-br > button[data-action="menu"] {
+  width: 32px;
+  height: 32px;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cardOverlayButton-br > button[data-action="menu"] .cardOverlayButtonIcon {
+  font-size: 20px !important;
+}
+.cardOverlayButton-br > button[data-action="menu"] .more_vert::before {
+  content: "\e5d3";
+}
 
 .cardText {
   text-align: left !important;

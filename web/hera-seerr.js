@@ -74,9 +74,9 @@
 
   // A biography is clamped to three lines; "More" opens it, only when something is hidden.
   const addMore = (text) => {
-    if (text.nextElementSibling?.classList.contains("hera-more")) return;
+    if (text.nextElementSibling?.classList.contains("hera-readmore")) return;
     if (text.scrollHeight <= text.clientHeight + 1) return;
-    const button = el("button", { type: "button", class: "hera-more", "aria-expanded": "false", text: "More" });
+    const button = el("button", { type: "button", class: "hera-readmore", "aria-expanded": "false", text: "More" });
     button.addEventListener("click", () => {
       const open = text.classList.toggle("is-open");
       button.setAttribute("aria-expanded", String(open));
@@ -638,7 +638,7 @@
     page.dataset.heraSeerrItem = itemId || "";
     stopStockWatch();
     page.querySelectorAll("[data-hera-seerr]").forEach((node) => node.remove());
-    page.querySelectorAll(".hera-person-role, .hera-more").forEach((node) => node.remove());
+    page.querySelectorAll(".hera-person-role, .hera-readmore").forEach((node) => node.remove());
     page.querySelectorAll(".hera-seerr-covered").forEach((node) => node.classList.remove("hera-seerr-covered"));
   };
 
@@ -684,7 +684,7 @@
       stopStockWatch();
       bioWatch.observer?.disconnect();
       clearTimeout(bioWatch.timer);
-      document.querySelectorAll("[data-hera-seerr], .hera-person-role, .hera-more").forEach((node) => node.remove());
+      document.querySelectorAll("[data-hera-seerr], .hera-person-role, .hera-readmore").forEach((node) => node.remove());
       document.querySelectorAll(".hera-seerr-covered").forEach((node) => node.classList.remove("hera-seerr-covered"));
       cleanups.splice(0).forEach((fn) => fn());
     },

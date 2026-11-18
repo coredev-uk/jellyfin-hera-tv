@@ -158,7 +158,7 @@ public class CompatibilityController(IServerApplicationHost applicationHost, IUs
     /// The module names web/*.js register (and "core"). Only these are kept, so a signed-in user
     /// can't fill the store with invented names; a new module is added here with its script.
     /// </summary>
-    private static readonly string[] KnownModules = ["core", "home", "discover", "player", "pause", "settings", "login", "search", "seerr", "extras", "extras-detail", "activity", "stats", "notify", "notify-detail", "collections", "collections-browse"];
+    private static readonly string[] KnownModules = ["core", "home", "discover", "player", "pause", "postplay", "settings", "login", "search", "seerr", "extras", "extras-detail", "activity", "stats", "notify", "notify-detail", "collections", "collections-browse"];
 
     [HttpGet("compat")]
     [AllowAnonymous]
