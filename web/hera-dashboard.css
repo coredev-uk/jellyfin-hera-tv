@@ -1823,6 +1823,19 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   outline: 3px solid var(--hera-focus);
   outline-offset: 3px;
 }
+/* A button that wraps blocks of its own (Intro Skipper's library and show rows) is a list row,
+ * not a pill: rounded-rectangle, roomier, its content centred on the row rather than pinned to the top. */
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button:not(.emby-button):not(.MuiButtonBase-root):has(> div) {
+  min-height: 48px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  align-items: center;
+  text-align: start;
+  line-height: 1.3;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button:not(.emby-button):not(.MuiButtonBase-root):has(> div):active {
+  transform: scale(0.99);
+}
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) a {
   color: var(--hera-label);
 }

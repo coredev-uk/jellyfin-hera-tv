@@ -150,8 +150,8 @@
 
   // A streaming service's card shows its logo, the way Seerr's Networks row does: the TMDB network
   // wordmark through TMDB's white duotone filter, or, for a service with no network of its own, its
-  // app icon above the name. The card's label already names it, so the image is decorative; one that
-  // fails to load leaves the name as it was.
+  // app icon. Either replaces the name; the card's label still says it, so the image is decorative.
+  // One that fails to load brings the name back.
   const TMDB = "https://image.tmdb.org/t/p/";
   const logoOn = (face, name, logo) => {
     const path = logo?.wordmark || logo?.icon;
@@ -166,9 +166,9 @@
     });
     img.addEventListener("error", () => {
       img.remove();
-      face.classList.remove("has-logo", "has-icon");
+      face.classList.remove("has-logo");
     }, { once: true });
-    face.classList.add(wordmark ? "has-logo" : "has-icon");
+    face.classList.add("has-logo");
     face.insertBefore(img, name);
   };
 

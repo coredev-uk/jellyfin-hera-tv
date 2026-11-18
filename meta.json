@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "Streaming collections show each service's logo; the Collections page wraps its groups into grids instead of sideways shelves; the header search opens where its button is; other plugins' settings pages (Intro Skipper and the like) get tidy section lists and titles.",
+  "changelog": "A collection's own page wraps its films into a grid instead of one sideways line; Up Next cards keep one menu button (Open Page lives in it) instead of two; services shown by app icon (NOW, Sky Go, BBC iPlayer) drop the name under it; the JustWatch credit under Also On is a small grey caption; button rows on other plugins' pages (Intro Skipper's libraries and shows) sit centred.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
@@ -8,7 +8,7 @@
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
   "timestamp": "2026-11-19T00:00:00.0000000Z",
-  "version": "1.9.1.0",
+  "version": "1.9.2.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

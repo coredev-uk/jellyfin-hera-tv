@@ -213,19 +213,9 @@
       extra: [{ label: "Open Page", icon: "info_outline", onSelect: () => openDetails(entry.detailId) }],
     };
     const openMenu = () => (heraTv.hidden?.menu?.(main) ? true : (openDetails(entry.detailId), false));
-    const info = kit.el(
-      "button",
-      {
-        type: "button",
-        class: "hera-card__info",
-        "aria-label": `About ${entry.title}`,
-        title: "Open page",
-        onclick: () => openDetails(entry.detailId),
-      },
-      kit.icon("info_outline"),
-    );
-    // On a remote there is no pointer for the info button: a long press on OK, or the remote's
-    // context-menu key, opens the card's menu; its Info key opens the page.
+    // The card's "more" button (hera-extras.js) carries Open Page, so there is no separate info
+    // button. On a remote a long press on OK, or the remote's context-menu key, opens that menu;
+    // its Info key opens the page.
     let pressTimer = 0;
     let handled = false;
     main.addEventListener("keydown", (event) => {
@@ -260,7 +250,7 @@
       clearTimeout(pressTimer);
       pressTimer = 0;
     });
-    return kit.el("div", { class: "hera-upnext" }, [main, info]);
+    return kit.el("div", { class: "hera-upnext" }, main);
   };
 
   // ---------- poster rows ------------------------------------------------------------------
