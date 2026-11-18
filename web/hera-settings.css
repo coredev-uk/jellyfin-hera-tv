@@ -19,8 +19,7 @@
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 56px;
   align-items: start;
-  max-width: 1180px;
-  margin: 0 auto;
+  max-width: none;
   padding: 104px var(--hera-edge) 96px;
   color: var(--hera-label);
 }
@@ -108,6 +107,11 @@
   background: var(--hera-fill-strong);
   color: var(--hera-label);
   font: 700 19px/1 var(--hera-font-display);
+}
+/* On the selected (inverted) row the avatar inverts with it, or its initial vanishes. */
+.hera-set-nav__item[aria-current="page"] .hera-set-avatar {
+  background: var(--hera-on-select);
+  color: var(--hera-select);
 }
 .hera-set-nav__item--profile .hera-set-avatar {
   width: 48px;
@@ -197,6 +201,13 @@
   color: var(--hera-label-3);
   font-size: 13px;
   line-height: 1.4;
+}
+/* A button in a footer ("Reload Now") sits in the line's own height, so the footer does not grow. */
+.hera-set-group__foot .hera-set-btn {
+  min-height: 32px;
+  margin: -7px 0;
+  padding: 0 14px;
+  font-size: 13px;
 }
 .hera-set-list {
   overflow: hidden;
@@ -303,7 +314,7 @@
   width: 51px;
   height: 31px;
   border-radius: 999px;
-  background: var(--hera-fill-strong);
+  background: color-mix(in srgb, var(--hera-label-3) 80%, transparent);
   transition: background-color var(--hera-fast) var(--hera-ease);
 }
 .hera-set-switch__knob {
@@ -313,7 +324,7 @@
   width: 27px;
   height: 27px;
   border-radius: 50%;
-  background: var(--hera-bg);
+  background: #fff;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.28);
   transition: transform var(--hera-fast) var(--hera-ease);
 }
@@ -321,6 +332,7 @@
   background: var(--hera-select);
 }
 .hera-set-row[aria-checked="true"] .hera-set-switch__knob {
+  background: var(--hera-bg);
   transform: translateX(20px);
 }
 
@@ -332,6 +344,16 @@
   padding: 3px;
   border-radius: 999px;
   background: var(--hera-fill);
+}
+/* A row too narrow for its label and the control puts the control on a line of its own. */
+.hera-set-row--static:has(> .hera-set-seg) {
+  flex-wrap: wrap;
+}
+.hera-set-row--static:has(> .hera-set-seg) > .hera-set-row__text {
+  flex: 1 1 220px;
+}
+.hera-set-seg {
+  max-width: 100%;
 }
 .hera-set-seg__option {
   appearance: none;
@@ -377,7 +399,7 @@
   font-size: 20px;
 }
 .hera-set-btn:hover {
-  background: var(--hera-hover);
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong);
 }
 .hera-set-btn:active {
   transform: scale(0.95);
@@ -437,7 +459,10 @@
   overflow: visible;
 }
 .hera-set-sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+}
+:root[data-hera-scheme="light"] .hera-set-sheet::backdrop {
+  background: rgba(0, 0, 0, 0.18);
 }
 .hera-set-sheet[open] {
   animation: hera-set-sheet-in var(--hera-slow) var(--hera-ease);
@@ -587,6 +612,7 @@
   appearance: none;
   box-sizing: border-box;
   width: 100%;
+  flex: none;
   height: 48px;
   padding: 0 16px;
   border: 1px solid transparent;
@@ -598,11 +624,55 @@
   transition: border-color var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
 }
 .hera-set-input:focus {
-  border-color: var(--hera-label-2);
+  background: var(--hera-fill-strong);
+  box-shadow: 0 0 0 2px var(--hera-focus);
   outline: none !important;
 }
 .hera-set-input::placeholder {
   color: var(--hera-label-3);
+}
+/* Search in a picker: the capsule of Hera's own search, its field bare inside. */
+.hera-set-search {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--hera-fill);
+  transition: background-color var(--hera-fast) var(--hera-ease), box-shadow var(--hera-fast) var(--hera-ease);
+}
+.hera-set-search:focus-within {
+  background: var(--hera-fill-strong);
+  box-shadow: 0 0 0 2px var(--hera-focus);
+}
+.hera-set-search .material-icons {
+  flex: none;
+  font-size: 22px;
+  color: var(--hera-label-2);
+}
+.hera-set-search__input {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hera-label);
+  font: 500 16px/1 var(--hera-font);
+  caret-color: var(--hera-label);
+  outline: none !important;
+}
+.hera-set-search__input::placeholder {
+  color: var(--hera-label-3);
+}
+/* Jellyfin's theme sets the scrollbar on every element, after Hera's own rule. */
+.hera-set-options {
+  scrollbar-color: var(--hera-track) transparent;
 }
 .hera-set-status {
   margin: 0;
@@ -634,6 +704,10 @@
 .layout-tv .hera-set-nav__item[aria-current="page"]:not(:focus) .hera-set-nav__role {
   color: var(--hera-label-2);
 }
+.layout-tv .hera-set-nav__item[aria-current="page"]:not(:focus) .hera-set-avatar {
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+}
 .layout-tv .hera-set-nav__item:focus,
 .layout-tv .hera-set-row:focus,
 .layout-tv .hera-set-seg__option:focus,
@@ -658,6 +732,9 @@
 .layout-tv .hera-set-row:focus .hera-set-switch {
   background: var(--hera-fill-strong);
 }
+.layout-tv .hera-set-row:focus .hera-set-switch__knob {
+  background: var(--hera-bg);
+}
 /* tvOS lights one control at a time: the chosen segment steps back while another is focused. */
 .layout-tv .hera-set-seg:focus-within .hera-set-seg__option[aria-checked="true"]:not(:focus) {
   background: var(--hera-fill-strong);
@@ -681,6 +758,19 @@
 }
 .layout-tv .hera-set-group__title {
   font-size: 16px;
+}
+/* The stock pages' heading rule is !important, so the step-up has to be too. */
+.layout-tv .userPreferencesPage .hera-set-group__title {
+  font-size: 16px !important;
+}
+.layout-tv .hera-set-group__foot,
+.layout-tv .hera-set-nav__role {
+  font-size: 15px;
+}
+.layout-tv .hera-set-group__foot .hera-set-btn {
+  min-height: 40px;
+  margin: -11px 0;
+  font-size: 15px;
 }
 .layout-tv .hera-set-title {
   font-size: 44px;
@@ -718,6 +808,16 @@
   .hera-set-nav__item--profile {
     flex: 1 0 100%;
     margin-bottom: 4px;
+  }
+}
+
+/* Glass gives way to a solid surface when the system asks for less transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  .hera-set__toast,
+  .hera-set-sheet__panel {
+    background: var(--hera-surface-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -778,7 +878,9 @@
   align-items: center;
   gap: 24px;
   margin: 0 auto 20px !important;
-  padding-bottom: 22px;
+  flex-wrap: wrap;
+  /* Jellyfin sets its own padding inline, which only !important beats. */
+  padding: 22px 24px !important;
 }
 .userPasswordPage .imagePlaceHolder {
   flex: none;
@@ -838,7 +940,9 @@
 }
 .userPreferencesPage .emby-select:focus,
 .userPreferencesPage .emby-input:focus {
-  border-color: var(--hera-label-2) !important;
+  border-color: transparent !important;
+  background-color: var(--hera-fill-strong) !important;
+  box-shadow: 0 0 0 2px var(--hera-focus);
 }
 .userPreferencesPage .fieldDescription,
 .userPreferencesPage .MuiFormHelperText-root {
@@ -897,7 +1001,7 @@
   transform: none !important;
   border: 0 !important;
   border-radius: 999px !important;
-  background: var(--hera-fill-strong) !important;
+  background: color-mix(in srgb, var(--hera-label-3) 80%, transparent) !important;
   transition: background-color var(--hera-fast) var(--hera-ease);
 }
 .userPreferencesPage .emby-checkbox-label .checkboxOutline .checkboxIcon {
@@ -917,7 +1021,7 @@
   width: 27px;
   height: 27px;
   border-radius: 50%;
-  background: var(--hera-bg);
+  background: #fff;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.28);
   transition: transform var(--hera-fast) var(--hera-ease);
 }
@@ -925,6 +1029,7 @@
   background: var(--hera-select) !important;
 }
 .userPreferencesPage .emby-checkbox:checked ~ .checkboxOutline::after {
+  background: var(--hera-bg);
   transform: translateX(20px);
 }
 .userPreferencesPage .emby-checkbox:focus-visible ~ .checkboxOutline {
@@ -987,9 +1092,14 @@
 .userPreferencesPage #btnAddImage,
 .userPreferencesPage #btnDeleteImage {
   min-height: 40px;
+  white-space: nowrap;
   padding: 0 18px;
   background: var(--hera-fill-strong) !important;
   color: var(--hera-label) !important;
+}
+.userPreferencesPage #btnAddImage:hover,
+.userPreferencesPage #btnDeleteImage:hover {
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong) !important;
 }
 .userPreferencesPage .updatePasswordForm .button-submit,
 .userPreferencesPage .updatePasswordForm .btnSave {

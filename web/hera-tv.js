@@ -271,16 +271,19 @@
    * that already runs it when pressed, the disc is only a picture of it.
    */
   const card = ({ href, onClick, image, shape = "poster", title, subtitle, badge, badgeTone, progress, label, action }) => {
+    // The disc is a picture of the action, never a second control: a button inside the card's own
+    // link is invalid and doubles the Tab stops. A pointer pressing it runs the action instead of
+    // following the link; a keyboard opens the title and plays from there.
     let disc = null;
-    if (action && href) {
-      disc = el("button", { type: "button", class: "hera-btn hera-btn--glass hera-card__play", "aria-label": action.label }, icon(action.icon));
-      disc.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        action.run(e);
-      });
-    } else if (action) {
+    if (action) {
       disc = el("span", { class: "hera-btn hera-btn--glass hera-card__play", "aria-hidden": "true" }, icon(action.icon));
+      if (href) {
+        disc.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          action.run(e);
+        });
+      }
     }
     const art = el("span", { class: "hera-card__art" }, [
       image
@@ -814,6 +817,7 @@
         el("button", {
           type: "button",
           role: "tab",
+          tabindex: "-1",
           class: "hera-hero__dot",
           "aria-label": item.Name,
           "aria-selected": "false",
@@ -935,7 +939,7 @@
       this.onVisibility = () => (document.hidden ? this.holds.add("hidden") : this.holds.delete("hidden"));
       document.addEventListener("visibilitychange", this.onVisibility);
 
-      this.show(0, false, true);
+      this.ready = this.show(0, false);
       if (reduceMotion.matches) this.setUserPaused(true);
       this.tick = this.tick.bind(this);
       this.frame = requestAnimationFrame(this.tick);
@@ -959,17 +963,29 @@
         await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
         if (token !== this.token) return;
       }
+      // A remote rests on Play. The slide it sits on goes inert when the next takes over, which
+      // would drop focus to the page; carry it to the same control on the new slide.
+      const held = document.activeElement;
+      const heldSlide = held && this.slides.find((slide) => slide.contains(held));
+      const heldAt = heldSlide ? [...heldSlide.querySelectorAll(".hera-hero__actions > *")].indexOf(held) : -1;
       this.index = target;
       this.slides.forEach((slide, i) => {
         const active = i === this.index;
         slide.classList.toggle("is-active", active);
         slide.toggleAttribute("inert", !active);
       });
-      this.dots.forEach((dot, i) => dot.setAttribute("aria-selected", String(i === this.index)));
+      this.dots.forEach((dot, i) => {
+        dot.setAttribute("aria-selected", String(i === this.index));
+        // One Tab stop for the pager; the arrow keys step through it.
+        dot.tabIndex = i === this.index ? 0 : -1;
+      });
       this.dots.forEach((dot) => dot.style.removeProperty("--hera-progress"));
       this.elapsed = 0;
       if (fromUser && document.activeElement?.classList.contains("hera-hero__dot")) {
         this.dots[this.index].focus();
+      }
+      if (heldSlide && heldSlide !== this.slides[this.index] && heldAt >= 0) {
+        this.slides[this.index].querySelectorAll(".hera-hero__actions > *")[heldAt]?.focus({ preventScroll: true });
       }
       const next = this.slides[(this.index + 1) % total]?.querySelector(".hera-hero__backdrop");
       if (next) next.loading = "eager";
@@ -1050,7 +1066,7 @@
     // On a TV the remote starts on Play, as tvOS starts on the hero's primary action.
     if (root.classList.contains("layout-tv") && window.scrollY < 80) {
       const focusPlay = () => state.hero?.node.querySelector(".hera-hero__slide.is-active .hera-btn--primary")?.focus();
-      focusPlay();
+      hero.ready.then(focusPlay);
       // Jellyfin's own autofocus can run after us and leave focus on the body.
       setTimeout(() => {
         if (document.activeElement === document.body) focusPlay();
@@ -1065,16 +1081,14 @@
   // for what the library holds, Request for what it doesn't. A card without a page to open is a
   // button that runs that action; its disc is then only a picture of it.
   const shelfCard = ({ href = null, image = null, logo = null, numbered = false, number = null, name, overview, meta, progress = 0, played = false, action, className = "", label = null }) => {
-    let disc;
+    // A picture of the action, as on the poster cards (see `card`).
+    const disc = el("span", { class: "hera-btn hera-btn--glass hera-episode__play", "aria-hidden": "true" }, icon(action.icon));
     if (href) {
-      disc = el("button", { type: "button", class: "hera-btn hera-btn--glass hera-episode__play", "aria-label": action.label }, icon(action.icon));
       disc.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
         action.run(e);
       });
-    } else {
-      disc = el("span", { class: "hera-btn hera-btn--glass hera-episode__play", "aria-hidden": "true" }, icon(action.icon));
     }
     const card = el(
       href ? "a" : "button",
@@ -1213,6 +1227,13 @@
     const nextEpisode = nextUp?.Items?.[0];
     const openSeasonId = item.Type === "Season" ? item.Id : item.Type === "Episode" ? item.SeasonId : nextEpisode?.SeasonId;
     const focusEpisodeId = item.Type === "Episode" ? item.Id : nextEpisode?.Id;
+    // The banner's Play names the episode it starts, as Apple TV's does.
+    if (item.Type === "Series" && nextEpisode?.IndexNumber != null) {
+      const verb = nextEpisode.UserData?.PlaybackPositionTicks > 0 ? "Resume" : "Play";
+      labelPlay(page, itemId, `${verb} S${nextEpisode.ParentIndexNumber ?? 1}, E${nextEpisode.IndexNumber}`);
+      page.heraPlayTarget = { id: itemId, item: nextEpisode };
+      installPlayOverride(page);
+    }
     const startIndex = Math.max(0, seasons.findIndex((s) => s.Id === openSeasonId));
     const shelf = el("div", { class: "hera-shelf", role: "tabpanel" });
     // Picking another episode from the shelf is browsing, not leaving: the new page opens where
@@ -1232,6 +1253,13 @@
         onclick: () => select(i),
       }),
     );
+    // On a TV, Up from an episode reaches the season tabs rather than skipping past them.
+    shelf.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" || tabs.length < 2 || !root.classList.contains("layout-tv")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      (tabs.find((tab) => tab.getAttribute("aria-selected") === "true") ?? tabs[0]).focus();
+    });
 
     const select = async (i) => {
       tabs.forEach((tab, j) => tab.setAttribute("aria-selected", String(i === j)));
@@ -1281,7 +1309,7 @@
     items.find((item) => !item.UserData?.Played) ??
     items[0];
 
-  const filmCard = (item, { rating = true } = {}) => {
+  const filmCard = (item, { rating = true, numbered = true } = {}) => {
     const backdrop = item.BackdropImageTags?.[0];
     const tags = item.ImageTags ?? {};
     const image = backdrop
@@ -1296,7 +1324,7 @@
       image,
       // A thumb usually has the title painted on; the logo goes only over plain key art.
       logo: backdrop && tags.Logo ? imageUrl(item.Id, "Logo", { maxWidth: 360, tag: tags.Logo }) : null,
-      numbered: true,
+      numbered,
       name: item.Name,
       overview: item.Overview,
       meta: [item.ProductionYear, runtime(item.RunTimeTicks), rating ? certificate(item.OfficialRating) : null].filter(Boolean).join(" · "),
@@ -1338,7 +1366,9 @@
     return handle;
   };
 
-  const fitBoxSetMeta = (page, items, noun) => {
+  const fitBoxSetMeta = (page, items, noun, mixedRatings = false) => {
+    // Jellyfin's one certificate for the lot would contradict films that carry their own.
+    if (mixedRatings) page.querySelector(".itemMiscInfo .mediaInfoOfficialRating")?.remove();
     const parts = [...page.querySelectorAll(".itemMiscInfo-primary .mediaInfoItem")];
     const count = parts.find((part) => /^\d+ items?$/.test(part.textContent.trim()));
     if (count) count.textContent = `${items.length} ${noun}${items.length === 1 ? "" : "s"}`;
@@ -1353,15 +1383,49 @@
     if (total) year.after(el("div", { class: "mediaInfoItem hera-boxset-runtime", text: total }));
   };
 
-  // The banner's Play names the film it starts, as Apple TV's names the episode.
-  const labelBoxSetPlay = (page, next) => {
+  // The banner's Play names what it starts ("Play Batman Begins", "Resume S1, E5"), as Apple TV's
+  // does. `itemId` is the page the label belongs to, so a page Jellyfin reuses never keeps another's.
+  const labelPlay = (page, itemId, label) => {
     const button = page.querySelector(".mainDetailButtons .btnPlay");
     const content = button?.querySelector(".detailButton-content");
     if (!content) return;
-    const verb = next.UserData?.PlaybackPositionTicks > 0 && !next.UserData?.Played ? "Resume" : "Play";
-    content.dataset.heraLabel = `${verb} ${next.Name}`;
-    button.setAttribute("aria-label", `${verb} ${next.Name}`);
-    button.title = `${verb} ${next.Name}`;
+    if (label) {
+      if (content.dataset.heraTitle === undefined) {
+        content.dataset.heraTitle = button.title;
+        content.dataset.heraAria = button.getAttribute("aria-label") ?? "";
+      }
+      content.dataset.heraLabel = label;
+      content.dataset.heraLabelItem = itemId;
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    } else if (content.dataset.heraTitle !== undefined) {
+      button.title = content.dataset.heraTitle;
+      if (content.dataset.heraAria) button.setAttribute("aria-label", content.dataset.heraAria);
+      else button.removeAttribute("aria-label");
+      delete content.dataset.heraLabel;
+      delete content.dataset.heraLabelItem;
+      delete content.dataset.heraTitle;
+      delete content.dataset.heraAria;
+    }
+  };
+
+  // Jellyfin's Play on a collection plays every film from the first, and on a series its own idea of
+  // where to start; Hera's starts the title the label names (`page.heraPlayTarget`).
+  const installPlayOverride = (page) => {
+    if (page.heraPlayOverride) return;
+    page.heraPlayOverride = true;
+    page.addEventListener(
+      "click",
+      (event) => {
+        const button = event.target.closest?.(".mainDetailButtons .btnPlay");
+        const target = page.heraPlayTarget;
+        if (!button || !target || target.id !== itemIdFromHash()) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        play(target.item).catch(console.error);
+      },
+      true,
+    );
   };
 
   const buildBoxSet = async (page, itemId, previous) => {
@@ -1379,6 +1443,9 @@
     const drawn = page.querySelector(".hera-boxset");
     if (!items.length || itemIdFromHash() !== itemId || (drawn && drawn.dataset.item !== itemId)) return null;
 
+    // A collection Hera built from a group (On Paramount+, Netflix) is a set of titles, not a franchise:
+    // no order, no next film, no Play that names one.
+    const grouped = !!item.Tags?.includes("hera-tv");
     const films = items.every((child) => child.Type === "Movie");
     const shows = items.every((child) => child.Type === "Series");
     const title = films ? "Films" : shows ? "TV Shows" : "In This Collection";
@@ -1387,8 +1454,8 @@
     const rating = new Set(items.map((child) => child.OfficialRating || "")).size > 1;
     const shelf = el("div", { class: "hera-shelf", "aria-label": title });
     for (const child of items) {
-      const card = filmCard(child, { rating });
-      if (child === next) card.classList.add("is-current");
+      const card = filmCard(child, { rating, numbered: !grouped });
+      if (!grouped && child === next) card.classList.add("is-current");
       shelf.append(card);
     }
     const section = el("section", { class: "hera-boxset verticalSection", "aria-label": title, "data-item": itemId }, [
@@ -1418,23 +1485,15 @@
       primary.insertBefore(section, primary.firstChild);
     }
     page.classList.add("hera-has-boxset");
-    fitBoxSetMeta(page, items, films ? "film" : shows ? "TV show" : "title");
-    page.heraBoxSetNext = next;
-    labelBoxSetPlay(page, next);
-    if (!page.heraBoxSetPlay) {
-      page.heraBoxSetPlay = true;
-      // Jellyfin's Play on a collection plays every film from the first; Hera's starts the next.
-      page.addEventListener(
-        "click",
-        (event) => {
-          const button = event.target.closest?.(".mainDetailButtons .btnPlay");
-          if (!button || !page.heraBoxSetNext || !page.classList.contains("hera-has-boxset")) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          play(page.heraBoxSetNext).catch(console.error);
-        },
-        true,
-      );
+    fitBoxSetMeta(page, items, films ? "film" : shows ? "TV show" : "title", rating);
+    if (grouped) {
+      page.heraPlayTarget = null;
+      labelPlay(page, itemId, null);
+    } else {
+      const verb = next.UserData?.PlaybackPositionTicks > 0 && !next.UserData?.Played ? "Resume" : "Play";
+      page.heraPlayTarget = { id: itemId, item: next };
+      labelPlay(page, itemId, `${verb} ${next.Name}`);
+      installPlayOverride(page);
     }
     return handle;
   };
@@ -1448,7 +1507,7 @@
     if (!same) {
       page.querySelector(".hera-boxset")?.remove();
       page.classList.remove("hera-has-boxset");
-      page.heraBoxSetNext = null;
+      page.heraPlayTarget = null;
     }
     const entry = { itemId, settled: false, handle: null };
     entry.ready = buildBoxSet(page, itemId, same ? known.handle : null)
@@ -1588,6 +1647,29 @@
     measure();
   };
 
+  // Removes the synopsis and its "More".
+  const dropOverview = (info) => {
+    info.querySelectorAll(".hera-detail-overview, .hera-detail-more").forEach((node) => node.remove());
+  };
+
+  // The synopsis is clamped to three lines; "More" opens the rest and shows only while something is
+  // hidden (the button's look is in hera-seerr.css, with the person page's own).
+  const addMore = (text) => {
+    // hera-detail-more marks it as the synopsis's own, so the person page's clean-up leaves it be.
+    const button = el("button", { type: "button", class: "hera-readmore hera-detail-more", "aria-expanded": "false", text: "More", hidden: true });
+    button.addEventListener("click", () => {
+      const open = text.classList.toggle("is-open");
+      button.setAttribute("aria-expanded", String(open));
+      button.textContent = open ? "Less" : "More";
+    });
+    text.after(button);
+    const observer = new ResizeObserver(() => {
+      if (!text.isConnected) return observer.disconnect();
+      if (!text.classList.contains("is-open")) button.hidden = text.scrollHeight <= text.clientHeight + 1;
+    });
+    observer.observe(text);
+  };
+
   // The synopsis belongs with the title and buttons, over the artwork, as on tvOS; the stock
   // copy further down is hidden while ours is in place.
   const mountOverview = async (page, itemId) => {
@@ -1595,15 +1677,16 @@
     if (!info) return;
     const existing = info.querySelector(".hera-detail-overview");
     if (existing?.dataset.item === itemId) return;
-    existing?.remove();
+    dropOverview(info);
     page.classList.remove("hera-has-overview");
     const item = await api().getItem(userId(), itemId);
     if (!item?.Overview || itemIdFromHash() !== itemId) return;
     // A second call may have finished first while this one waited.
-    info.querySelector(".hera-detail-overview")?.remove();
+    dropOverview(info);
     const text = el("p", { class: "hera-detail-overview", "data-item": itemId, text: item.Overview });
     info.append(text);
     page.classList.add("hera-has-overview");
+    addMore(text);
   };
 
   // One observer per logo element: Jellyfin reuses the page, and onView runs on every show.
@@ -1655,6 +1738,8 @@
       this.dialog = this.render();
       document.body.append(this.dialog);
       this.dialog.showModal();
+      // The first control is a setting, not Sign out: a second Enter must never leave the page.
+      this.dialog.querySelector(".hera-cc__tile")?.focus();
       this.refreshSessions().catch(console.error);
     },
 
@@ -1966,6 +2051,8 @@
         markLogo(page);
         fitRibbon(page);
         const id = itemIdFromHash();
+        const playContent = page.querySelector(".mainDetailButtons .btnPlay .detailButton-content");
+        if (id && playContent?.dataset.heraLabelItem && playContent.dataset.heraLabelItem !== id) labelPlay(page, id, null);
         if (id) {
           fillBanner(page, id).catch(console.error);
           mountOverview(page, id).catch(console.error);
@@ -2041,6 +2128,22 @@
     for (const node of document.querySelectorAll(".mediaInfoOfficialRating")) {
       if (node.firstElementChild?.classList.contains("hera-badge")) continue;
       node.replaceChildren(el("span", { class: "hera-badge", text: certificate(node.textContent.trim()) }));
+    }
+    // Jellyfin's meta line writes runtimes "1h 39m" and ranges "2022 - 2025"; Hera's own surfaces
+    // say "1 hr 39 min" and "2022–2025".
+    for (const node of document.querySelectorAll(".itemMiscInfo .mediaInfoItem")) {
+      if (node.childElementCount) continue;
+      const text = node.textContent.trim();
+      const long = /^(\d+)h(?: (\d+)m)?$/.exec(text);
+      const short = /^(\d+)m$/.exec(text);
+      const next = long
+        ? `${long[1]} hr${Number(long[2]) ? ` ${long[2]} min` : ""}`
+        : short
+          ? `${short[1]} min`
+          : /^\d{4} - (?:\d{4}|Present)$/.test(text)
+            ? text.replace(" - ", "–")
+            : null;
+      if (next) node.textContent = next;
     }
   };
   const watchCopy = () => {

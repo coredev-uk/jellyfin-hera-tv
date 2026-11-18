@@ -209,7 +209,7 @@ body,
   z-index: 2;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.58) 34%, rgba(0, 0, 0, 0.86) 66%, var(--hera-bg) 94%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.72) 34%, rgba(0, 0, 0, 0.88) 66%, var(--hera-bg) 94%),
     linear-gradient(90deg, rgba(0, 0, 0, 0.42) 0%, transparent 55%);
 }
 /* Light ground: a pale wash of the same art, never a black veil, dissolving into white. */
@@ -232,7 +232,7 @@ body,
 }
 
 :focus-visible {
-  outline: 3px solid var(--hera-focus) !important;
+  outline: 2px solid var(--hera-focus) !important;
   outline-offset: 3px;
 }
 /* Menus and sheets take focus programmatically; their edge is the shadow, not a ring. */
@@ -245,6 +245,12 @@ body,
 
 * {
   scrollbar-width: thin;
+  scrollbar-color: var(--hera-track) transparent;
+}
+/* Jellyfin's dark theme loads after this sheet and sets `* { scrollbar-color }`; the scheme
+ * attribute outranks it, so the track follows light and dark like everything else. */
+html[data-hera-scheme],
+html[data-hera-scheme] * {
   scrollbar-color: var(--hera-track) transparent;
 }
 .emby-scroller,
@@ -466,7 +472,7 @@ html[data-hera-view="indexPage"] .MuiAppBar-root > .MuiToolbar-root:first-child 
 }
 .MuiAppBar-root .MuiIconButton-root:hover,
 .MuiAppBar-root .headerButton:hover {
-  background: var(--hera-fill-strong) !important;
+  background: var(--hera-glass-hover) !important;
   transform: none;
 }
 .MuiAppBar-root .MuiIconButton-root:active,
@@ -604,9 +610,13 @@ h3 {
   border-radius: var(--hera-r-card);
   overflow: hidden;
   background: var(--hera-surface-2) !important;
-  box-shadow: var(--hera-shadow);
   transform: translateZ(0);
   transition: transform var(--hera-fast) var(--hera-ease), box-shadow var(--hera-fast) var(--hera-ease);
+}
+/* Jellyfin's own poster rows (Recently Added, Cast & Crew, Collections, More Like This) take the
+ * width Hera's rows do, plus the card's own half-gap of margin each side. */
+.overflowPortraitCard {
+  width: calc(clamp(132px, 11.5vw, 196px) + var(--hera-gap)) !important;
 }
 .overflowBackdropCard .cardScalable,
 .backdropCard .cardScalable,
@@ -629,7 +639,9 @@ h3 {
   transition-duration: var(--hera-slow);
 }
 .card-hoverable:hover .cardImageContainer,
-.card-hoverable:hover .cardContent {
+.card-hoverable:hover .cardContent,
+.card:focus-within .cardImageContainer,
+.card:focus-within .cardContent {
   transform: scale(1.03);
   filter: brightness(1.06);
   transition-duration: var(--hera-slow);
@@ -739,8 +751,24 @@ h3 {
 .cardOverlayFab-primary .cardOverlayButtonIcon {
   font-size: 28px !important;
 }
+.cardOverlayFab-primary .MuiSvgIcon-root {
+  font-size: 28px !important;
+}
+/* Jellyfin grows its disc to 1.4x on hover; Hera's stays 52px and presses to 95%. */
+.cardOverlayFab-primary:hover,
+.cardOverlayContainer > .cardOverlayFab-primary:hover {
+  transform: none !important;
+}
+.cardOverlayFab-primary:active,
+.cardOverlayContainer > .cardOverlayFab-primary:active {
+  transform: scale(0.95) !important;
+}
 /* Hover shows Play and the menu only; watched and favourite live on the item's page. */
 .cardOverlayButton-br > button:not([data-action="menu"]) {
+  display: none !important;
+}
+/* On a phone Jellyfin's play button is itself the corner button; Hera's rows have none. */
+button.cardOverlayButton-br:not([data-action="menu"]) {
   display: none !important;
 }
 /* The menu matches Hera's own card "more" button: a 32px disc of three dots across, set 8px in
@@ -763,6 +791,11 @@ h3 {
 }
 .cardOverlayButton-br > button[data-action="menu"] .cardOverlayButtonIcon {
   font-size: 20px !important;
+}
+/* Jellyfin 12 draws the icons as MUI SVGs: the menu's dots are vertical, so lay them across. */
+.cardOverlayButton-br > button[data-action="menu"] .MuiSvgIcon-root {
+  font-size: 20px !important;
+  transform: rotate(90deg);
 }
 .cardOverlayButton-br > button[data-action="menu"] .more_vert::before {
   content: "\e5d3";
@@ -808,7 +841,6 @@ h3 {
   border-radius: 999px;
   overflow: hidden;
   background: var(--hera-track) !important;
-  backdrop-filter: blur(8px);
 }
 .itemProgressBarForeground {
   background: var(--hera-select) !important;
@@ -888,7 +920,11 @@ h3 {
  * overview grows upwards rather than pushing the buttons down. The fallback covers the moment
  * before the first measurement. */
 .itemDetailPage {
-  --hera-detail-h: clamp(440px, min(80vh, 56.25vw), 1100px);
+  /* Grows with the ribbon, so a long overview or a narrow screen never pushes the logo up under the header. */
+  --hera-detail-h: max(
+    clamp(440px, min(80vh, 56.25vw), 1100px),
+    calc(var(--hera-ribbon-h, 162px) + clamp(90px, 15vh, 160px) + 20px + var(--hera-detail-gap) + var(--hera-detail-foot) + 96px)
+  );
   --hera-detail-foot: 0px;
   --hera-detail-gap: 48px;
   --hera-detail-overlay: calc(var(--hera-ribbon-h, 162px) + var(--hera-detail-gap) + var(--hera-detail-foot));
@@ -962,8 +998,7 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   margin-bottom: 0 !important;
 }
 
-.layout-desktop .itemDetailPage:not(.hera-no-backdrop) .detailImageContainer,
-.layout-tv .itemDetailPage:not(.hera-no-backdrop) .detailImageContainer {
+.itemDetailPage:not(.hera-no-backdrop) .detailImageContainer {
   display: none !important;
 }
 
@@ -989,8 +1024,7 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   position: static !important;
   padding: 28px var(--hera-edge) 24px !important;
 }
-.layout-desktop .itemDetailPage .infoWrapper .detailImageContainer,
-.layout-tv .itemDetailPage .infoWrapper .detailImageContainer {
+.itemDetailPage .infoWrapper .detailImageContainer {
   display: none !important;
 }
 .itemDetailPage.hera-no-backdrop .detailImageContainer .card {
@@ -1068,6 +1102,12 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   margin: 0 !important;
   padding: 0 !important;
   gap: 12px;
+}
+/* Jellyfin's phone layout centres the meta line and the buttons; the logo, title and synopsis sit on the edge. */
+.layout-mobile .itemMiscInfo,
+.layout-mobile .mainDetailButtons {
+  justify-content: flex-start;
+  text-align: left;
 }
 
 /* With logo artwork the logo is the title, as on tvOS: hide the heading it duplicates (the
@@ -1172,6 +1212,16 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
 .detailButton-text {
   display: none !important;
 }
+/* Trailer is a disc widened with its label, as More Info is. */
+.mainDetailButtons .btnPlayTrailer:not(.hide) {
+  width: auto;
+  padding: 0 22px 0 16px !important;
+}
+.mainDetailButtons .btnPlayTrailer .detailButton-content::after {
+  content: "Trailer";
+  font-size: 16px;
+  font-weight: 600;
+}
 .mainDetailButtons .btnPlay,
 .mainDetailButtons .btnResume {
   width: auto;
@@ -1202,6 +1252,20 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
 }
 .detailButton .ratingbutton-icon-withrating {
   color: var(--hera-on-select) !important;
+}
+/* Not a favourite yet: the outline heart, as the home hero shows. */
+.mainDetailButtons .btnUserRating .detailButton-icon:not(.ratingbutton-icon-withrating) {
+  font-size: 0 !important;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mainDetailButtons .btnUserRating .detailButton-icon:not(.ratingbutton-icon-withrating)::before {
+  content: "favorite_border" / "";
+  font-size: 24px;
+  line-height: 1;
 }
 
 /* Overview, tags and the information block. */
@@ -1348,6 +1412,11 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   font-size: 14px;
   font-weight: 500;
 }
+/* Long credit lists wrap as running text, not as centred boxes with the comma stranded. */
+.detailsGroupItem .content a {
+  display: inline;
+  text-align: left;
+}
 .trackSelections .detailTrackSelect,
 .trackSelections .emby-select-withcolor {
   width: 100%;
@@ -1361,6 +1430,11 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   font-size: 14px !important;
   font-weight: 500;
   text-overflow: ellipsis;
+}
+.trackSelections .detailTrackSelect:focus-visible,
+.layout-tv .trackSelections .detailTrackSelect:focus {
+  outline: 2px solid var(--hera-focus) !important;
+  outline-offset: -2px;
 }
 .trackSelections .selectArrowContainer {
   position: absolute !important;
@@ -1553,7 +1627,7 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   text-align: center;
 }
 #indexPage .tabContent[data-index="1"] .sections:not(:has(.verticalSection:not(.hide)))::before {
-  content: "favorite_border";
+  content: "favorite_border" / "";
   font: 48px/1 "Material Icons";
   color: var(--hera-label-3);
   animation: hera-empty-in var(--hera-slow) var(--hera-ease) 600ms both;
@@ -1984,7 +2058,7 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
 }
 .hera-hero__toggle {
   width: 36px;
-  height: 36px;
+  min-width: 36px;
 }
 .hera-hero__toggle .material-icons {
   font-size: 20px;
@@ -2016,7 +2090,7 @@ html.hera-art-top[data-hera-view="itemDetailPage"] .hera-ambient {
   inset: -10%;
   background-size: cover;
   background-position: center 30%;
-  filter: blur(70px) saturate(150%);
+  filter: blur(70px) saturate(150%) brightness(0.74);
   opacity: 0;
   transition: opacity 1.2s var(--hera-ease);
 }
@@ -2027,7 +2101,7 @@ html.hera-art-top[data-hera-view="itemDetailPage"] .hera-ambient {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.66) 55%, rgba(0, 0, 0, 0.78) 100%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.56) 0%, rgba(0, 0, 0, 0.72) 55%, rgba(0, 0, 0, 0.82) 100%);
 }
 :root[data-hera-scheme="light"] .hera-ambient__layer {
   filter: blur(70px) saturate(160%) brightness(1.2);
@@ -2080,7 +2154,8 @@ html.hera-home #homeTab {
   gap: 2px;
   padding: 3px;
   border-radius: 999px;
-  background: var(--hera-fill);
+  background: var(--hera-glass);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
   overflow-x: auto;
   scrollbar-width: none;
   max-width: 100%;
@@ -2089,14 +2164,15 @@ html.hera-home #homeTab {
   flex: none;
   border: 0;
   margin: 0;
-  padding: 7px 14px;
+  min-height: 36px;
+  padding: 0 18px;
   border-radius: 999px;
   background: none;
   color: var(--hera-label-2);
   font: 600 14px/1 var(--hera-font);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease);
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
 }
 .hera-seasons__tab:hover {
   color: var(--hera-label);
@@ -2105,6 +2181,9 @@ html.hera-home #homeTab {
 .hera-seasons__tab[aria-selected="true"] {
   background: var(--hera-select);
   color: var(--hera-on-select);
+}
+.hera-seasons__tab:active {
+  transform: scale(0.95);
 }
 .hera-seasons__tab:focus-visible {
   outline-offset: -3px;
@@ -2138,7 +2217,6 @@ html.hera-home #homeTab {
   border-radius: var(--hera-r-wide);
   overflow: hidden;
   background: var(--hera-surface-2);
-  box-shadow: var(--hera-shadow);
   margin-bottom: 8px;
   transition: transform var(--hera-fast) var(--hera-ease), box-shadow var(--hera-fast) var(--hera-ease);
 }
@@ -2241,7 +2319,7 @@ html.hera-home #homeTab {
 /* The episode whose page this is: a quiet 2px edge in secondary label colour (the white 3px ring
  * means keyboard focus), and its number reads as "now". */
 .hera-episode.is-current .hera-episode__still {
-  box-shadow: 0 0 0 2px var(--hera-label-2), var(--hera-shadow);
+  box-shadow: 0 0 0 2px var(--hera-label-2);
 }
 .hera-episode.is-current .hera-episode__name b {
   color: var(--hera-label);
@@ -2403,7 +2481,7 @@ button.hera-episode {
   gap: 10px;
   margin-bottom: 2px;
 }
-.hera-row__title {
+.sectionTitle.hera-row__title {
   margin: 0 !important;
   padding: 0 !important;
 }
@@ -2492,7 +2570,6 @@ button.hera-episode {
   overflow: hidden;
   border-radius: var(--hera-r-card);
   background: var(--hera-surface-2);
-  box-shadow: var(--hera-shadow);
   margin-bottom: 8px;
   transition: transform var(--hera-fast) var(--hera-ease), box-shadow var(--hera-fast) var(--hera-ease);
 }
@@ -2525,7 +2602,8 @@ button.hera-episode {
   box-shadow: var(--hera-shadow-lift);
   transition-duration: var(--hera-slow);
 }
-.hera-card:hover .hera-card__art img {
+.hera-card:hover .hera-card__art img,
+.hera-card:focus-visible .hera-card__art img {
   transform: scale(1.03);
   transition-duration: var(--hera-slow);
 }
@@ -2941,8 +3019,37 @@ html.layout-tv.hera-home .hera-hero {
   font-size: 17px;
 }
 .layout-tv .hera-episode:focus .hera-episode__still {
-  transform: scale(1.05);
-  box-shadow: 0 0 0 4px var(--hera-focus), var(--hera-shadow-lift);
+  outline: none;
+  transform: scale(1.06);
+  box-shadow: 0 0 0 3px var(--hera-focus), var(--hera-shadow-lift);
+}
+/* The detail pages step up with the rest of the TV layout: meta, chips, the episode shelf. */
+.layout-tv .itemMiscInfo,
+.layout-tv .itemMiscInfo .mediaInfoItem:not(.mediaInfoCriticRating) {
+  font-size: 17px;
+}
+.layout-tv .hera-badge,
+.layout-tv .hera-chip {
+  height: 22px;
+  font-size: 13px;
+  line-height: 22px;
+}
+.layout-tv .hera-seasons__title {
+  font-size: 28px;
+}
+.layout-tv .hera-seasons__tab {
+  font-size: 17px;
+}
+.layout-tv .hera-episode__name,
+.layout-tv .hera-boxset .hera-episode__name {
+  font-size: 18px;
+}
+.layout-tv .hera-episode__overview,
+.layout-tv .hera-boxset .hera-episode__overview {
+  font-size: 16px;
+}
+.layout-tv .hera-episode__meta {
+  font-size: 14px;
 }
 .layout-tv .skinHeader {
   padding-left: var(--hera-edge);
@@ -3175,6 +3282,12 @@ progress[aria-valuenow]:before,
   position: relative;
   z-index: 1;
 }
+/* The same for Hera's own cards: the title stays above the focused artwork's shadow. */
+.layout-tv .hera-card > .hera-card__title,
+.layout-tv .hera-card > .hera-card__subtitle {
+  position: relative;
+  z-index: 1;
+}
 .layout-tv .cardBox > .cardText:first-of-type {
   padding-top: 10px;
 }
@@ -3277,6 +3390,14 @@ progress[aria-valuenow]:before,
   .card:focus-within .cardScalable,
   .hera-card:hover .hera-card__art,
   .hera-episode:hover .hera-episode__still,
+  .hera-card:focus-visible .hera-card__art,
+  .hera-episode:focus-visible .hera-episode__still,
+  .layout-tv .card:focus .cardScalable,
+  .layout-tv .hera-card:focus .hera-card__art,
+  .layout-tv .hera-episode:focus .hera-episode__still,
+  .card:focus-within .cardImageContainer,
+  .card:focus-within .cardContent,
+  .hera-card:focus-visible .hera-card__art img,
   .card-hoverable:hover .cardImageContainer,
   .card-hoverable:hover .cardContent,
   .hera-card:hover .hera-card__art img,
@@ -3293,6 +3414,10 @@ progress[aria-valuenow]:before,
 /* ---------- Narrow windows -------------------------------------------------------- */
 
 @media (max-width: 900px) {
+  .hera-hero {
+    --hera-hero-overlap: 0px;
+    margin-bottom: 24px;
+  }
   .hera-hero__content {
     width: auto;
     right: var(--hera-edge);

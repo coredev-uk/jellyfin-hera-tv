@@ -6,7 +6,8 @@
  *  - A "Leaving 9 Dec" chip on the detail page of a title that is leaving.
  * Jellyfin's own Recently Added rows stay. Every other stock section (Continue Watching, Next Up,
  * My Media, ...) is hidden here, whatever the person's home settings say, because Up Next and
- * the rows below stand in for them. Titles the person hid (hera-extras.js) stay out of the rows.
+ * the rows below stand in for them; a TV layout keeps My Media, its only way to the libraries.
+ * Titles the person hid (hera-extras.js) stay out of the rows.
  */
 (() => {
   "use strict";
@@ -552,11 +553,19 @@
       return prefs?.CustomPrefs || {};
     });
 
+  // The TV layout always puts a "My Media" row of library tiles in slot 0 and pushes the person's
+  // own sections down one, so the slot that holds Recently Added there is one higher than the
+  // setting says. Jellyfin's TV header has no library tabs, so those tiles are the way to the
+  // libraries and stay.
   const keptSlots = (prefs) => {
+    const sections = [];
+    for (let slot = 0; slot < 10; slot++) sections.push(prefs[`homesection${slot}`] ?? STOCK_LAYOUT[slot] ?? "none");
+    const tv = kit.isTv();
+    if (tv && !sections.includes("smalllibrarytiles")) sections.unshift("smalllibrarytiles");
     const kept = new Set();
-    for (let slot = 0; slot < 10; slot++) {
-      if ((prefs[`homesection${slot}`] ?? STOCK_LAYOUT[slot] ?? "none") === "latestmedia") kept.add(slot);
-    }
+    sections.forEach((section, slot) => {
+      if (section === "latestmedia" || (tv && (section === "smalllibrarytiles" || section === "librarybuttons"))) kept.add(slot);
+    });
     return kept;
   };
 
@@ -577,19 +586,6 @@
         section.classList.toggle("hera-stock-hidden", !keep);
         if (!keep) section.classList.add("hide");
         else if (was) section.classList.remove("hide");
-      }
-    }
-    tidyLibraryTiles(container);
-  };
-
-  // Jellyfin's TV layout always puts a "My Media" row of library tiles first, whatever the home
-  // settings say. The header tabs already open each library, so it steps aside for our rows.
-  // `hide` is Jellyfin's own class, which the focus handoff from the hero also respects.
-  const tidyLibraryTiles = (container) => {
-    if (!kit.isTv()) return;
-    for (const section of container.querySelectorAll(":scope > .verticalSection:not(.hera-row)")) {
-      if (section.querySelector(':scope .itemsContainer > [data-type="CollectionFolder"], :scope .itemsContainer > [data-type="UserView"]')) {
-        section.classList.add("hide", "hera-library-tiles");
       }
     }
   };
@@ -770,7 +766,6 @@
       state.container = null;
       state.cache.clear();
       for (const id of [...state.shown.keys()]) removeRow(id);
-      document.querySelectorAll(".hera-library-tiles").forEach((n) => n.classList.remove("hide", "hera-library-tiles"));
       document.querySelectorAll(".hera-stock-hidden").forEach((n) => n.classList.remove("hide", "hera-stock-hidden"));
       document.querySelectorAll(".hera-keep").forEach((n) => n.classList.remove("hera-keep"));
       document.querySelectorAll(".hera-owns-home").forEach((n) => n.classList.remove("hera-owns-home"));

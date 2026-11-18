@@ -72,11 +72,12 @@
 
   // ---------- cards ---------------------------------------------------------------------
 
-  // Seerr says "Processing" for everything between approved and here. Where the download stack
-  // knows better (the person's own requests, as the home page's Your Requests row shows them) its
-  // word is used: "Awaiting Release", "Downloading", "Searching". A title still to come out reads
-  // Awaiting Release even without it.
-  const BADGES = { partial: "Partly Available", processing: "Processing", pending: "Requested" };
+  // Seerr says "Processing" for everything between approved and here, and Hera never repeats it.
+  // Where the download stack knows better (the person's own requests, as the home page's Your
+  // Requests row shows them) its word is used: "Awaiting Release", "Downloading", "Searching". A
+  // title still to come out reads Awaiting Release even without it, and one the stack has nothing
+  // on reads Approved, as Your Requests does.
+  const BADGES = { partial: "Partly Available", processing: "Approved", pending: "Requested" };
   const liveLabels = new Map();
   const unreleased = (item) => !!item.releaseDate && new Date(`${item.releaseDate}T00:00:00`) > new Date();
   const badgeOf = (item) => {
@@ -182,10 +183,10 @@
   const STATUS_TEXT = {
     available: "Available",
     partial: "Partly Available",
-    processing: "Processing",
+    processing: "Approved",
     pending: "Requested",
   };
-  const STATUS_ICON = { available: "check_circle", partial: "timelapse", processing: "downloading", pending: "schedule" };
+  const STATUS_ICON = { available: "check_circle", partial: "timelapse", processing: "check_circle_outline", pending: "schedule" };
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -737,7 +738,14 @@
       ]);
     }
     const label = status === "none" ? "Request" : (badgeOf(item) ?? STATUS_TEXT[status] ?? "Request");
-    const glyph = status === "none" ? "add" : label === "Awaiting Release" ? "event" : (STATUS_ICON[status] ?? "check_circle");
+    const glyph =
+      status === "none"
+        ? "add"
+        : label === "Awaiting Release"
+          ? "event"
+          : label === "Downloading"
+            ? "downloading"
+            : (STATUS_ICON[status] ?? "check_circle");
     return el(
       "button",
       { type: "button", class: "hera-btn hera-btn--primary", onclick: (event) => openTitle(item, { opener: event.currentTarget }) },
@@ -1329,6 +1337,6 @@
     },
   });
 
-  HT.discover = { openTitle, itemCard, seriesText };
+  HT.discover = { openTitle, itemCard, badgeOf, seriesText };
   start();
 })();

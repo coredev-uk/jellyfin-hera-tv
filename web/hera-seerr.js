@@ -638,7 +638,7 @@
     page.dataset.heraSeerrItem = itemId || "";
     stopStockWatch();
     page.querySelectorAll("[data-hera-seerr]").forEach((node) => node.remove());
-    page.querySelectorAll(".hera-person-role, .hera-readmore").forEach((node) => node.remove());
+    page.querySelectorAll(".hera-person-role, .hera-readmore:not(.hera-detail-more)").forEach((node) => node.remove());
     page.querySelectorAll(".hera-seerr-covered").forEach((node) => node.classList.remove("hera-seerr-covered"));
   };
 
@@ -684,7 +684,7 @@
       stopStockWatch();
       bioWatch.observer?.disconnect();
       clearTimeout(bioWatch.timer);
-      document.querySelectorAll("[data-hera-seerr], .hera-person-role, .hera-readmore").forEach((node) => node.remove());
+      document.querySelectorAll("[data-hera-seerr], .hera-person-role, .hera-readmore:not(.hera-detail-more)").forEach((node) => node.remove());
       document.querySelectorAll(".hera-seerr-covered").forEach((node) => node.classList.remove("hera-seerr-covered"));
       cleanups.splice(0).forEach((fn) => fn());
     },

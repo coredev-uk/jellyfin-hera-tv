@@ -634,7 +634,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument .type-interior .MuiButton-outlined:hover,
 .dashboardDocument .type-interior .MuiButton-containedError:hover,
 .dashboardDocument .type-interior .MuiButton-containedInherit:hover {
-  background: var(--hera-hover) !important;
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong) !important;
 }
 .dashboardDocument .type-interior .MuiButton-text,
 .dashboardDocument .type-interior .MuiButton-textPrimary,
@@ -720,7 +720,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   box-shadow: none !important;
 }
 .dashboardDocument .type-interior .fab:hover {
-  background: var(--hera-hover) !important;
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong) !important;
 }
 
 /* ====================================================================================== *
@@ -770,7 +770,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   background: var(--hera-fill-strong) !important;
 }
 .dashboardDocument .type-interior .MuiFilledInput-root.Mui-focused {
-  box-shadow: 0 0 0 1px var(--hera-label-2) inset;
+  box-shadow: 0 0 0 2px var(--hera-focus);
 }
 .dashboardDocument .type-interior .MuiFilledInput-root.Mui-disabled {
   opacity: 0.55;
@@ -828,7 +828,9 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument .type-interior .emby-input:focus,
 .dashboardDocument .type-interior .emby-select:focus,
 .dashboardDocument .type-interior .emby-textarea:focus {
-  border-color: var(--hera-label-2) !important;
+  border-color: transparent !important;
+  background-color: var(--hera-fill-strong) !important;
+  box-shadow: 0 0 0 2px var(--hera-focus);
 }
 .dashboardDocument .type-interior .emby-select {
   padding-right: 44px !important;
@@ -1175,6 +1177,10 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument .type-interior .content-primary .MuiListItem-root:has(> .MuiListItemButton-root) {
   padding: 0;
 }
+/* A row with an action at its right leaves the room MUI's own padding would have. */
+.dashboardDocument .type-interior .content-primary .MuiListItem-root:has(> .MuiListItemSecondaryAction-root) {
+  padding-right: 56px;
+}
 .dashboardDocument .type-interior .content-primary .MuiListItemButton-root {
   padding: 10px var(--dash-pad);
 }
@@ -1280,15 +1286,16 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   color: var(--hera-label-3);
 }
 
-/* Library counts: small tiles, the number set in the row's own type */
-.dashboardDocument #dashboardPage .MuiBox-root > .MuiGrid-container {
+/* Library counts: small tiles, the number set in the row's own type. `.content-primary` is a Box
+ * too, so without the :not() these rules would also take the page's own grid (as a phone shows). */
+.dashboardDocument #dashboardPage .MuiBox-root:not(.content-primary) > .MuiGrid-container {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   width: 100%;
   margin: 0;
 }
-.dashboardDocument #dashboardPage .MuiBox-root > .MuiGrid-container > .MuiGrid-item {
+.dashboardDocument #dashboardPage .MuiBox-root:not(.content-primary) > .MuiGrid-container > .MuiGrid-item {
   width: auto;
   max-width: none;
   margin: 0;
@@ -1577,6 +1584,42 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   }
 }
 
+/* On a phone the server facts and the library counts go two to a row, so no label is cut. */
+@container dash (max-width: 479px) {
+  .dashboardDocument #dashboardPage .MuiBox-root:not(.content-primary) > .MuiGrid-container {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* The labels are one stack and the values another; each pair of facts is a label row over a value row. */
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(1) > :nth-child(odd) {
+    grid-column: 1;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(1) > :nth-child(even) {
+    grid-column: 2;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(2) > :nth-child(odd) {
+    grid-column: 1;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(2) > :nth-child(even) {
+    grid-column: 2;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(1) > :nth-child(-n + 2) {
+    grid-row: 1;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(2) > :nth-child(-n + 2) {
+    grid-row: 2;
+    margin-bottom: 10px;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(1) > :nth-child(n + 3) {
+    grid-row: 3;
+  }
+  .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) .MuiPaper-root > .MuiStack-root > .MuiStack-root:nth-child(2) > :nth-child(n + 3) {
+    grid-row: 4;
+  }
+}
+
 /* The page is the container: one column, two from 640, then the twelve-column page from 900.
  * Where there is room the server's three actions leave the section and sit on the title's line. */
 @container dash (min-width: 640px) {
@@ -1598,7 +1641,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   }
   .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(1) > .MuiStack-root > .MuiStack-root:last-child {
     position: absolute;
-    top: 9px;
+    top: -7px;
     right: var(--dash-edge);
   }
   .dashboardDocument #dashboardPage .content-primary > .MuiGrid-container > .MuiGrid-item:nth-child(1) > .MuiStack-root > .MuiBox-root:nth-child(2) {
@@ -1633,7 +1676,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument #userProfilesPage .sectionTitleContainer {
   align-items: center;
   gap: 12px;
-  margin: -6px 0 18px;
+  margin: -10px 0 18px;
 }
 .dashboardDocument #userProfilesPage .sectionTitleContainer .sectionTitle {
   margin: 0;
@@ -1644,10 +1687,16 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 }
 .dashboardDocument #userProfilesPage .localUsers {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   justify-content: start;
   gap: 24px 20px;
   padding: 0 !important;
+}
+/* People are circles, here as in Settings and the Control Center. */
+.dashboardDocument #userProfilesPage .localUsers .cardContent,
+.dashboardDocument #userProfilesPage .localUsers .cardImageContainer {
+  border-radius: 50%;
+  overflow: hidden;
 }
 .dashboardDocument #userProfilesPage .localUsers > .card {
   width: auto;
@@ -1799,7 +1848,9 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) input:focus,
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) select:focus,
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) textarea:focus {
-  border-color: var(--hera-label-2);
+  border-color: transparent;
+  background-color: var(--hera-fill-strong);
+  box-shadow: 0 0 0 2px var(--hera-focus);
   outline: none;
 }
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button:not(.emby-button):not(.MuiButtonBase-root) {
@@ -1814,7 +1865,7 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   transition: transform var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
 }
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button:not(.emby-button):not(.MuiButtonBase-root):hover {
-  background: var(--hera-hover);
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong);
 }
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button:not(.emby-button):not(.MuiButtonBase-root):active {
   transform: scale(0.95);
@@ -2070,6 +2121,11 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   gap: 6px;
   margin: 10px 2px 0;
 }
+/* Jellyfin's `.content-primary p` is more specific than the footer rule and would enlarge it. */
+.dashboardDocument .type-interior .hera-cfg .hera-set-group__foot {
+  font-size: 13px;
+  line-height: 1.4;
+}
 .hera-cfg .hera-set-group__foot .material-icons {
   flex: none;
   margin-top: 1px;
@@ -2081,6 +2137,11 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
   flex-direction: column;
   gap: 22px;
   padding: 20px;
+}
+/* A switch row inside a card (Letterboxd) runs edge to edge, as the rows of every other group do. */
+.hera-cfg-card > .hera-set-row {
+  width: auto;
+  margin: -20px -20px 0;
 }
 .hera-cfg-field__head {
   display: flex;
@@ -2285,6 +2346,25 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 }
 .hera-cfg-compat .hera-cfg-verdict {
   flex: none;
+}
+/* What follows a list (a build button and its status) keeps clear of it. */
+.hera-cfg .hera-set-list + .hera-cfg-compat {
+  margin-top: 18px;
+}
+
+/* Glass gives way to a solid surface when the system asks for less transparency. */
+@media (prefers-reduced-transparency: reduce) {
+  .hera-cfg-bar {
+    background: var(--hera-surface-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .dashboardDocument .MuiPopover-paper,
+  .dashboardDocument .MuiMenu-paper {
+    background: var(--hera-surface-2) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 .hera-cfg-table-wrap {
   overflow-x: auto;
