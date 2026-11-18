@@ -2059,6 +2059,7 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
 .hera-hero__toggle {
   width: 36px;
   min-width: 36px;
+  height: 36px;
 }
 .hera-hero__toggle .material-icons {
   font-size: 20px;
