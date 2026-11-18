@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.11.0.0",
+        "changelog": "Letterboxd, built in: each person links their own account under Settings > Profile, and every film they watch to the end is logged to their diary (rewatches marked, days already logged skipped), with an import of past watches. The admin page sets the Letterboxd API pair (or HERATV_LETTERBOXD_API_KEY and _SECRET). New settings: who sees the request quality capsule, which quality it starts on, and the exact Radarr and Sonarr profiles for 1080p and 4K (a 4K server makes a 4K request); how far ahead Leaving Soon looks; a switch per seasonal set; and, per person under Settings > Playback, post-play and its trailers. Certificates and streaming collections follow the configured region.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.11.0.0/hera-tv_1.11.0.0.zip",
+        "checksum": "9617611449c25ede5361d46ce45cb8f3",
+        "timestamp": "2026-11-18T21:35:57Z"
+      },
+      {
         "version": "1.10.4.0",
         "changelog": "Every poster of something in the library plays from where it sits: Hera's home rows, search and Seerr's In Your Library now show the same glass play disc over a light frost as Jellyfin's own posters, and Jellyfin's disc is the same size as Hera's. Trailers never show YouTube's \"Video unavailable\" page: the server asks YouTube which trailers may play outside youtube.com, post-play reveals a trailer only once it is playing and moves to the next if one fails, and a title page's Trailer button opens Hera's own full-screen trailer layer (or goes when none will play).\n",
         "targetAbi": "12.4.0.0",
