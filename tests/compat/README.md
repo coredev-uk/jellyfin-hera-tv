@@ -73,7 +73,7 @@ pages under test. The login page is therefore not covered by this run.
 
 ## In GitHub Actions
 
-`.github/workflows/compat.yaml` builds the plugin with the Containerfile's build stage, then runs
+`.github/workflows/compat.yaml` builds the plugin as the release does (`dotnet build -c Release`), then runs
 this on every pull request, every push to main, on demand (`workflow_dispatch` takes a
 `jellyfin_tag`) and nightly.
 

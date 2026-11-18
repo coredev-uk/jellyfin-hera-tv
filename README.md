@@ -3,7 +3,6 @@
 ### Hera TV
 
 [![Jellyfin 12.4](https://img.shields.io/badge/jellyfin-12.4-00A4DC?logo=jellyfin&logoColor=white)](https://jellyfin.org)
-[![Image](https://img.shields.io/badge/image-ghcr.io%2Fcoredev--uk%2Fjellyfin--hera--tv-2496ED?logo=docker&logoColor=white)](https://github.com/coredev-uk/jellyfin-hera-tv/pkgs/container/jellyfin-hera-tv)
 [![Build](https://github.com/coredev-uk/jellyfin-hera-tv/actions/workflows/build.yaml/badge.svg)](https://github.com/coredev-uk/jellyfin-hera-tv/actions/workflows/build.yaml)
 
 A Jellyfin plugin that gives the web client the look of Apple's TV app, with Seerr, Sonarr, Radarr and SABnzbd built into the library.
@@ -11,8 +10,7 @@ A Jellyfin plugin that gives the web client the look of Apple's TV app, with See
 [Features](#features) •
 [Install](#install) •
 [Configuration](#configuration) •
-[Design](DESIGN.md) •
-[Image](https://github.com/coredev-uk/jellyfin-hera-tv/pkgs/container/jellyfin-hera-tv)
+[Design](DESIGN.md)
 
 <br clear="left">
 
@@ -51,7 +49,7 @@ The plugin restyles Jellyfin's own pages and adds sections of its own. Jellyfin'
 
 ## Install
 
-The plugin is one DLL and its `meta.json`. Jellyfin loads it from `plugins/HeraTV` in its config folder.
+The plugin is one DLL and its `meta.json`, in a folder of its own under `plugins` in Jellyfin's config folder.
 
 **From the plugin catalogue.** In Jellyfin, open Dashboard → Plugins → Repositories, add a repository with this URL, then find Hera TV under Catalogue, install it and restart Jellyfin:
 
@@ -60,17 +58,6 @@ https://raw.githubusercontent.com/coredev-uk/jellyfin-hera-tv/manifest/manifest.
 ```
 
 Updates arrive the same way. Jellyfin's Update Plugins task installs a newer version from the catalogue, or you can update it by hand there, and a restart loads it.
-
-**From the image.** `ghcr.io/coredev-uk/jellyfin-hera-tv:<commit>` carries the built plugin. Run it as an init container with Jellyfin's `/config` mounted, and it replaces `/config/plugins/HeraTV` with its own copy:
-
-```yaml
-initContainers:
-  hera-tv:
-    image: ghcr.io/coredev-uk/jellyfin-hera-tv:<commit>@sha256:<digest>
-    volumeMounts:
-      - name: config
-        mountPath: /config
-```
 
 <details>
 <summary>Building it yourself, and installing by hand</summary>
