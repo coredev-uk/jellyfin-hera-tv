@@ -1,0 +1,537 @@
+/* Hera TV: notifications (the header bell, its panel, and "New" on titles). Loaded after hera-tv.css. */
+
+/* ---------- the bell ------------------------------------------------------------------------ */
+
+/* In the modern app bar the bell wears the same glass as its neighbours: it carries their class
+ * (see .MuiAppBar-root .MuiIconButton-root in hera-tv.css), which sets its size, fill and hover.
+ * Beside the TV and legacy header's plain buttons it carries those buttons' classes instead. */
+.hera-bell {
+  position: relative;
+  flex: none;
+  cursor: pointer;
+}
+/* The modern bar's buttons are Material UI's, which Hera restyles by class; this one has none of
+ * their emotion styles, so what they give a button is set here. */
+.MuiAppBar-root .hera-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  font: inherit;
+}
+.MuiAppBar-root .hera-bell .material-icons {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* The unread count: a small solid dot on the bell's shoulder, in the selection colours so it holds
+ * 4.5:1 on glass and over artwork alike, ringed in the ground so it cuts out from the bell. */
+.hera-bell__count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  box-shadow: 0 0 0 2px var(--hera-bg);
+  font: 700 11px/18px var(--hera-font);
+  text-align: center;
+  pointer-events: none;
+}
+.hera-bell__count[hidden] {
+  display: none;
+}
+
+/* On a TV the bell takes the header's own focus (the enlarged icon and white ring that its
+ * neighbours get), and a count sized for ten feet. */
+.layout-tv .hera-bell__count {
+  top: 4px;
+  right: 4px;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+/* ---------- the panel: Control Center's material and motion --------------------------------- */
+
+.hera-nt {
+  --nt-art: 96px;
+  --nt-pad: 8px;
+  --nt-gap: 12px;
+  /* hera-notify.js sets these from the bell's position. */
+  position: fixed;
+  inset: var(--nt-top, 72px) var(--nt-right, var(--hera-edge)) auto auto;
+  margin: 0;
+  padding: 0;
+  width: min(420px, calc(100vw - 24px));
+  max-height: calc(100vh - var(--nt-top, 72px) - 20px);
+  border: 0;
+  border-radius: 28px;
+  background: transparent;
+  color: var(--hera-label);
+  overflow: visible;
+}
+.hera-nt::backdrop {
+  background: rgba(0, 0, 0, 0.3);
+}
+:root[data-hera-scheme="light"] .hera-nt::backdrop {
+  background: rgba(0, 0, 0, 0.18);
+}
+.hera-nt[open] {
+  transform-origin: top right;
+  animation: hera-nt-in var(--hera-slow) var(--hera-ease);
+}
+@keyframes hera-nt-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
+.hera-nt__panel {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: inherit;
+  overflow: hidden;
+  border-radius: 28px;
+  background: var(--hera-glass);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge), var(--hera-shadow-lift);
+  color: var(--hera-label);
+}
+.hera-nt__panel:focus {
+  outline: none !important;
+}
+
+.hera-nt__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 18px 20px 8px 24px;
+}
+.hera-nt__title {
+  margin: 0;
+  font: 700 20px/1.2 var(--hera-font-display);
+  letter-spacing: -0.02em;
+}
+.hera-nt__headrow {
+  display: flex;
+}
+.hera-nt__markall {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--hera-fill);
+  color: var(--hera-label);
+  font: 600 13px/1 var(--hera-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-nt__markall:hover {
+  background: var(--hera-fill-strong);
+}
+.hera-nt__markall:active {
+  transform: scale(0.96);
+}
+
+.hera-nt__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 10px;
+  scrollbar-width: thin;
+}
+
+.hera-nt__heading {
+  margin: 10px 16px 4px;
+  font: 650 13px/1.3 var(--hera-font);
+  letter-spacing: 0;
+  color: var(--hera-label-2);
+}
+.hera-nt__list,
+.hera-nt__posters {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- a notice ---- */
+
+.hera-nt__item {
+  appearance: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--nt-gap);
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--nt-pad) 34px var(--nt-pad) var(--nt-pad);
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--hera-label);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease);
+}
+.hera-nt__item:hover {
+  background: var(--hera-hover);
+}
+.hera-nt__item:active {
+  background: var(--hera-fill);
+}
+.hera-nt__notice.has-posters > .hera-nt__item {
+  padding-bottom: 6px;
+}
+
+.hera-nt__art,
+.hera-nt__mini {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--hera-fill);
+  color: var(--hera-label-2);
+}
+.hera-nt__art--wide {
+  width: var(--nt-art);
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+}
+.hera-nt__art--poster {
+  width: calc(var(--nt-art) * 0.5);
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+}
+.hera-nt__art .material-icons {
+  font-size: 24px;
+}
+.hera-nt__art img,
+.hera-nt__mini img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hera-nt__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hera-nt__name,
+.hera-nt__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.hera-nt__name {
+  font: 500 14px/1.3 var(--hera-font);
+  letter-spacing: -0.005em;
+  color: var(--hera-label-2);
+}
+/* Unread reads at full strength and bold; read steps back, still above 4.5:1. */
+.is-unread > .hera-nt__item .hera-nt__name {
+  font-weight: 700;
+  color: var(--hera-label);
+}
+.hera-nt__desc {
+  font: 400 13px/1.35 var(--hera-font);
+  color: var(--hera-label-2);
+}
+.hera-nt__time {
+  margin-top: 2px;
+  font: 500 12px/1.3 var(--hera-font);
+  color: var(--hera-label-3);
+}
+.hera-nt__dot {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 999px;
+  background: var(--hera-select);
+}
+.hera-nt__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- an arrival's posters, under its text ---- */
+
+.hera-nt__posters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--nt-pad) 10px calc(var(--nt-pad) + var(--nt-art) + var(--nt-gap));
+}
+.hera-nt__poster {
+  display: block;
+  border-radius: 6px;
+  transition: box-shadow var(--hera-fast) var(--hera-ease);
+}
+.hera-nt__poster:hover {
+  box-shadow: 0 0 0 2px var(--hera-label-3);
+}
+.hera-nt__mini {
+  width: 40px;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+}
+.hera-nt__mini .material-icons {
+  font-size: 18px;
+}
+.hera-nt__more {
+  padding: 0 4px;
+  font: 600 12px/1 var(--hera-font);
+  color: var(--hera-label-2);
+}
+
+/* ---- loading, empty and failed ---- */
+
+.hera-nt__ghost {
+  display: flex;
+  align-items: center;
+  gap: var(--nt-gap);
+  padding: var(--nt-pad);
+  animation: hera-nt-pulse 1.6s ease-in-out infinite;
+}
+.hera-nt__ghost .hera-nt__art {
+  background: var(--hera-fill-strong);
+}
+.hera-nt__bar {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--hera-fill-strong);
+}
+.hera-nt__bar--short {
+  width: 55%;
+}
+@keyframes hera-nt-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+.hera-nt__note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 24px 40px;
+  text-align: center;
+}
+.hera-nt__note > .material-icons {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--hera-fill);
+  color: var(--hera-label-2);
+  font-size: 28px;
+}
+.hera-nt__note-text {
+  margin: 0;
+  font: 600 15px/1.35 var(--hera-font);
+  color: var(--hera-label);
+}
+.hera-nt__retry {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  height: 36px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  font: 600 14px/1 var(--hera-font);
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-nt__retry:hover {
+  background: var(--hera-select-hover);
+}
+.hera-nt__retry:active {
+  transform: scale(0.96);
+}
+
+/* ---- the TV layout: 10-foot type, and the focused notice is the selected one ---- */
+
+.layout-tv .hera-nt {
+  --nt-art: 160px;
+  --nt-pad: 10px;
+  --nt-gap: 20px;
+  width: min(680px, calc(100vw - 48px));
+  border-radius: 36px;
+}
+.layout-tv .hera-nt__panel {
+  border-radius: 36px;
+}
+.layout-tv .hera-nt__head {
+  min-height: 52px;
+  padding: 24px 28px 10px 32px;
+}
+.layout-tv .hera-nt__title {
+  font-size: 30px;
+}
+.layout-tv .hera-nt__markall {
+  height: 44px;
+  padding: 0 22px;
+  font-size: 17px;
+}
+.layout-tv .hera-nt__heading {
+  margin: 14px 20px 6px;
+  font-size: 18px;
+}
+.layout-tv .hera-nt__item {
+  border-radius: 24px;
+  padding-right: 44px;
+}
+.layout-tv .hera-nt__name {
+  font-size: 20px;
+}
+.layout-tv .hera-nt__desc {
+  font-size: 17px;
+}
+.layout-tv .hera-nt__time {
+  font-size: 15px;
+}
+.layout-tv .hera-nt__dot {
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+}
+.layout-tv .hera-nt__mini {
+  width: 56px;
+}
+.layout-tv .hera-nt__more {
+  font-size: 16px;
+}
+.layout-tv .hera-nt__note-text {
+  font-size: 20px;
+}
+.layout-tv .hera-nt__retry {
+  height: 48px;
+  padding: 0 26px;
+  font-size: 18px;
+}
+.layout-tv .hera-nt__item:focus,
+.layout-tv .hera-nt__markall:focus,
+.layout-tv .hera-nt__retry:focus {
+  outline: none !important;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+}
+.layout-tv .hera-nt__item:focus .hera-nt__name,
+.layout-tv .hera-nt__item:focus .hera-nt__desc,
+.layout-tv .hera-nt__item:focus .hera-nt__time {
+  color: var(--hera-on-select);
+}
+.layout-tv .hera-nt__item:focus .hera-nt__dot {
+  background: var(--hera-on-select);
+}
+.layout-tv .hera-nt__poster:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 4px var(--hera-focus);
+}
+
+/* ---------- "New" on a title ------------------------------------------------------------------ */
+
+/* A chip in the quality chips' voice (hera-extras.css), in the selection colours so it can't be
+ * mistaken for one: solid, in a corner the quality chips don't use. It carries .hera-dark, as the
+ * chips do, so on artwork it is white with black text in both schemes. */
+.hera-new {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  font: 700 10px/1 var(--hera-font);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.card .hera-new {
+  left: 6px;
+  top: 6px;
+}
+/* A card's own badge (a request's state) has the corner: the chip sits under it. */
+.hera-card__art:has(> .hera-card__badge) > .hera-new {
+  top: 36px;
+}
+.layout-tv .hera-new {
+  left: 12px;
+  top: 12px;
+  padding: 4px 9px;
+  font-size: 14px;
+}
+.layout-tv .card .hera-new {
+  left: 10px;
+  top: 10px;
+}
+.layout-tv .hera-card__art:has(> .hera-card__badge) > .hera-new {
+  top: 48px;
+}
+
+/* On a detail page, the meta line carries it, with the other chips. */
+.itemMiscInfo .hera-new-meta {
+  display: inline-flex;
+  align-items: center;
+}
+.hera-new-chip {
+  padding: 0 6px;
+  border-radius: var(--hera-r-badge);
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  font: 700 11px/18px var(--hera-font);
+  white-space: nowrap;
+}
+.layout-tv .hera-new-chip {
+  padding: 0 9px;
+  font-size: 15px;
+  line-height: 24px;
+}

@@ -495,6 +495,18 @@ export default function (view) {
     return group("Title pages", el("div", { class: "hera-set-list" }, rows), foot("These apply to everyone on this server."));
   };
 
+  const notifySection = () => {
+    refs.notifySwitch = switchRow(
+      "notifications",
+      "Notifications",
+      "A bell in the header with each person's own request progress, new episodes of shows they're watching, and a daily summary of new films and series. Each person chooses which of these they get.",
+      server.features.notifications,
+    );
+    const hour = numberRow("heraArrivalsHour", "schedule", "Daily summary hour", "The hour of the day, 0 to 23 in the server's time, from which the summary of new arrivals is written.", server.notifications.arrivalsHour, 0, 23);
+    refs.arrivalsHour = hour.input;
+    return group("Notifications", el("div", { class: "hera-set-list" }, [refs.notifySwitch, hour.row]), foot("These apply to everyone on this server."));
+  };
+
   // ---------- compatibility -------------------------------------------------------------------
 
   const compatRow = (iconName, label, value) =>
@@ -665,6 +677,7 @@ export default function (view) {
         ...ARR.map(([id]) => sections.arr[id]),
         homeSection(),
         rowsSection(),
+        notifySection(),
         titleSection(),
         sections.compat,
         bar,
@@ -714,6 +727,8 @@ export default function (view) {
     for (const [key, bodyKey] of TITLE_SWITCHES) {
       body[bodyKey] = refs.switches[key].getAttribute("aria-checked") === "true";
     }
+    body.notificationsEnabled = refs.notifySwitch.getAttribute("aria-checked") === "true";
+    body.arrivalsHour = refs.arrivalsHour.value === "" ? undefined : Number(refs.arrivalsHour.value);
     body.watchRegion = refs.region.value.trim();
     const open = (input) => !input.readOnly;
     if (open(refs.seerrUrl)) body.seerrUrl = refs.seerrUrl.value.trim();

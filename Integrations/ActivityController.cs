@@ -15,12 +15,9 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 [ApiController]
 [Authorize]
 [Route("HeraTV/activity")]
-public class ActivityController(UpstreamClient upstream, LibraryLookup library, IUserManager userManager) : ControllerBase
+public class ActivityController(UpstreamClient upstream, UserRequests requests, LibraryLookup library, IUserManager userManager) : ControllerBase
 {
     private const int MaxRequests = 60;
-
-    // Seerr's own request rank: what still needs looking at comes first when several requests share a title.
-    private static readonly string[] StatusRank = ["pending", "approved", "failed", "available", "declined"];
 
     /// <summary>
     /// The signed-in user's own Seerr requests, one per title, each with its state in the download
@@ -56,77 +53,21 @@ public class ActivityController(UpstreamClient upstream, LibraryLookup library, 
             return Ok(Array.Empty<object>());
         }
 
-        var live = ActivityOn();
-        var queueTask = live ? ArrActivity.QueueAsync(upstream) : Task.FromResult<IReadOnlyList<ArrActivity.QueueItem>>([]);
-        var sabTask = live ? ArrActivity.SabAsync(upstream) : Task.FromResult<ArrActivity.SabQueue?>(null);
-        var node = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}/requests?take={Math.Clamp(take, 1, MaxRequests)}&skip=0", TimeSpan.FromSeconds(20), seerrUser).ConfigureAwait(false);
-        var queue = await queueTask.ConfigureAwait(false);
-        var sab = await sabTask.ConfigureAwait(false);
+        var loaded = await requests.LoadAsync(seerrUser.Value, Math.Clamp(take, 1, MaxRequests)).ConfigureAwait(false);
         var settings = IntegrationSettings.Current;
         var admin = IsAdmin();
 
-        // A title requested more than once (a series, then its next series) is one entry.
-        var merged = new List<Merged>();
-        foreach (var request in node?["results"]?.AsArray() ?? [])
+        var rows = (loaded?.Entries ?? []).Select(e => new
         {
-            var media = request?["media"];
-            var type = (string?)media?["mediaType"] ?? (string?)request?["type"];
-            var tmdbId = media?["tmdbId"]?.GetValue<int?>();
-            if (request is null || type is null || tmdbId is null)
-            {
-                continue;
-            }
+            item = SeerrMapper.Item(e.Title, target, library),
+            requestStatus = e.Status,
+            requestedAt = e.RequestedAt,
+            seasons = e.Seasons.Order().ToArray(),
+            activity = e.Activity?.ToJson(loaded!.Sab),
+            links = ExternalLinks.For(settings, admin, e.Type, e.TmdbId, e.Activity is null ? null : ServiceOf(e.Type), e.Activity?.Slug),
+        }).ToArray();
 
-            var status = SeerrMapper.RequestStatus(request["status"]?.GetValue<int>() ?? 0);
-            var seasons = (request["seasons"]?.AsArray() ?? []).Select(s => s?["seasonNumber"]?.GetValue<int?>()).OfType<int>().ToList();
-            var existing = merged.Find(m => m.Type == type && m.TmdbId == tmdbId);
-            if (existing is null)
-            {
-                merged.Add(new Merged(type, tmdbId.Value, media?["externalServiceId"]?.GetValue<int?>(), media?["tvdbId"]?.GetValue<int?>(), status, (string?)request["createdAt"], seasons));
-                continue;
-            }
-
-            existing.Seasons.AddRange(seasons.Except(existing.Seasons));
-            if (Array.IndexOf(StatusRank, status) < Array.IndexOf(StatusRank, existing.Status))
-            {
-                existing.Status = status;
-            }
-
-            if (string.CompareOrdinal((string?)request["createdAt"], existing.RequestedAt) > 0)
-            {
-                existing.RequestedAt = (string?)request["createdAt"];
-            }
-        }
-
-        var rows = await Task.WhenAll(merged.Select(async m =>
-        {
-            // Request records carry ids only; the title's own record (cached) supplies the rest.
-            var title = await upstream.SeerrGetAsync($"api/v1/{m.Type}/{m.TmdbId}?language=en", TimeSpan.FromHours(6)).ConfigureAwait(false);
-            if (title is null)
-            {
-                return null;
-            }
-
-            title["mediaType"] = m.Type;
-            ArrActivity.Activity? activity = null;
-            // Only an approved request can be in the download stack.
-            if (live && m.Status is "approved" or "available")
-            {
-                activity = await LookUp(m.Type, m.TmdbId, m.ArrId, m.TvdbId ?? title["externalIds"]?["tvdbId"]?.GetValue<int?>(), m.Seasons, queue).ConfigureAwait(false);
-            }
-
-            return new
-            {
-                item = SeerrMapper.Item(title, target, library),
-                requestStatus = m.Status,
-                requestedAt = m.RequestedAt,
-                seasons = m.Seasons.Order().ToArray(),
-                activity = activity?.ToJson(sab),
-                links = ExternalLinks.For(settings, admin, m.Type, m.TmdbId, activity is null ? null : ServiceOf(m.Type), activity?.Slug),
-            };
-        })).ConfigureAwait(false);
-
-        return Ok(rows.Where(r => r is not null));
+        return Ok(rows);
     }
 
     /// <summary>A film's or show's state in the download stack, for its sheet or detail page.</summary>
@@ -140,7 +81,7 @@ public class ActivityController(UpstreamClient upstream, LibraryLookup library, 
 
         var type = mediaType == "tv" ? "tv" : "movie";
         var settings = IntegrationSettings.Current;
-        if (!ActivityOn())
+        if (!UserRequests.ActivityOn())
         {
             return Ok(new { activity = (object?)null, links = ExternalLinks.For(settings, false, type, tmdbId, null, null) });
         }
@@ -183,31 +124,11 @@ public class ActivityController(UpstreamClient upstream, LibraryLookup library, 
 
     private bool IsAdmin() => User.IsInRole("Administrator");
 
-    // Sonarr or Radarr connected, and the dashboard's "Request progress" switch on.
-    private static bool ActivityOn() => IntegrationSettings.Current.ActivityEnabled && Plugin.Instance?.Configuration.ActivityEnabled != false;
-
     private static ArrService ServiceOf(string mediaType) => mediaType == "tv" ? ArrService.Sonarr : ArrService.Radarr;
 
     private User? CurrentUser()
     {
         var claim = User.FindFirst("Jellyfin-UserId")?.Value;
         return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
-
-    private sealed class Merged(string type, int tmdbId, int? arrId, int? tvdbId, string status, string? requestedAt, List<int> seasons)
-    {
-        public string Type { get; } = type;
-
-        public int TmdbId { get; } = tmdbId;
-
-        public int? ArrId { get; } = arrId;
-
-        public int? TvdbId { get; } = tvdbId;
-
-        public string Status { get; set; } = status;
-
-        public string? RequestedAt { get; set; } = requestedAt;
-
-        public List<int> Seasons { get; } = seasons;
     }
 }

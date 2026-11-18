@@ -136,6 +136,8 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
         config.RatingsEnabled = body.RatingsEnabled ?? config.RatingsEnabled;
         config.QualityBadgesEnabled = body.QualityBadgesEnabled ?? config.QualityBadgesEnabled;
         config.ActivityEnabled = body.ActivityEnabled ?? config.ActivityEnabled;
+        config.NotificationsEnabled = body.NotificationsEnabled ?? config.NotificationsEnabled;
+        config.ArrivalsHour = Math.Clamp(body.ArrivalsHour ?? config.ArrivalsHour, 0, 23);
         if (!string.IsNullOrEmpty(region))
         {
             config.WatchRegion = region.ToUpperInvariant();
@@ -265,6 +267,7 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
             },
             features = IntegrationSettings.Features(config),
             elsewhere = new { region = string.IsNullOrWhiteSpace(config.WatchRegion) ? "GB" : config.WatchRegion.ToUpperInvariant() },
+            notifications = new { arrivalsHour = Math.Clamp(config.ArrivalsHour, 0, 23) },
         };
     }
 
@@ -451,6 +454,10 @@ public class SettingsController(UpstreamClient upstream) : ControllerBase
         public bool? QualityBadgesEnabled { get; set; }
 
         public bool? ActivityEnabled { get; set; }
+
+        public bool? NotificationsEnabled { get; set; }
+
+        public int? ArrivalsHour { get; set; }
 
         public string? WatchRegion { get; set; }
     }

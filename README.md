@@ -39,6 +39,7 @@ The plugin restyles Jellyfin's own pages and adds sections of its own. Jellyfin'
 | Discover | Trending, popular and upcoming titles from Seerr, requestable from a title sheet |
 | Extras | Ratings, where to watch, quality badges, hidden titles, and Maintainerr's "Leaving Soon" |
 | Activity | Sonarr, Radarr and SABnzbd progress on the titles they're fetching |
+| Notifications | A bell in the header, and "New" on titles, for your own requests (approved, downloading, ready to watch, declined), new episodes of shows you've watched in the last 90 days, and a daily summary of what arrived. Only while Jellyfin is open. Each person picks which kinds they get |
 | Statistics | A Dashboard page for admins with what's playing now, history, top users and titles, playback methods, devices and peak hours, and a page for everyone with only their own watching. History comes from the Playback Reporting plugin when it's installed. Concurrent streams, resolution, bitrate and transcoding are recorded by Hera TV itself once a minute, so they build up from the day it's installed |
 | Dashboard | Jellyfin's admin pages in the same look, plus a settings page for the plugin |
 
