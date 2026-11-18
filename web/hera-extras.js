@@ -15,7 +15,7 @@
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { kit } = heraTv;
+  const { kit, jf } = heraTv;
   const { el, icon } = kit;
 
   const BADGE_LABEL = { "4k": "4K", dv: "Dolby Vision", hdr: "HDR", atmos: "Dolby Atmos", "7.1": "7.1", "5.1": "5.1" };
@@ -597,7 +597,7 @@
   };
 
   const paintDetail = (page, data) => {
-    const meta = page.querySelector(".itemMiscInfo-primary");
+    const meta = page.querySelector(jf.detailMisc);
     if (meta) {
       meta.querySelectorAll(".hera-xmeta").forEach((node) => node.remove());
       const ratings = data.ratings ? ratingsNode(data.ratings) : null;
@@ -632,7 +632,7 @@
     };
     paintDetail(page, shown);
     // Jellyfin draws the meta line again when the item reloads (a played mark, a refreshed rating).
-    const meta = page.querySelector(".itemMiscInfo-primary");
+    const meta = page.querySelector(jf.detailMisc);
     const observer = new MutationObserver(() => {
       if (meta.querySelector(".hera-xmeta") || (!shown.ratings && !shown.badges?.length)) return;
       observer.disconnect();
@@ -722,16 +722,13 @@
     startCards().catch((error) => console.error("[Hera TV:extras]", error));
   };
 
+  // Two modules, so that a detail page Jellyfin has redrawn costs only the detail page's extras
+  // (the ratings, quality and where-to-watch), not the badges on cards or hidden titles.
   heraTv.register({
     name: "extras",
-    onView(page, { itemId }) {
+    onView() {
       applyDefaults();
       start();
-      if (page.id === "itemDetailPage") {
-        mountDetail(page, itemId).catch((error) => console.error("[Hera TV:extras]", error));
-      } else {
-        clearDetail();
-      }
     },
     teardown() {
       state.run++;
@@ -741,7 +738,6 @@
       clearTimeout(state.badgeTimer);
       closeMenu({ restore: false });
       toast?.remove();
-      clearDetail();
       document.querySelectorAll(".hera-quality").forEach((node) => node.remove());
       document.querySelectorAll("[data-hera-qid]").forEach((node) => delete node.dataset.heraQid);
       document.querySelectorAll(".hera-card--hidden").forEach((cell) => {
@@ -750,6 +746,23 @@
       });
       started = false;
       delete heraTv.hidden;
+    },
+  });
+
+  heraTv.register({
+    name: "extras-detail",
+    // The ratings and quality badges join the meta line; without it there is nothing to join.
+    requires: { itemDetailPage: ["detailMisc"] },
+    onView(page, { itemId }) {
+      if (page.id === "itemDetailPage") {
+        mountDetail(page, itemId).catch((error) => console.error("[Hera TV:extras]", error));
+      } else {
+        clearDetail();
+      }
+    },
+    teardown() {
+      state.run++;
+      clearDetail();
     },
   });
 })();

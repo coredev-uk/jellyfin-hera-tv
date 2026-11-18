@@ -21,9 +21,11 @@
   const kit = window.HeraTV && window.HeraTV.kit;
   if (!kit) return;
   const { el, icon, api, userId, getJSON, appearance, isTv } = kit;
+  const { jf } = window.HeraTV;
 
   const PAGE_ID = "myPreferencesMenuPage";
   const SECTION_KEY = "hera-settings-section";
+  const HOLD_MS = 4000; // how long Jellyfin's own list stays hidden while Hera's loads
 
   // Jellyfin's stock pages this app links to, by what each one still does that we do not.
   const STOCK = {
@@ -552,6 +554,12 @@
   const isAdmin = () => !!(ctx.user.Policy && ctx.user.Policy.IsAdministrator);
   const config = () => ctx.user.Configuration || {};
 
+  // Jellyfin's own Sign Out, should its Dashboard helper go; the stock list stays in the page, hidden.
+  const signOut = () => {
+    if (window.Dashboard?.logout) return window.Dashboard.logout();
+    [...ctx.page.querySelectorAll(jf.prefsLinks)].find((node) => /sign out/i.test(node.textContent))?.click();
+  };
+
   const sections = [
     {
       id: "profile",
@@ -584,9 +592,7 @@
               row({
                 icon: "logout",
                 label: "Sign Out",
-                onclick: () => {
-                  if (window.Dashboard && window.Dashboard.logout) window.Dashboard.logout();
-                },
+                onclick: signOut,
               }),
             ],
           }),
@@ -845,7 +851,7 @@
   const KNOWN = ["userprofile", "quickconnect", "mypreferencesdisplay", "mypreferenceshome", "mypreferencesplayback", "mypreferencessubtitles", "mypreferencescontrols"];
   const stockExtras = () => {
     const out = [];
-    ctx.page.querySelectorAll(".readOnlyContent a.listItem-border").forEach((node) => {
+    ctx.page.querySelectorAll(jf.prefsLinks).forEach((node) => {
       if (ctx.root.contains(node)) return;
       const href = node.getAttribute("href") || "";
       const label = (node.querySelector(".listItemBodyText") || node).textContent.trim();
@@ -914,13 +920,6 @@
     renderPane();
   };
 
-  const stockReady = async (page) => {
-    for (let i = 0; i < 30; i++) {
-      if (page.querySelector(".readOnlyContent a.listItem-border")) return;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  };
-
   const unmount = () => {
     if (!ctx) return;
     document.querySelectorAll(".hera-set-sheet").forEach((dialog) => dialog.close());
@@ -934,14 +933,18 @@
 
   const mount = async (page, user) => {
     const token = ++mountToken;
+    // Hidden while the data loads, so Jellyfin's list doesn't flash first; given back if that takes
+    // too long, so a slow or failing server never leaves the page empty.
     page.classList.add("hera-set-page");
-    await stockReady(page);
+    const release = setTimeout(() => {
+      if (token === mountToken && !(ctx && ctx.page === page && ctx.root.isConnected)) page.classList.remove("hera-set-page");
+    }, HOLD_MS);
     const [full, cultures, views, quickConnect] = await Promise.all([
       loadUser(user),
       getJSON("Localization/Cultures").catch(() => []),
       getJSON("UserViews", { userId: user }).then((r) => (r && r.Items) || []).catch(() => []),
       getJSON("QuickConnect/Enabled").catch(() => false),
-    ]);
+    ]).finally(() => clearTimeout(release));
     if (token !== mountToken || !page.isConnected) return;
     unmount();
     let remembered = null;
@@ -977,6 +980,7 @@
       to.focus();
     });
     page.append(root);
+    page.classList.add("hera-set-page");
     renderNav();
     renderPane();
     // Plugins add their menu links after the page first draws; keep "More" current.
@@ -1011,6 +1015,8 @@
 
   window.HeraTV.register({
     name: "settings",
+    // The stock menu's links are what Hera's rows lead on to, and what its "More" section mirrors.
+    requires: { myPreferencesMenuPage: ["prefsLinks"] },
     async onView(page, { params }) {
       if (page.id !== PAGE_ID) {
         unmount();
@@ -1026,8 +1032,10 @@
         await mount(page, userId());
       } catch (error) {
         console.error("[Hera TV:settings]", error);
-        // Better Jellyfin's own list than an empty page.
+        // Better Jellyfin's own list than an empty or half-built page; the core counts the failure.
+        unmount();
         page.classList.remove("hera-set-page");
+        throw error;
       }
     },
     teardown() {

@@ -63,6 +63,9 @@
   const detailsHref = (id) => `#/details?id=${id}`;
   const poster = (id) => kit.imageUrl(id, "Primary", { maxWidth: 400 });
 
+  /** Before `ref` when it is a direct child of `host`, else last: a stock section that has moved must not make the insert throw. */
+  const insertBefore = (host, node, ref) => host.insertBefore(node, ref?.parentNode === host ? ref : null);
+
   /** A card for something the library holds: its own artwork, a link to its page. */
   const libraryCard = ({ id, title, subtitle, badge }) =>
     kit.card({ href: detailsHref(id), image: poster(id), title, subtitle, badge });
@@ -311,7 +314,7 @@
     const [data, extras] = await Promise.all([fetchPerson(tmdbId), personItems(item.Id)]);
     if (!isCurrent(page, item.Id) || page.querySelector('[data-hera-seerr="films"]')) return;
 
-    const info = page.querySelector(".detailRibbon .infoWrapper");
+    const info = page.querySelector(`${HT.jf.detailRibbon} .infoWrapper`);
     info?.querySelector(".hera-person-role")?.remove();
     if (data.role) info?.querySelector(".nameContainer")?.after(el("p", { class: "hera-person-role", text: data.role }));
     watchBio(info);
@@ -319,9 +322,9 @@
     const films = buildFilms(data, extras);
     if (films.empty) return;
     films.node.dataset.heraSeerr = "films";
-    const host = page.querySelector(".detailPagePrimaryContent .detailSection");
+    const host = page.querySelector(HT.jf.detailSection);
     if (!host) return;
-    host.insertBefore(films.node, host.querySelector("#listChildrenCollapsible"));
+    insertBefore(host, films.node, host.querySelector("#listChildrenCollapsible"));
     coverStock(page, films.covers);
   };
 
@@ -397,7 +400,7 @@
   };
 
   const mountView = async (page, tmdb) => {
-    const host = page.querySelector("#homeTab");
+    const host = page.querySelector(HT.jf.homeTab);
     if (!host) return;
     unmountView();
     const abort = (view.abort = new AbortController());
@@ -486,13 +489,13 @@
     for (const other of similar) addLibrary(other.Id, other.Name, other.ProductionYear, other.Type === "Series" ? "TV Show" : "Film");
 
     // Jellyfin keeps earlier detail pages in the document, hidden: look only inside this one.
-    const host = page.querySelector(".detailPageSecondaryContainer");
+    const host = page.querySelector(HT.jf.detailSecondary);
     if (!host) return;
     const row = kit.shelf({ id: "seerr-related", title: "More Like This", cards });
     row.classList.add("hera-seerr");
     row.dataset.heraSeerr = "related";
     page.querySelector('[data-hera-seerr="related"]')?.remove();
-    host.insertBefore(row, host.querySelector("#similarCollapsible"));
+    insertBefore(host, row, host.querySelector("#similarCollapsible"));
     page.querySelector("#similarCollapsible")?.classList.add("hera-seerr-covered");
   };
 
@@ -670,6 +673,9 @@
 
   HT.register({
     name: "seerr",
+    // A person only Seerr knows is drawn in the home tab; titles and people in the library get
+    // their rows in the detail page's main and secondary sections.
+    requires: { indexPage: ["homeTab"], itemDetailPage: ["detailSection", "detailSecondary"] },
     async onView(page, { itemId }) {
       if (!kit.userId()) return;
       await syncView(page);

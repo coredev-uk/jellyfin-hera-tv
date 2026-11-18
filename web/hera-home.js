@@ -13,9 +13,10 @@
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { kit } = heraTv;
+  const { kit, jf } = heraTv;
 
   const UP_NEXT_LIMIT = 16;
+  const HOLD_MS = 4000; // how long Jellyfin's own sections wait for the person's home settings
   const SHELF_LIMIT = 20;
   const LONG_PRESS_MS = 450;
   const MINUTE = 600000000;
@@ -442,7 +443,7 @@
 
   // ---------- mounting -----------------------------------------------------------------------
 
-  const homeContainer = () => document.querySelector("#indexPage #homeTab .homeSectionsContainer");
+  const homeContainer = () => document.querySelector(jf.homeSections);
 
   /** Where a row goes among its siblings: by rank, after Jellyfin's own sections. */
   const place = (row) => {
@@ -571,9 +572,10 @@
   const tidyStock = (container) => {
     if (state.kept) {
       for (const section of container.children) {
+        if (section.classList.contains("hera-row")) continue;
         const slot = slotOf(section);
-        if (slot === null || section.classList.contains("hera-row")) continue;
-        const keep = state.kept === "all" || state.kept.has(slot);
+        // A child that is not a numbered slot is not one Hera knows how to judge: it stays.
+        const keep = slot === null || state.kept === "all" || state.kept.has(slot);
         const was = section.classList.contains("hera-stock-hidden");
         section.classList.toggle("hera-keep", keep);
         section.classList.toggle("hera-stock-hidden", !keep);
@@ -623,8 +625,15 @@
     if (!container) return;
     watch(container);
     const run = ++state.run;
-    document.documentElement.classList.add("hera-owns-home");
+    // The hold on Jellyfin's own sections is on this container, so it ends with it.
+    container.classList.add("hera-owns-home");
     state.cache.delete("home-settings");
+    // A settings request that never answers must not keep Jellyfin's sections held back.
+    const release = setTimeout(() => {
+      if (run !== state.run || state.kept !== null) return;
+      state.kept = "all";
+      if (container.isConnected) tidyStock(container);
+    }, HOLD_MS);
     homeSettings()
       .then((prefs) => {
         state.kept = keptSlots(prefs);
@@ -634,6 +643,7 @@
         state.kept = "all";
       })
       .finally(() => {
+        clearTimeout(release);
         if (run === state.run && container.isConnected) tidyStock(container);
       });
     for (const [id, job] of jobs) {
@@ -665,7 +675,7 @@
     if (!entry || !page.isConnected || kit.itemIdFromHash() !== itemId) return;
     const text = `Leaving ${kit.shortDate(entry.leavesOn)}`;
     const apply = () => {
-      const meta = page.querySelector(".itemMiscInfo-primary");
+      const meta = page.querySelector(jf.detailMisc);
       if (!meta || meta.querySelector(".hera-leaving") || !meta.children.length) return;
       const chip = kit.el("span", { class: "hera-leaving", text });
       const rating = meta.querySelector(".mediaInfoOfficialRating");
@@ -674,7 +684,7 @@
     };
     apply();
     // The meta line is redrawn when the item finishes loading; keep the chip on it.
-    const target = page.querySelector(".itemMiscInfo-primary")?.parentElement || page;
+    const target = page.querySelector(jf.detailMisc)?.parentElement || page;
     state.detailObserver = new MutationObserver(apply);
     state.detailObserver.observe(target, { childList: true, subtree: true });
   };
@@ -683,6 +693,10 @@
 
   heraTv.register({
     name: "home",
+    // Jellyfin only draws the sections container for an account with libraries; the module waits
+    // for it itself (waitForHomeSections), so the home tab is what it needs. Without the meta line
+    // there is nowhere for the Leaving chip.
+    requires: { indexPage: ["homeTab"], itemDetailPage: ["detailMisc"] },
     onView(page, { itemId, params }) {
       if (page.id === "indexPage") {
         clearChips();
@@ -709,7 +723,7 @@
       document.querySelectorAll(".hera-library-tiles").forEach((n) => n.classList.remove("hide", "hera-library-tiles"));
       document.querySelectorAll(".hera-stock-hidden").forEach((n) => n.classList.remove("hide", "hera-stock-hidden"));
       document.querySelectorAll(".hera-keep").forEach((n) => n.classList.remove("hera-keep"));
-      document.documentElement.classList.remove("hera-owns-home");
+      document.querySelectorAll(".hera-owns-home").forEach((n) => n.classList.remove("hera-owns-home"));
       state.kept = null;
       clearChips();
       stopRequestsPoll();

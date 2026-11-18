@@ -414,7 +414,7 @@
 
     const slot = el("div", { class: "hera-activity-slot" });
     const place = () => {
-      const meta = page.querySelector(".itemMiscInfo-primary");
+      const meta = page.querySelector(HT.jf.detailMisc);
       if (!meta || slot.previousElementSibling === meta) return Boolean(meta);
       meta.after(slot);
       return true;
@@ -430,9 +430,9 @@
     detail.node = slot;
     detail.stop = mounted.stop;
     // Jellyfin draws the meta line again when the item loads; the slot follows it.
-    const target = page.querySelector(".itemMiscInfo-primary")?.parentElement || page;
+    const target = page.querySelector(HT.jf.detailMisc)?.parentElement || page;
     detail.watch = new MutationObserver(() => {
-      if (!slot.isConnected || slot.previousElementSibling !== page.querySelector(".itemMiscInfo-primary")) place();
+      if (!slot.isConnected || slot.previousElementSibling !== page.querySelector(HT.jf.detailMisc)) place();
     });
     detail.watch.observe(target, { childList: true });
   };
@@ -667,7 +667,7 @@
   };
 
   const mountView = (page, ints) => {
-    const host = page.querySelector("#homeTab");
+    const host = page.querySelector(HT.jf.homeTab);
     if (!host) return;
     unmountView();
     view.abort = new AbortController();
@@ -702,6 +702,8 @@
 
   HT.register({
     name: "activity",
+    // The Requests view mounts into the home tab, and a title's download state sits after the meta line.
+    requires: { indexPage: ["homeTab"], itemDetailPage: ["detailMisc"] },
     async onView(page, { itemId }) {
       if (!kit.userId()) return;
       await syncView(page);

@@ -11,6 +11,7 @@
   const heraTv = window.HeraTV;
   if (!heraTv) return;
   const { api, el, icon, getJSON, imageUrl, runtime, userId } = heraTv.kit;
+  const { jf } = heraTv;
 
   const PAUSE_DELAY = 3000;
   const FADE_OUT = 200;
@@ -82,7 +83,7 @@
     page.classList.add("hera-dark");
     // Jellyfin 12 keeps two headers (the legacy one and the MUI app bar's); the player shows
     // whichever it uses, so both go dark while it is up.
-    dark.headers = [...document.querySelectorAll(".skinHeader")];
+    dark.headers = [...document.querySelectorAll(jf.legacyHeader)];
     dark.headers.forEach((header) => header.classList.add("hera-dark"));
     if (dark.bodyObserver) return;
     for (const node of document.body.children) if (isOverlay(node)) node.classList.add("hera-dark");
@@ -121,8 +122,10 @@
 
   const video = () => document.querySelector(".videoPlayerContainer video") || document.querySelector("video");
 
+  const osdBar = () => pauseScreen.page?.querySelector(jf.videoOsd) ?? null;
+
   const osdVisible = () => {
-    const bar = pauseScreen.page?.querySelector(".videoOsdBottom");
+    const bar = osdBar();
     if (!bar) return false;
     return !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
   };
@@ -231,7 +234,7 @@
     if (!playing || generation !== pauseScreen.generation) return;
     const item = await loadDetails(playing.item.Id);
     // The world moved on while the data loaded: the user resumed, or woke the OSD.
-    if (!item || generation !== pauseScreen.generation || !isPaused() || osdVisible() || sheetOpen()) return;
+    if (!item || generation !== pauseScreen.generation || !isPaused() || !osdBar() || osdVisible() || sheetOpen()) return;
     const total = playing.item.RunTimeTicks || item.RunTimeTicks || 0;
     const left = total ? Math.max(0, total - (playing.session.PlayState?.PositionTicks || 0)) : 0;
     // Nothing to rest on at the very end: Up Next takes over there.
@@ -246,7 +249,8 @@
 
   // Decide what the pause screen should be doing right now.
   const reconcile = (immediate) => {
-    if (!isPaused() || osdVisible() || sheetOpen()) {
+    // With no OSD to read, the pause screen cannot tell when it would sit over the controls.
+    if (!isPaused() || !osdBar() || osdVisible() || sheetOpen()) {
       cancelTimer();
       pauseScreen.generation++;
       hideLayer();
@@ -390,7 +394,9 @@
     // An Unpause that lands while the stream is still re-seeking is dropped, so wait for the
     // seek to finish (a transcode restarts its stream) before resuming.
     const landed = v ? new Promise((done) => v.addEventListener("seeked", done, { once: true })) : Promise.resolve();
-    await sessionCommand(sessionId, "Seek", { seekPositionTicks: 0 }).catch(() => {});
+    await sessionCommand(sessionId, "Seek", { seekPositionTicks: 0 }).catch(() => {
+      if (v) v.currentTime = 0;
+    });
     await Promise.race([landed, new Promise((done) => setTimeout(done, 2500))]);
     await sessionCommand(sessionId, "Unpause").catch(() => {});
     // Belt and braces: the element itself, should the command have been dropped regardless.
@@ -414,7 +420,7 @@
     for (const type of ["pointermove", "mousemove", "pointerdown", "mousedown", "touchstart", "wheel", "pointerup", "mouseup", "click"]) on(window, type, onPointer, true);
 
     // The OSD hiding while paused is the other trigger.
-    const bar = page.querySelector(".videoOsdBottom");
+    const bar = page.querySelector(jf.videoOsd);
     if (bar) {
       let visible = osdVisible();
       const observer = new MutationObserver(() => {
@@ -443,24 +449,37 @@
   };
 
   // ---------- lifecycle --------------------------------------------------------------------
+  // Two modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
+  // scheme must hold even when the pause screen has stood aside (light mode would otherwise put
+  // dark text on the picture).
 
   heraTv.register({
     name: "player",
     onView(page) {
       if (page?.id !== "videoOsdPage") {
         clearInterval(osd.timer);
-        unbindPause();
         stopDark();
         return;
       }
       startDark(page);
       followPlayer(page);
-      bindPause(page);
     },
     teardown() {
       clearInterval(osd.timer);
-      unbindPause();
       stopDark();
+    },
+  });
+
+  heraTv.register({
+    name: "pause",
+    // The pause screen stays out of the way of the OSD, so it has to be able to see it.
+    requires: { videoOsdPage: ["videoOsd"] },
+    onView(page) {
+      if (page?.id === "videoOsdPage") bindPause(page);
+      else unbindPause();
+    },
+    teardown() {
+      unbindPause();
     },
   });
 })();
