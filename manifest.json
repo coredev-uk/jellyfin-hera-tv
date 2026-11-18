@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "1.10.1.0",
+        "changelog": "Post-play fixes: Play and Play Next Episode now start the next title (by the server's PlayNow, which also stopped working after a server restart until the page was reloaded). A film's trailer now plays with sound as the credits' music fades out, with mute and volume at the lower right, and after 30 seconds the credits leave the screen. A back arrow at the top left leaves the player.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.10.1.0/hera-tv_1.10.1.0.zip",
+        "checksum": "674664f76cfcaaa10f8f0ff7d6b95fb0",
+        "timestamp": "2026-11-18T19:43:03Z"
+      },
+      {
         "version": "1.10.0.0",
         "changelog": "Post-play: at the credits the picture shrinks into the corner and the next episode, or the next film in its collection with its trailer, takes the screen. Skip Intro rises above the controls. Discover gets a header row with search and Requests, a feature that takes turns through what's trending, request states from the download stack (Awaiting Release, not Processing) and a 1080p / 4K choice when requesting. Card menus match across rows; the stray line under Up Next's menu button is gone.\n",
         "targetAbi": "12.4.0.0",
