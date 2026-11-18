@@ -52,6 +52,14 @@ The plugin restyles Jellyfin's own pages and adds sections of its own. Jellyfin'
 
 The plugin is one DLL and its `meta.json`. Jellyfin loads it from `plugins/HeraTV` in its config folder.
 
+**From the plugin catalogue.** In Jellyfin, open Dashboard → Plugins → Repositories, add a repository with this URL, then find Hera TV under Catalogue, install it and restart Jellyfin:
+
+```
+https://raw.githubusercontent.com/coredev-uk/jellyfin-hera-tv/manifest/manifest.json
+```
+
+Updates arrive the same way. Jellyfin's Update Plugins task installs a newer version from the catalogue, or you can update it by hand there, and a restart loads it.
+
 **From the image.** `ghcr.io/coredev-uk/jellyfin-hera-tv:<commit>` carries the built plugin. Run it as an init container with Jellyfin's `/config` mounted, and it replaces `/config/plugins/HeraTV` with its own copy:
 
 ```yaml
