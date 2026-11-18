@@ -587,46 +587,6 @@ h3 {
   margin-bottom: 14px !important;
 }
 
-/* Shelf paddles: hidden until the row is hovered, then a glass disc at each edge. */
-.emby-scrollbuttons {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: flex !important;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 calc(var(--hera-edge) * 0.25) !important;
-  opacity: 0;
-  transition: opacity var(--hera-fast) var(--hera-ease);
-  z-index: 3;
-}
-.verticalSection:hover .emby-scrollbuttons,
-.emby-scroller-container:hover .emby-scrollbuttons {
-  opacity: 1;
-}
-.emby-scrollbuttons-button {
-  pointer-events: auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 999px !important;
-  color: var(--hera-label) !important;
-  background: var(--hera-glass) !important;
-  backdrop-filter: var(--hera-blur);
-  -webkit-backdrop-filter: var(--hera-blur);
-  box-shadow: inset 0 1px 0 var(--hera-glass-edge), var(--hera-shadow);
-  transition: transform var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
-}
-.emby-scrollbuttons-button:hover {
-  background: var(--hera-glass-hover) !important;
-}
-.emby-scrollbuttons-button:active {
-  transform: scale(0.94);
-}
-.emby-scrollbuttons-button[disabled] {
-  opacity: 0;
-  pointer-events: none;
-}
-
 /* ---------- Cards ---------------------------------------------------------------- */
 
 .card {
@@ -2422,12 +2382,16 @@ button.hera-episode {
 .hera-shelf--wide {
   grid-auto-columns: clamp(240px, 22vw, 340px);
 }
+.hera-paddle-host {
+  position: relative;
+}
+/* Placed by paddlesFor in hera-tv.js: level with the artwork, on the edge of the cards. */
 .hera-row__paddle {
   position: absolute;
-  top: calc(50% - 30px);
   z-index: 3;
   width: 44px;
   height: 44px;
+  padding: 0;
   border: 0;
   border-radius: 999px;
   display: inline-flex;
@@ -2440,19 +2404,16 @@ button.hera-episode {
   box-shadow: inset 0 1px 0 var(--hera-glass-edge), var(--hera-shadow);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+  transition: opacity var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
 }
 .hera-row__paddle[hidden] {
   display: none;
 }
-.hera-row__paddle--prev {
-  left: calc(var(--hera-edge) * -0.5);
-}
-.hera-row__paddle--next {
-  right: calc(var(--hera-edge) * -0.5);
-}
-.hera-row:hover .hera-row__paddle {
+.hera-paddled:hover > .hera-row__paddle {
   opacity: 1;
+}
+.hera-row__paddle:hover {
+  background: var(--hera-glass-hover);
 }
 .hera-row__paddle:active {
   transform: scale(0.92);

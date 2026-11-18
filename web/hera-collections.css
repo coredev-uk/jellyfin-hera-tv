@@ -32,9 +32,6 @@ html.hera-collections-on #boxsetsPage .padded-bottom-page > :not(.hera-collectio
 .hera-collections .hera-shelf--wide {
   grid-template-columns: repeat(auto-fill, minmax(clamp(240px, 22vw, 340px), 1fr));
 }
-.hera-collections .hera-row__paddle {
-  display: none !important;
-}
 
 /* ---------- Groups | All: the capsule switch ------------------------------------------------ */
 
