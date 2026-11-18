@@ -142,8 +142,34 @@
 
     const name = el("span", { class: "hera-collections__name", text: collection.name });
     // `hera-dark` keeps the name white in the light scheme too: it sits on artwork, not on the page.
-    art.append(el("span", { class: "hera-collections__face hera-dark" }, name));
+    const face = el("span", { class: "hera-collections__face hera-dark" }, name);
+    art.append(face);
+    logoOn(face, name, collection.logo);
     return card;
+  };
+
+  // A streaming service's card shows its logo, the way Seerr's Networks row does: the TMDB network
+  // wordmark through TMDB's white duotone filter, or, for a service with no network of its own, its
+  // app icon above the name. The card's label already names it, so the image is decorative; one that
+  // fails to load leaves the name as it was.
+  const TMDB = "https://image.tmdb.org/t/p/";
+  const logoOn = (face, name, logo) => {
+    const path = logo?.wordmark || logo?.icon;
+    if (!path) return;
+    const wordmark = !!logo.wordmark;
+    const img = el("img", {
+      class: wordmark ? "hera-collections__wordmark" : "hera-collections__icon",
+      src: wordmark ? `${TMDB}w500_filter(duotone,ffffff,bababa)${path}` : `${TMDB}w154${path}`,
+      alt: "",
+      decoding: "async",
+      loading: "lazy",
+    });
+    img.addEventListener("error", () => {
+      img.remove();
+      face.classList.remove("has-logo", "has-icon");
+    }, { once: true });
+    face.classList.add(wordmark ? "has-logo" : "has-icon");
+    face.insertBefore(img, name);
   };
 
   const shelfFor = (group) => {

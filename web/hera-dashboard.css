@@ -1826,6 +1826,86 @@ html[data-hera-scheme="light"] .dashboardDocument .type-interior .MuiCard-root i
 .dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) a {
   color: var(--hera-label);
 }
+/* A plugin's own title reads like Hera's page titles. */
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) h1,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) .app-title {
+  margin: 0 0 20px;
+  color: var(--hera-label);
+  font: 700 26px/1.2 var(--hera-font-display);
+  letter-spacing: -0.015em;
+}
+/* Section navigation (Intro Skipper's sidebar of tabs, and any plugin's tab list): a quiet list
+ * like the Dashboard's own sidebar rather than a stack of pill buttons, the current section on a
+ * filled row. The generic button look above is for actions, not for places. */
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) [role="tablist"] {
+  gap: 2px;
+  border: 0 !important;
+  box-shadow: none !important;
+  background: none !important;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav[aria-label] {
+  min-width: 176px;
+  padding: 0 20px 0 0;
+  align-self: flex-start;
+}
+/* Intro Skipper marks the current tab with a bar anchored to it; the filled row does that here. */
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav::after,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav::before {
+  display: none !important;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button:not(.emby-button):not(.MuiButtonBase-root),
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) [role="tablist"] button:not(.emby-button):not(.MuiButtonBase-root),
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button[role="tab"] {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--hera-label-2);
+  font: 500 15px/1.2 var(--hera-font);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: none;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button:not(.emby-button):not(.MuiButtonBase-root):hover,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) [role="tablist"] button:not(.emby-button):not(.MuiButtonBase-root):hover,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button:hover,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button[role="tab"]:hover {
+  background: var(--hera-hover);
+  color: var(--hera-label);
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button:not(.emby-button):not(.MuiButtonBase-root):active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button:active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button[role="tab"]:active {
+  transform: none;
+  opacity: 0.8;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button.tab-button.tab-active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button.tab-button.active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button.tab-active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button.active,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) [role="tablist"] button[role="tab"][aria-selected="true"],
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button[role="tab"][aria-selected="true"],
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button[aria-current]:not(.emby-button):not(.MuiButtonBase-root),
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button.is-active:not(.emby-button):not(.MuiButtonBase-root) {
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+  font-weight: 600;
+  text-decoration: none;
+}
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) nav button:focus-visible,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button.tab-button:focus-visible,
+.dashboardDocument .pluginConfigurationPage:not(.hera-cfg-page) button[role="tab"]:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: -2px;
+}
 
 /* ====================================================================================== *
  * Menus and dialogs (portalled to <body>)

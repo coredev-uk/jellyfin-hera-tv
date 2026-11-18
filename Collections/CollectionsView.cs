@@ -115,10 +115,17 @@ internal sealed class CollectionsView(
         // franchises, which the builder never touches, have their own so they don't use Hera's choices up.
         var heraArt = new ArtPicker();
         var franchiseArt = new ArtPicker();
+        var logos = streaming.Current?.Logos;
         var byGroup = new Dictionary<CollectionGroup, List<(string Sort, object Entry)>>();
         foreach (var (set, group, members) in found.OrderBy(f => CollectionGroups.SortName(f.Group, f.Set.Name), StringComparer.Ordinal))
         {
             var picker = group == CollectionGroup.Franchises ? franchiseArt : heraArt;
+            // A streaming set's definition id is "streaming:<provider key>"; its logo goes with it.
+            var logo = group == CollectionGroup.Streaming
+                && CollectionBuilder.DefinitionId(set)?.Split(':') is [_, var key]
+                && logos?.TryGetValue(key, out var found2) == true
+                    ? new { wordmark = found2!.Wordmark, icon = found2.Icon }
+                    : null;
             var entry = new
             {
                 id = Plain(set.Id),
@@ -128,6 +135,8 @@ internal sealed class CollectionsView(
                 // A member's own art, for a set that has none of its own yet.
                 imageId = picker.Pick(members, ImageType.Primary) is { } p ? Plain(p.Id) : null,
                 backdropId = picker.Pick(members, ImageType.Backdrop) is { } b ? Plain(b.Id) : null,
+                // TMDB image paths for the service's wordmark and app icon; null for other groups.
+                logo,
             };
             if (!byGroup.TryGetValue(group, out var list))
             {

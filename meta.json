@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "Collections the Kometa way: Hera builds real collections nightly (universes, award winners, UK streaming services, UK seasonal, homegrown, decades, genres), the Collections page groups them on shelves, and the home page gains rows that change daily: newly released, popular, highly rated, a streaming service, genres, a decade and more.",
+  "changelog": "Streaming collections show each service's logo; the Collections page wraps its groups into grids instead of sideways shelves; the header search opens where its button is; other plugins' settings pages (Intro Skipper and the like) get tidy section lists and titles.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-18T00:00:00.0000000Z",
-  "version": "1.9.0.0",
+  "timestamp": "2026-11-19T00:00:00.0000000Z",
+  "version": "1.9.1.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]
