@@ -78,6 +78,8 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # meta.json's changelog, written in Markdown, is the release's notes; the manifest links
+          # each version's Revision History entry to them (.github/scripts/manifest.sh).
           jq -r .changelog meta.json > notes.md
           gh release create "v${VERSION}" "dist/hera-tv_${VERSION}.zip" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \

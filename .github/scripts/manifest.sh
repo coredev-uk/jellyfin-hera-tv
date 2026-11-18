@@ -23,7 +23,7 @@ jq -s '[.[][]
   | . as $r
   | ([.assets[] | select(.name | test("^hera-tv_.+\\.zip$"))][0]) as $a
   | select($a != null)
-  | {tag: .tag_name, body: (.body // ""), published: .published_at, name: $a.name, url: $a.browser_download_url}]
+  | {tag: .tag_name, page: .html_url, published: .published_at, name: $a.name, url: $a.browser_download_url}]
   | sort_by(.published) | reverse' "$releases" > "$work/releases.json"
 
 echo '[]' > "$work/versions.json"
@@ -32,11 +32,13 @@ while IFS=$'\t' read -r tag name url; do
   if [[ -n ${ASSET_DIR:-} ]]; then cp "$ASSET_DIR/$name" "$zip"; else curl -fsSL --retry 3 -o "$zip" "$url"; fi
   checksum=$(md5sum "$zip" | cut -d' ' -f1)
   abi=$(unzip -p "$zip" meta.json | jq -r .targetAbi)
+  # Jellyfin renders a version's changelog as Markdown in Revision History; the notes themselves
+  # live on the GitHub release, formatted there, so the catalogue links to them.
   jq --arg tag "$tag" --arg sum "$checksum" --arg abi "$abi" --slurpfile all "$work/releases.json" '
     ($all[0][] | select(.tag == $tag)) as $r
     | . + [{
         version: ($tag | ltrimstr("v")),
-        changelog: $r.body,
+        changelog: "[What'\''s new in \($tag | ltrimstr("v")), on GitHub](\($r.page))",
         targetAbi: $abi,
         sourceUrl: $r.url,
         checksum: $sum,
@@ -45,7 +47,9 @@ while IFS=$'\t' read -r tag name url; do
   mv "$work/next.json" "$work/versions.json"
 done < <(jq -r '.[] | [.tag, .name, .url] | @tsv' "$work/releases.json")
 
+# imageUrl is the catalogue's artwork; Jellyfin saves it beside the plugin when it installs one.
 jq --slurpfile versions "$work/versions.json" '[{
     guid, name, description, overview, owner, category,
+    imageUrl: "https://raw.githubusercontent.com/coredev-uk/jellyfin-hera-tv/main/assets/plugin-banner.png",
     versions: $versions[0]
   }]' "$root/meta.json"
