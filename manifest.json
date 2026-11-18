@@ -1,0 +1,28 @@
+[
+  {
+    "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
+    "name": "Hera TV",
+    "description": "Apple TV-style theme, home hero and season shelves for the web client.",
+    "overview": "The Apple TV app's look for Jellyfin's web client",
+    "owner": "coredev-uk",
+    "category": "General",
+    "versions": [
+      {
+        "version": "1.10.0.0",
+        "changelog": "Post-play: at the credits the picture shrinks into the corner and the next episode, or the next film in its collection with its trailer, takes the screen. Skip Intro rises above the controls. Discover gets a header row with search and Requests, a feature that takes turns through what's trending, request states from the download stack (Awaiting Release, not Processing) and a 1080p / 4K choice when requesting. Card menus match across rows; the stray line under Up Next's menu button is gone.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.10.0.0/hera-tv_1.10.0.0.zip",
+        "checksum": "843af9f73f3fd716ce2b9f708f0c7681",
+        "timestamp": "2026-11-18T18:36:53Z"
+      },
+      {
+        "version": "1.9.3.0",
+        "changelog": "Every sideways row (Hera's and Jellyfin's: Recently Added, Episodes, Cast & Crew, More Like This) gets tv.apple.com's hover paddles to scroll it with a mouse. A collection's own page wraps its films into a grid; Up Next cards keep one menu button (Open Page lives in it); services shown by app icon drop the name under it; the JustWatch credit under Also On is a small grey caption; button rows on other plugins' pages sit centred.\n",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.9.3.0/hera-tv_1.9.3.0.zip",
+        "checksum": "fe38bade1e7b6f9cd86eb19ac44df654",
+        "timestamp": "2026-11-18T18:31:57Z"
+      }
+    ]
+  }
+]
