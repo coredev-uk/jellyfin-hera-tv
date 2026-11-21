@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "- Hera TV has its own artwork in Jellyfin's plugin catalogue and on the Plugins page.\n- Each version in the catalogue's Revision History links to its release notes on GitHub, where they're formatted properly.",
+  "changelog": "- The home hero's pause button is round again, like the arrows beside it.\n- Unused code removed.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-19T03:30:00.0000000Z",
-  "version": "1.11.2.0",
+  "timestamp": "2026-11-21T12:00:00.0000000Z",
+  "version": "1.11.3.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]
