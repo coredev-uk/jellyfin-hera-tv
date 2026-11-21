@@ -17,8 +17,6 @@
   const { kit } = HT;
   const { el, icon } = kit;
 
-  const root = document.documentElement;
-
   const POLL_MS = 2 * 60 * 1000;
   // Focus and visibility changes arrive together; one fetch serves both.
   const MIN_GAP_MS = 4000;
