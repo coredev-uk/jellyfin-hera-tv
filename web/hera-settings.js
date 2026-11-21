@@ -192,13 +192,6 @@
     }
     return [...seen].sort((a, b) => a[1].localeCompare(b[1])).map(([code, name]) => [code, name]);
   };
-  const languageName = (code) => {
-    if (!code) return "No preference";
-    const culture = ctx.cultures.find(
-      (c) => c.ThreeLetterISOLanguageName === code || (c.ThreeLetterISOLanguageNames || []).includes(code) || c.TwoLetterISOLanguageName === code,
-    );
-    return culture ? culture.DisplayName : code;
-  };
 
   // ---------- feedback --------------------------------------------------------------------
 

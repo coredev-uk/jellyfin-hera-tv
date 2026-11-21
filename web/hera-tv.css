@@ -1484,8 +1484,8 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   margin-left: -10px;
   margin-right: -10px;
 }
-/* A row's action buttons are MUI icon buttons, painted white. */
-.listItem .MuiIconButton-root:not(.hera-keep-colour),
+/* A row's action buttons are MUI icon buttons, in the secondary label colour. */
+.listItem .MuiIconButton-root,
 .MuiIconButton-root.listItemButton {
   color: var(--hera-label-2);
 }

@@ -18,7 +18,7 @@
   const HT = window.HeraTV;
   if (!HT?.kit) return;
   const { kit } = HT;
-  const { el, icon } = kit;
+  const { el } = kit;
 
   const root = document.documentElement;
   const PAGE_ID = "boxsetsPage";
