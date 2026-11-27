@@ -1,6 +1,6 @@
 /*
  * Hera TV: Jellyfin's admin Dashboard (#/dashboard and everything under it, plus plugin
- * configuration pages). Loaded last. Jellyfin 12 builds these pages from two kits, MUI
+ * configuration pages). Loaded after the main client's sheets (stats, bell and collections follow it, each under its own scope). Jellyfin 12 builds these pages from two kits, MUI
  * components and the older emby-* markup, often on one page; both are drawn here as one
  * system, in the Settings app's language: a quiet sidebar whose selected item is the selection
  * capsule, a content column that starts at the sidebar's edge and fills the window, grouped rows
@@ -17,6 +17,309 @@
  *   edge 24–48 · a form keeps a 720 measure at the content's left edge, never centred
  */
 
+/* The `.hera-set-*` base rules (avatar, title, group, list, row, switch, segmented control, button,
+ * field, status). The Dashboard config pages (Configuration/*.html) and the Settings app both
+ * build from them, so they live in this sheet, which is gated on Hera being on rather than on the
+ * settings module: switching "Settings menu" off must not strip the plugin's own pages. The rules
+ * specific to the Settings app's menu stay in hera-settings.css. */
+.hera-set-avatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+  font: 700 19px/1 var(--hera-font-display);
+}
+.hera-set-avatar--xl {
+  width: 96px;
+  height: 96px;
+  font-size: 40px;
+}
+.hera-set-title {
+  margin: 0 0 28px;
+  font: 700 34px/1.1 var(--hera-font-display);
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.hera-set-group {
+  margin: 0 0 32px;
+}
+.hera-set-group__title {
+  margin: 0 0 8px 16px;
+  color: var(--hera-label-2);
+  font: 600 13px/1.3 var(--hera-font);
+  letter-spacing: 0;
+}
+.hera-set-group__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 16px 0;
+  color: var(--hera-label-3);
+  font-size: 13px;
+  line-height: 1.4;
+}
+/* A button in a footer ("Reload Now") sits in the line's own height, so the footer does not grow. */
+.hera-set-group__foot .hera-set-btn {
+  min-height: 32px;
+  margin: -7px 0;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.hera-set-list {
+  overflow: hidden;
+  border-radius: 20px;
+  background: var(--hera-surface);
+}
+.hera-set-row {
+  appearance: none;
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 60px;
+  margin: 0;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hera-label);
+  font: 500 16px/1.3 var(--hera-font);
+  letter-spacing: -0.005em;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease);
+}
+.hera-set-row + .hera-set-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 16px;
+  height: 1px;
+  background: var(--hera-separator);
+}
+.hera-set-row:hover {
+  background: var(--hera-hover);
+}
+.hera-set-row:active {
+  background: var(--hera-fill);
+}
+.hera-set-row--static,
+.hera-set-row--static:hover,
+.hera-set-row--static:active {
+  cursor: default;
+  background: transparent;
+}
+.hera-set-row:focus-visible {
+  outline: 3px solid var(--hera-focus) !important;
+  outline-offset: -3px;
+}
+.hera-set-row__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--hera-fill-strong);
+}
+.hera-set-row__icon .material-icons {
+  font-size: 20px;
+}
+.hera-set-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hera-set-row__label {
+  font-weight: 500;
+}
+.hera-set-row__desc {
+  color: var(--hera-label-2);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.hera-set-row__value {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hera-label-2);
+  font-size: 15px;
+}
+.hera-set-row__chev {
+  flex: none;
+  margin-left: -6px;
+  font-size: 20px;
+  color: var(--hera-label-3);
+}
+
+/* Switch: grey track; on, the selection colour. The knob is a hole in the ground colour. */
+.hera-set-switch {
+  flex: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hera-label-3) 80%, transparent);
+  transition: background-color var(--hera-fast) var(--hera-ease);
+}
+.hera-set-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.28);
+  transition: transform var(--hera-fast) var(--hera-ease);
+}
+.hera-set-row[aria-checked="true"] .hera-set-switch {
+  background: var(--hera-select);
+}
+.hera-set-row[aria-checked="true"] .hera-set-switch__knob {
+  background: var(--hera-bg);
+  transform: translateX(20px);
+}
+/* Segmented control */
+.hera-set-seg {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--hera-fill);
+}
+/* A row too narrow for its label and the control puts the control on a line of its own. */
+.hera-set-row--static:has(> .hera-set-seg) {
+  flex-wrap: wrap;
+}
+.hera-set-row--static:has(> .hera-set-seg) > .hera-set-row__text {
+  flex: 1 1 220px;
+}
+.hera-set-seg {
+  max-width: 100%;
+}
+.hera-set-seg__option {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hera-label);
+  font: 600 14px/1 var(--hera-font);
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease);
+}
+.hera-set-seg__option:hover {
+  background: var(--hera-hover);
+}
+.hera-set-seg__option[aria-checked="true"] {
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+}
+/* Buttons */
+.hera-set-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hera-fill-strong);
+  color: var(--hera-label);
+  font: 600 15px/1 var(--hera-font);
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: transform var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
+}
+.hera-set-btn .material-icons {
+  font-size: 20px;
+}
+.hera-set-btn:hover {
+  background: linear-gradient(var(--hera-hover), var(--hera-hover)), var(--hera-fill-strong);
+}
+.hera-set-btn:active {
+  transform: scale(0.95);
+}
+.hera-set-btn--primary {
+  min-height: 48px;
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+}
+.hera-set-btn--primary:hover {
+  background: var(--hera-select-hover);
+}
+.hera-set-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hera-set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hera-set-field__label {
+  color: var(--hera-label-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hera-set-input {
+  appearance: none;
+  box-sizing: border-box;
+  width: 100%;
+  flex: none;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--hera-fill);
+  color: var(--hera-label);
+  font: 500 16px/1 var(--hera-font);
+  caret-color: var(--hera-label);
+  transition: border-color var(--hera-fast) var(--hera-ease), background-color var(--hera-fast) var(--hera-ease);
+}
+.hera-set-input:focus {
+  background: var(--hera-fill-strong);
+  box-shadow: 0 0 0 2px var(--hera-focus);
+  outline: none !important;
+}
+.hera-set-input::placeholder {
+  color: var(--hera-label-3);
+}
+.hera-set-status {
+  margin: 0;
+  color: var(--hera-label-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.hera-set-status.is-error {
+  color: var(--hera-label);
+  font-weight: 600;
+}
 .dashboardDocument {
   --dash-edge: clamp(24px, 3vw, 48px);
   --dash-max: 1680px;

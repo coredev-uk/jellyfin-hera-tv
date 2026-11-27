@@ -2,7 +2,7 @@
  * Hera TV: request activity. Registers with window.HeraTV (hera-tv.js).
  * Seerr says "processing" for everything between "approved" and "here". Sonarr, Radarr and
  * SABnzbd know better, and the server (Integrations/ArrActivity.cs) joins them to the title:
- *  - HeraTV.activity.describe/card/line: one wording and one look for a title's real state
+ *  - HeraTV.activity.describe/requestCard/mountTitle: one wording and one look for a title's real state
  *    ("Downloading 42% · 12 min left", "Searching", "Series 4: 6 of 10"), used by the home row,
  *    the title sheet and film and series pages.
  *  - A state line on film and series pages, under the meta line, while a title is requested or
@@ -10,6 +10,17 @@
  *  - A Requests view at #/home?hera=requests: the person's own requests with live progress and,
  *    for an administrator, a Downloads list of the whole queue with SABnzbd's speed.
  * Everything refreshes while visible, and nothing here is drawn when no download service is set up.
+ *
+ * Contracts with the other modules:
+ *  - HeraTV.activity is read by hera-home.js (the Your Requests row: fetchRequests, describeRequest,
+ *    requestCard, updateCard, keyOf, rankOf, pacer, hash) and hera-discover.js (fetchTitle, describe,
+ *    activityOn, titleInfoOn, requestsAvailable, mountTitle, hash). A title with no Jellyfin page opens
+ *    HeraTV.discover.openTitle (hera-discover.js).
+ *  - DOM expandos: line.heraLine and row.heraParts hold the parts a repaint fills in place; row.heraRequest
+ *    is the request a row shows. data-hera-request marks a request's card on the home row.
+ *  - Expects hera-tv.css for cards, shelves and buttons, and html.hera-view-taken for the takeover of the
+ *    home tab while the Requests view shows (kit.view). `.hera-ext` (the "open in" links) is styled here and
+ *    shared with the title sheet in hera-discover.css.
  */
 (() => {
   "use strict";
@@ -19,12 +30,11 @@
   const { kit } = HT;
   const { el, icon } = kit;
 
-  const root = document.documentElement;
-  const cleanups = [];
-  const listen = (target, type, handler, options) => {
-    target.addEventListener(type, handler, options);
-    cleanups.push(() => target.removeEventListener(type, handler, options));
-  };
+  const scope = kit.scope();
+
+  // Jellyfin's page ids, the keys `requires` is written in.
+  const INDEX_PAGE = "indexPage";
+  const DETAIL_PAGE = "itemDetailPage";
 
   const REQUESTS_HASH = "#/home?hera=requests";
   // How often to look again. A title that moves (downloading, importing, queued, searching) is
@@ -64,8 +74,6 @@
     if (date.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
     return date.toLocaleDateString(undefined, options);
   };
-
-  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   const kindOf = (mediaType) => (mediaType === "tv" ? "TV Show" : "Film");
 
@@ -190,34 +198,27 @@
 
   // ---------- data ----------------------------------------------------------------------------
 
-  const memo = new Map();
-  const cached = (key, ttl, load) => {
-    const now = Date.now();
-    const hit = memo.get(key);
-    if (hit && now - hit.at < hit.ttl) return hit.promise;
-    const promise = Promise.resolve()
-      .then(load)
-      .catch((error) => {
-        if (memo.get(key)?.promise === promise) memo.delete(key);
-        console.warn(`[Hera TV:activity] ${key}`, error);
-        return null;
-      });
-    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
-    for (const [k, v] of memo) if (now - v.at >= v.ttl) memo.delete(k);
-    memo.set(key, { at: now, ttl, promise });
-    return promise;
+  const memo = kit.ttlCache({ ttl: 4000, max: 40 });
+  // A failed fetch answers null, so a line or a view that can't reach the server just draws nothing.
+  const cached = (key, load) => {
+    const request = memo.get(key, () => Promise.resolve().then(load));
+    kit.track("activity", request);
+    return request.catch((error) => {
+      console.warn(`[Hera TV:activity] ${key}`, error);
+      return null;
+    });
   };
 
   /** What the server says of a title: `{ activity, links }`. Several parts of one page share one fetch. */
   const fetchTitle = (mediaType, tmdbId, tvdb) =>
-    cached(`title:${mediaType}:${tmdbId}`, 4000, async () => {
+    cached(`title:${mediaType}:${tmdbId}`, async () => {
       const reply = await kit.hera(`activity/title/${mediaType === "tv" ? "tv" : "movie"}/${tmdbId}`, { query: tvdb ? { tvdb } : undefined });
       return reply ?? null;
     });
 
-  const fetchRequests = (take = 20) => cached(`requests:${take}`, 4000, async () => (await kit.hera("activity/requests", { query: { take } })) || []);
+  const fetchRequests = (take = 20) => cached(`requests:${take}`, async () => (await kit.hera("activity/requests", { query: { take } })) || []);
 
-  const fetchDownloads = () => cached("downloads", 4000, () => kit.hera("activity/downloads"));
+  const fetchDownloads = () => cached("downloads", () => kit.hera("activity/downloads"));
 
   /** Whether the download stack is connected and switched on for this server. */
   const activityOn = (ints) => Boolean(ints?.activity) && ints.features?.activity !== false;
@@ -447,11 +448,11 @@
     if (run !== detail.run) return;
     const tmdbId = item?.ProviderIds?.Tmdb;
     if (!tmdbId || (item.Type !== "Movie" && item.Type !== "Series")) return;
-    if (kit.itemIdFromHash() !== itemId || !page.isConnected || page.classList.contains("hide")) return;
+    if (kit.itemIdFromHash() !== itemId || !page.isConnected || kit.jf("activity", "page") !== page) return;
 
     const slot = el("div", { class: "hera-activity-slot" });
     const place = () => {
-      const meta = page.querySelector(HT.jf.detailMisc);
+      const meta = kit.jf("activity", "detailMisc", page);
       if (!meta || slot.previousElementSibling === meta) return Boolean(meta);
       meta.after(slot);
       return true;
@@ -467,29 +468,20 @@
     detail.node = slot;
     detail.stop = mounted.stop;
     // Jellyfin draws the meta line again when the item loads; the slot follows it.
-    const target = page.querySelector(HT.jf.detailMisc)?.parentElement || page;
+    const target = kit.jf("activity", "detailMisc", page)?.parentElement || page;
     detail.watch = new MutationObserver(() => {
-      if (!slot.isConnected || slot.previousElementSibling !== page.querySelector(HT.jf.detailMisc)) place();
+      if (!slot.isConnected || slot.previousElementSibling !== kit.jf("activity", "detailMisc", page)) place();
     });
     detail.watch.observe(target, { childList: true });
   };
 
   // ---------- the Requests view -------------------------------------------------------------
 
-  const view = { root: null, abort: null, stop: null, classWatch: null };
+  const view = { root: null, abort: null, stop: null };
 
-  const wantsView = () => {
-    const [path, query = ""] = window.location.hash.split("?");
-    return path.startsWith("#/home") && new URLSearchParams(query).get("hera") === "requests";
-  };
-
-  const stripHomeClass = () => {
-    view.classWatch?.disconnect();
-    // The home page marks the root for its hero; there is none here, and its header tokens would be wrong.
-    root.classList.remove("hera-home");
-    view.classWatch = new MutationObserver(() => root.classList.contains("hera-home") && root.classList.remove("hera-home"));
-    view.classWatch.observe(root, { attributes: true, attributeFilter: ["class"] });
-  };
+  // The `hera` query of the route showing, from kit.onRoute and from onView, which both carry it.
+  let params = new URLSearchParams();
+  const wantsView = () => params.get("hera") === "requests";
 
   /** Puts `nodes` in `host` in order, moving as little as possible so focus survives a refresh. */
   const arrange = (host, nodes) => {
@@ -548,7 +540,7 @@
     if (item.episodes === 1 && item.episode != null) {
       return [item.season != null ? `Series ${item.season}, Episode ${item.episode}` : `Episode ${item.episode}`, item.episodeTitle].filter(Boolean).join(" · ");
     }
-    if (item.episodes > 1) return [item.season != null ? `Series ${item.season}` : null, plural(item.episodes, "episode")].filter(Boolean).join(" · ");
+    if (item.episodes > 1) return [item.season != null ? `Series ${item.season}` : null, kit.text.plural(item.episodes, "episode")].filter(Boolean).join(" · ");
     return null;
   };
 
@@ -589,7 +581,7 @@
     if (!sab) return "SABnzbd isn't answering";
     if (sab.paused) return "SABnzbd paused";
     if (sab.speedBps > 0) return ["SABnzbd", `${bytes(sab.speedBps)}/s`, sab.etaSeconds ? `${eta(sab.etaSeconds)} left` : null].filter(Boolean).join(" · ");
-    return sab.queued > 0 ? `SABnzbd · ${plural(sab.queued, "download")} waiting` : "SABnzbd idle";
+    return sab.queued > 0 ? `SABnzbd · ${kit.text.plural(sab.queued, "download")} waiting` : "SABnzbd idle";
   };
 
   const buildView = (ints, signal) => {
@@ -706,7 +698,9 @@
     };
 
     // The first paint shows what is there; a failed load says so.
-    load().catch((error) => {
+    const first = load();
+    kit.track("activity", first);
+    first.catch((error) => {
       if (signal.aborted) return;
       console.error("[Hera TV:activity]", error);
       empty.hidden = false;
@@ -721,29 +715,26 @@
     view.abort = null;
     view.stop?.();
     view.stop = null;
+    if (view.root) kit.view.release("requests");
     view.root?.remove();
     view.root = null;
-    view.classWatch?.disconnect();
-    view.classWatch = null;
-    root.classList.remove("hera-activity-on");
   };
 
   const mountView = (page, ints) => {
-    const host = page.querySelector(HT.jf.homeTab);
+    const host = kit.jf("activity", "homeTab", page);
     if (!host) return;
     unmountView();
     view.abort = new AbortController();
     view.root = buildView(ints, view.abort.signal);
     host.append(view.root);
-    root.classList.add("hera-activity-on");
-    stripHomeClass();
+    kit.view.take("requests", { art: false });
     window.scrollTo(0, 0);
     // A remote needs focus somewhere once the first rows land.
     if (kit.isTv()) setTimeout(() => view.root?.querySelector(".hera-av-row, .hera-av__back")?.focus({ preventScroll: true }), 600);
   };
 
   const syncView = async (page) => {
-    if (!wantsView() || page?.id !== "indexPage" || !kit.userId()) {
+    if (!wantsView() || page?.id !== INDEX_PAGE || !kit.userId()) {
       if (view.root) unmountView();
       return;
     }
@@ -760,43 +751,48 @@
 
   // ---------- module -------------------------------------------------------------------------
 
-  const onHash = () => requestAnimationFrame(() => syncView(document.querySelector(".page:not(.hide)")));
+  const onRoute = (route) => {
+    params = route.params;
+    syncView(route.page ?? kit.jf("activity", "page"));
+  };
 
   HT.register({
     name: "activity",
     // The Requests view mounts into the home tab, and a title's download state sits after the meta line.
     requires: { indexPage: ["homeTab"], itemDetailPage: ["detailMisc"] },
-    async onView(page, { itemId }) {
+    async onView(page, { itemId, params: viewParams }) {
+      params = viewParams;
       if (!kit.userId()) return;
       await syncView(page);
-      if (page.id === "itemDetailPage") await mountDetail(page, itemId);
+      if (page.id === DETAIL_PAGE) await mountDetail(page, itemId);
       else clearDetail();
+    },
+    // Routes and the namespace (home and Control Center read HT.activity) wait for start().
+    start() {
+      scope.add(kit.onRoute("activity", onRoute));
+      HT.activity = {
+        describe,
+        describeRequest,
+        activityOn,
+        requestsAvailable,
+        titleInfoOn,
+        requestCard,
+        updateCard,
+        mountTitle,
+        fetchRequests,
+        fetchTitle,
+        keyOf,
+        pacer,
+        rankOf,
+        hash: REQUESTS_HASH,
+      };
     },
     teardown() {
       unmountView();
       clearDetail();
       memo.clear();
-      cleanups.splice(0).forEach((fn) => fn());
+      scope.dispose();
       delete HT.activity;
     },
   });
-
-  listen(window, "hashchange", onHash);
-
-  HT.activity = {
-    describe,
-    describeRequest,
-    activityOn,
-    requestsAvailable,
-    titleInfoOn,
-    requestCard,
-    updateCard,
-    mountTitle,
-    fetchRequests,
-    fetchTitle,
-    keyOf,
-    pacer,
-    rankOf,
-    hash: REQUESTS_HASH,
-  };
 })();

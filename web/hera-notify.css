@@ -503,22 +503,3 @@
 .hera-card__art:has(> .hera-card__badge) > .hera-new {
   top: 36px;
 }
-
-/* On a detail page, the meta line carries it, with the other chips. */
-.itemMiscInfo .hera-new-meta {
-  display: inline-flex;
-  align-items: center;
-}
-.hera-new-chip {
-  padding: 0 6px;
-  border-radius: var(--hera-r-badge);
-  background: var(--hera-select);
-  color: var(--hera-on-select);
-  font: 700 11px/18px var(--hera-font);
-  white-space: nowrap;
-}
-.layout-tv .hera-new-chip {
-  padding: 0 9px;
-  font-size: 15px;
-  line-height: 24px;
-}

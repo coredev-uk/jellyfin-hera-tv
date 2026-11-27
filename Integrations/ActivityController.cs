@@ -114,7 +114,7 @@ public class ActivityController(UpstreamClient upstream, UserRequests requests, 
 
     /// <summary>Everything in Sonarr's and Radarr's queues, with SABnzbd's overall speed. Administrators only.</summary>
     [HttpGet("downloads")]
-    [Authorize(Policy = "RequiresElevation")]
+    [Authorize(Policy = HeraUser.Elevated)]
     public async Task<IActionResult> GetDownloads()
         => Ok(await ArrActivity.DownloadsAsync(upstream).ConfigureAwait(false));
 
@@ -123,13 +123,9 @@ public class ActivityController(UpstreamClient upstream, UserRequests requests, 
             ? ArrActivity.SeriesAsync(upstream, tmdbId, tvdbId, arrId, seasons, queue)
             : ArrActivity.MovieAsync(upstream, tmdbId, arrId, queue);
 
-    private bool IsAdmin() => User.IsInRole("Administrator");
+    private bool IsAdmin() => HeraUser.IsAdmin(this, userManager);
 
     private static ArrService ServiceOf(string mediaType) => mediaType == "tv" ? ArrService.Sonarr : ArrService.Radarr;
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 }

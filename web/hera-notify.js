@@ -6,8 +6,11 @@
  *  - "New" on the cards and the detail page of the titles that unread notices name.
  * Notices are the person's own and are only seen while Jellyfin is open: the bell polls every two
  * minutes while the tab is visible, and straight away when it comes back to the front.
- * HeraTV.notify.render(panel, data) draws the panel's contents from any response, so the same code
- * paints the live panel and a sample.
+ * The bell stands aside (reported as partial) when the header has no search button to sit beside.
+ * Borrowed Jellyfin classes: the bell wears MuiIconButton-root / headerButton, the detail chip
+ * mediaInfoItem. Cards are found through HT.jf (notifyCard, notifyCardArt) and Hera's own
+ * `.hera-card`/`.hera-episode`, whose `heraId` expando carries a card's item id. hera-notify.css
+ * expects hera-tv.css's scheme tokens and `.hera-dark`.
  */
 (() => {
   "use strict";
@@ -59,6 +62,8 @@
     if (!(at < today)) return 0;
     return at >= today - 6 * DAY_MS ? 1 : 2;
   };
+
+  const jf = HT.jf;
 
   // ---------- pieces ----------------------------------------------------------------------------
 
@@ -288,13 +293,9 @@
     cardQueued: false,
     detail: null,
     warned: false,
-    cleanups: [],
   };
 
-  const listen = (target, type, handler, options) => {
-    target.addEventListener(type, handler, options);
-    state.cleanups.push(() => target.removeEventListener(type, handler, options));
-  };
+  let scope = null; // listeners and route subscription, alive while the module polls
 
   const idsOf = (notice) => [notice.itemId, notice.imageId, ...(notice.items || []).map((item) => item.id)].filter(Boolean).map(plainId);
 
@@ -312,27 +313,30 @@
 
   // ---------- the bell --------------------------------------------------------------------------
 
-  const BAR_RIGHT_BOX = ".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiBox-root:last-child";
-
   /**
    * Where the bell goes: right after the search button, before the profile button, in the modern
    * app bar, or in the TV and legacy layouts' .skinHeader. Whichever header is showing wins; with
    * none (the player, sign-in) or without a search button to sit beside, the bell stands aside.
+   * A header that is absent is normal here, so these lookups are not misses.
    */
   const findHost = () => {
     const shown = (node) => node && node.offsetHeight > 0;
-    const modern = document.querySelector(`${HT.jf.appBar} a[href="#/search"]`);
-    const legacy = document.querySelector(`${HT.jf.legacyHeader} a[href="#/search"], ${HT.jf.legacyHeader} .headerSearchButton`);
+    const bar = document.querySelector(jf.appBar);
+    const legacyBar = document.querySelector(jf.legacyHeader);
+    const modern = bar && kit.jf("notify", "headerSearchButton", bar);
+    const legacy = legacyBar && kit.jf("notify", "headerSearchButton", legacyBar);
     const pick = [
-      modern && { kind: "modern", anchor: modern, header: modern.closest(HT.jf.appBar) },
-      legacy && { kind: "legacy", anchor: legacy, header: legacy.closest(HT.jf.legacyHeader) },
+      modern && { kind: "modern", anchor: modern, header: bar },
+      legacy && { kind: "legacy", anchor: legacy, header: legacyBar },
     ].filter(Boolean);
     const host = pick.find((candidate) => shown(candidate.header)) || null;
     // The profile button's own click opens Control Center: a bell in its box would open that too.
-    if (host?.anchor.parentElement?.matches(BAR_RIGHT_BOX)) return null;
+    if (host?.anchor.parentElement?.matches(jf.appBarEnd)) return null;
     return host;
   };
 
+  // The bell wears Jellyfin's own button classes so the header styles it like its neighbours:
+  // MuiIconButton-root in the modern app bar, headerButton and friends in the legacy header.
   const buildBell = (kind) => {
     const classes =
       kind === "modern"
@@ -370,8 +374,8 @@
     state.kind = null;
   };
 
-  const ANCHOR = 'a[href="#/search"], .headerSearchButton';
-  const shownHeader = () => [...document.querySelectorAll(`${HT.jf.appBar}, ${HT.jf.legacyHeader}`)].find((node) => node.offsetHeight > 0) || null;
+  const ANCHOR = jf.headerSearchButton;
+  const shownHeader = () => [...document.querySelectorAll(`${jf.appBar}, ${jf.legacyHeader}`)].find((node) => node.offsetHeight > 0) || null;
 
   // Jellyfin draws its header in pieces, and again when the user or layout changes; the bell finds
   // its place again, a few times over if the search button isn't there yet.
@@ -382,10 +386,17 @@
     const host = findHost();
     if (!host) {
       if (state.bell && !state.bell.isConnected) removeBell();
+      // The admin Dashboard's header never has a search button: no bell there is normal, not a miss.
+      if (kit.jf("notify", "dashboardDocument")) {
+        kit.report("notify", "idle");
+        return;
+      }
       if (attempt < 8) retryTimer = setTimeout(() => ensureBell(attempt + 1), 500);
       else if (shownHeader() && !state.bell && !state.warned) {
         state.warned = true;
-        console.warn(`[Hera TV:notify] standing aside: Jellyfin's header has no search button (${HT.jf.appBar} a[href="#/search"], ${HT.jf.legacyHeader} .headerSearchButton) to sit beside`);
+        const detail = `Jellyfin's header has no search button (${ANCHOR}) to sit beside`;
+        console.warn(`[Hera TV:notify] standing aside: ${detail}`);
+        kit.report("notify", "partial", detail);
       }
       return;
     }
@@ -396,6 +407,7 @@
       state.kind = host.kind;
     }
     if (state.bell.previousElementSibling !== host.anchor) host.anchor.after(state.bell);
+    kit.report("notify", "ok");
     paintBell();
     if (state.header !== host.header) {
       state.headerObserver?.disconnect();
@@ -436,7 +448,9 @@
       if (state.panel) paintPanel();
     }
     const run = ++state.run;
-    const pending = Promise.resolve(kit.hera("notifications", { query: { limit: LIMIT } }))
+    const request = Promise.resolve(kit.hera("notifications", { query: { limit: LIMIT } }));
+    kit.track("notify", request);
+    const pending = request
       .then((data) => {
         // Another account, or a mark-as-read still on its way, makes this answer out of date.
         if (user !== kit.userId() || run !== state.run || state.reading > 0) return state.data;
@@ -578,9 +592,8 @@
       if (event.target === dialog) closePanel();
     });
     // Back belongs to the panel while it is open: Jellyfin would otherwise also leave the page.
-    // webOS (461) and Tizen (10009) remotes send their own Back keys.
     dialog.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" || event.keyCode === 461 || event.keyCode === 10009 || event.key === "GoBack") {
+      if (kit.keys.isBack(event)) {
         event.preventDefault();
         event.stopPropagation();
         closePanel();
@@ -623,8 +636,8 @@
   // The same cards the quality badges go on, and the same way: one batched pass over what
   // Jellyfin and Hera add to the page, no request per card. A card is New when its item (or its
   // series) is named by an unread notice.
-  const CARD_SELECTOR = [".card[data-id]", '.hera-card[href*="id="]', ".hera-episode"].join(",");
-  const ART_SELECTOR = ".hera-card__art, .cardScalable, .hera-episode__still";
+  const CARD_SELECTOR = [jf.notifyCard, '.hera-card[href*="id="]', ".hera-episode"].join(",");
+  const ART_SELECTOR = `.hera-card__art, ${jf.notifyCardArt}, .hera-episode__still`;
 
   const cardIds = (card) => {
     const ids = [];
@@ -683,6 +696,7 @@
 
   // ---------- "New" on a detail page --------------------------------------------------------------
 
+  // `mediaInfoItem` is Jellyfin's class for a meta-line chip: borrowed so the chip sits in its rhythm.
   const detailChip = () =>
     el("div", { class: "mediaInfoItem hera-new-meta", "aria-label": "New" }, el("span", { class: "hera-new-chip", text: "New" }));
 
@@ -690,7 +704,7 @@
     const detail = state.detail;
     if (!detail) return;
     const { page, id } = detail;
-    const meta = page.isConnected ? page.querySelector(HT.jf.detailMisc) : null;
+    const meta = page.isConnected ? kit.jf("notify-detail", "detailMisc", page) : null;
     if (!meta) return;
     const wanted = state.news.has(plainId(id));
     const have = meta.querySelector(":scope > .hera-new-meta");
@@ -719,7 +733,7 @@
       return;
     }
     clearDetail();
-    const meta = page.querySelector(HT.jf.detailMisc);
+    const meta = kit.jf("notify-detail", "detailMisc", page);
     const detail = { page, id, observer: null };
     state.detail = detail;
     // Jellyfin draws the meta line again when the item reloads (a played mark, a refreshed rating).
@@ -739,10 +753,11 @@
   const start = () => {
     if (state.started) return;
     state.started = true;
+    scope = kit.scope();
     state.timer = setInterval(poll, POLL_MS);
-    listen(document, "visibilitychange", poll);
-    listen(window, "focus", poll);
-    listen(window, "hashchange", () => closePanel({ restore: false }));
+    scope.listen(document, "visibilitychange", poll);
+    scope.listen(window, "focus", poll);
+    scope.add(kit.onRoute("notify", () => closePanel({ restore: false })));
   };
 
   const reset = () => {
@@ -761,7 +776,8 @@
   const halt = () => {
     clearInterval(state.timer);
     clearTimeout(retryTimer);
-    state.cleanups.splice(0).forEach((fn) => fn());
+    scope?.dispose();
+    scope = null;
     state.started = false;
     removeBell();
     state.user = null;
@@ -790,19 +806,13 @@
       if (!state.data) poll();
     },
     teardown() {
-      clearInterval(state.timer);
-      clearTimeout(retryTimer);
-      state.cleanups.splice(0).forEach((fn) => fn());
+      halt();
       stopCards();
-      removeBell();
       state.dialog?.remove();
       state.dialog = null;
       state.panel = null;
       document.querySelectorAll(".hera-new").forEach((node) => node.remove());
-      state.started = false;
-      state.user = null;
       state.data = null;
-      delete HT.notify;
     },
   });
 
@@ -819,6 +829,4 @@
       clearDetail();
     },
   });
-
-  HT.notify = { render, loading, failed };
 })();

@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.HeraTv.Integrations;
 using MediaBrowser.Model.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.HeraTv.Letterboxd;
 
@@ -7,7 +8,11 @@ namespace Jellyfin.Plugin.HeraTv.Letterboxd;
 /// Retries every film still waiting for the Letterboxd diary each morning: anything a run left
 /// pending, and anything that failed. The watcher does the first attempt a minute after a film ends.
 /// </summary>
-public sealed class LogFilmsToLetterboxdTask(LetterboxdSync sync, LetterboxdStore store) : IScheduledTask
+/// <remarks>
+/// Jellyfin builds tasks itself and marks the whole plugin as failed if one can't be built, so this takes only
+/// the service provider and asks for what it needs when it runs.
+/// </remarks>
+public sealed class LogFilmsToLetterboxdTask(IServiceProvider services) : IScheduledTask
 {
     public string Name => "Log films to Letterboxd";
 
@@ -21,6 +26,8 @@ public sealed class LogFilmsToLetterboxdTask(LetterboxdSync sync, LetterboxdStor
     {
         if (IntegrationSettings.Current.LetterboxdEnabled)
         {
+            var sync = services.GetRequiredService<LetterboxdSync>();
+            var store = services.GetRequiredService<LetterboxdStore>();
             // Each run settles a capped number of films; keep going while runs make progress. Failed
             // films are retried on the first pass only, so one bad night can't use up their attempts.
             for (var run = 0; run < 20; run++)

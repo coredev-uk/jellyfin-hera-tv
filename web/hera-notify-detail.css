@@ -1,0 +1,22 @@
+/* Hera TV: the "New" chip in a title page's meta line (hera-notify.js, module `notify-detail`).
+ * Own sheet, so switching the module off takes only these rules with it; the bell and the "New"
+ * badge on cards stay in hera-notify.css. */
+
+/* On a detail page, the meta line carries it, with the other chips. */
+.itemMiscInfo .hera-new-meta {
+  display: inline-flex;
+  align-items: center;
+}
+.hera-new-chip {
+  padding: 0 6px;
+  border-radius: var(--hera-r-badge);
+  background: var(--hera-select);
+  color: var(--hera-on-select);
+  font: 700 11px/18px var(--hera-font);
+  white-space: nowrap;
+}
+.layout-tv .hera-new-chip {
+  padding: 0 9px;
+  font-size: 15px;
+  line-height: 24px;
+}

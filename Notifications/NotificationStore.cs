@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 using Jellyfin.Plugin.HeraTv.Stats;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Notifications;
 
@@ -14,7 +13,7 @@ namespace Jellyfin.Plugin.HeraTv.Notifications;
 /// Like the stats store, it fails soft: a database that can't be opened is logged once, reads as
 /// "no notices" and writes report false, so a broken file costs the bell and never a page.
 /// </remarks>
-public sealed class NotificationStore
+public sealed class NotificationStore : SqliteStore
 {
     /// <summary>How long a notice is kept, counted from when it was last written.</summary>
     public const int KeepDays = 60;
@@ -79,19 +78,19 @@ public sealed class NotificationStore
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    private readonly ILogger<NotificationStore> logger;
-    private readonly Lock gate = new();
-    private string? path;
-    private int faulted;
-    private bool ready;
+    // Version 1 is the schema as it stood before versions were kept, and repairs a file from before request_states had its clock.
+    private static readonly Migration[] Migrations =
+    [
+        new(1, (connection, transaction) =>
+        {
+            Migration.Execute(connection, transaction, Schema);
+            AddMissingColumns(connection, transaction);
+        }),
+    ];
 
-    public NotificationStore(ILogger<NotificationStore> logger) => this.logger = logger;
-
-    /// <summary>Opens the database at a given file instead of the plugin's data folder.</summary>
-    internal NotificationStore(ILogger<NotificationStore> logger, string file)
+    public NotificationStore(ServerHealth health)
+        : base(health, "Notifications", "use its notifications database, so notices aren't being kept", "notifications.db", Migrations)
     {
-        this.logger = logger;
-        path = file;
     }
 
     /// <summary>
@@ -99,10 +98,10 @@ public sealed class NotificationStore
     /// existing one rewritten because <paramref name="rewrite"/> is set.
     /// </summary>
     public bool Add(string userId, NoticeDraft draft, bool rewrite, DateTime nowUtc)
-        => Run(connection => Insert(connection, null, userId, draft, rewrite, nowUtc) > 0, false);
+        => Writing(connection => Insert(connection, null, userId, draft, rewrite, nowUtc) > 0, false);
 
     /// <summary>Gets the producer's own record on a notice (<see cref="NoticeDraft.Data"/>), or null.</summary>
-    public string? DataOf(string userId, string dedupeKey) => Run(
+    public string? DataOf(string userId, string dedupeKey) => Reading(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -119,7 +118,7 @@ public sealed class NotificationStore
     /// <paramref name="baselineKey"/> marks the user as having had their first look. False when it couldn't be saved.
     /// </summary>
     public bool ApplyRequests(string userId, IReadOnlyList<(string Key, RequestState State)> states, IReadOnlyList<NoticeDraft> notices, string? baselineKey, DateTime nowUtc)
-        => Run(
+        => Writing(
             connection =>
             {
                 using var transaction = connection.BeginTransaction();
@@ -154,7 +153,7 @@ public sealed class NotificationStore
             false);
 
     /// <summary>Gets what was last recorded for each of a user's requests, by <c>type:tmdbId</c>.</summary>
-    public Dictionary<string, RequestState> RequestStates(string userId) => Run(
+    public Dictionary<string, RequestState> RequestStates(string userId) => Reading(
         connection =>
         {
             var states = new Dictionary<string, RequestState>(StringComparer.Ordinal);
@@ -172,7 +171,7 @@ public sealed class NotificationStore
         new Dictionary<string, RequestState>(StringComparer.Ordinal));
 
     /// <summary>Gets a small named value the producers keep (when the daily summary last ran, who has had a first look), or null.</summary>
-    public string? Meta(string key) => Run(
+    public string? Meta(string key) => Reading(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -182,7 +181,7 @@ public sealed class NotificationStore
         },
         null);
 
-    public bool SetMeta(string key, string value) => Run(
+    public bool SetMeta(string key, string value) => Writing(
         connection =>
         {
             SetMeta(connection, null, key, value);
@@ -191,7 +190,7 @@ public sealed class NotificationStore
         false);
 
     /// <summary>Gets a user's newest notices, how many they haven't read, and the library items those name.</summary>
-    public Listing Read(string userId, int limit) => Run(
+    public Listing Read(string userId, int limit) => Reading(
         connection =>
         {
             var notices = new List<Notice>();
@@ -243,7 +242,7 @@ public sealed class NotificationStore
         new Listing(0, [], []));
 
     /// <summary>Marks a user's notices read: the given ones, or every one when <paramref name="ids"/> is null. Returns how many are still unread.</summary>
-    public int MarkRead(string userId, IReadOnlyList<long>? ids) => Run(
+    public int MarkRead(string userId, IReadOnlyList<long>? ids) => Writing(
         connection =>
         {
             using (var command = connection.CreateCommand())
@@ -270,7 +269,7 @@ public sealed class NotificationStore
         0);
 
     /// <summary>Gets a user's choices, which are all on until they say otherwise.</summary>
-    public NoticePrefs GetPrefs(string userId) => Run(
+    public NoticePrefs GetPrefs(string userId) => Reading(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -283,7 +282,7 @@ public sealed class NotificationStore
         },
         NoticePrefs.Default);
 
-    public bool SetPrefs(string userId, NoticePrefs prefs) => Run(
+    public bool SetPrefs(string userId, NoticePrefs prefs) => Writing(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -304,7 +303,7 @@ public sealed class NotificationStore
     /// that haven't changed for <see cref="RequestKeepDays"/>. A request seen again after that is only
     /// announced if it is recent (<see cref="RequestTransitions.FreshFor"/>), so nothing old is replayed.
     /// </summary>
-    public bool Prune(DateTime nowUtc) => Run(
+    public bool Prune(DateTime nowUtc) => Writing(
         connection =>
         {
             using var transaction = connection.BeginTransaction();
@@ -371,78 +370,15 @@ public sealed class NotificationStore
         return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
-    private static object Db(string? value) => value is null ? DBNull.Value : value;
-
-    private static string? Text(SqliteDataReader reader, int column) => reader.IsDBNull(column) ? null : reader.GetString(column);
-
-    /// <summary>Runs one unit of work on a fresh connection, creating the database first if need be. The fallback stands in when it fails.</summary>
-    private T Run<T>(Func<SqliteConnection, T> work, T fallback)
-    {
-        try
-        {
-            T result;
-            lock (gate)
-            {
-                var file = path ??= Locate();
-                var builder = new SqliteConnectionStringBuilder
-                {
-                    DataSource = file,
-                    Mode = SqliteOpenMode.ReadWriteCreate,
-                    DefaultTimeout = 5,
-                    Pooling = false,
-                };
-                using var connection = new SqliteConnection(builder.ConnectionString);
-                connection.Open();
-                // The tables are made once per process, not on every call: the bell polls this constantly.
-                if (!ready)
-                {
-                    using var schema = connection.CreateCommand();
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                    AddMissingColumns(connection);
-                    ready = true;
-                }
-
-                result = work(connection);
-            }
-
-            Interlocked.Exchange(ref faulted, 0);
-            return result;
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
-        {
-            // A database that went wrong may be gone or replaced: make the tables again next time.
-            ready = false;
-            if (Interlocked.Exchange(ref faulted, 1) == 0)
-            {
-                logger.LogWarning(ex, "Hera TV couldn't use its notifications database; notices aren't being kept until it can. Further failures are logged at debug level");
-            }
-            else
-            {
-                logger.LogDebug(ex, "Hera TV couldn't use its notifications database");
-            }
-
-            return fallback;
-        }
-    }
-
     /// <summary>Brings a database made by an earlier version up to the current tables: <c>CREATE TABLE IF NOT EXISTS</c> leaves an old table as it was.</summary>
-    private static void AddMissingColumns(SqliteConnection connection)
+    private static void AddMissingColumns(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var check = connection.CreateCommand();
+        check.Transaction = transaction;
         check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_states') WHERE name = 'updatedAt'";
         if (Convert.ToInt32(check.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
         {
-            using var alter = connection.CreateCommand();
-            alter.CommandText = "ALTER TABLE request_states ADD COLUMN updatedAt TEXT";
-            alter.ExecuteNonQuery();
+            Migration.Execute(connection, transaction, "ALTER TABLE request_states ADD COLUMN updatedAt TEXT");
         }
-    }
-
-    private static string Locate()
-    {
-        var folder = Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin hasn't loaded yet.");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, "notifications.db");
     }
 }

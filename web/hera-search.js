@@ -7,6 +7,16 @@
  *    on-screen keyboard in the TV layout.
  * Both share one engine: per kind Jellyfin API queries, ranking, caches, and cancellation of the
  * request a newer key supersedes. Jellyfin's own page and route stay; its markup is only hidden.
+ *
+ * Contracts with other files:
+ *  - Jellyfin's pieces come through kit.jf (headerSearchButton, searchHeader, appBarTabs,
+ *    legacyHeaderTabs). The header field reports through kit.report, since it has no page of its own.
+ *  - Borrowed Jellyfin classes: `sectionTitle`, `sectionTitle-cards` and `verticalSection` on
+ *    headings and sections (hera-tv.css styles them), and `layout-mobile` on <html> (where
+ *    Jellyfin keeps its own header, so the stock button stands).
+ *  - Expandos: Seerr cards carry `heraItem` (the title) and a `data-hera-key`, both Discover's
+ *    contract, so a request made from its sheet updates the badge here too.
+ *  - hera-discover.js supplies HT.discover.badgeOf, itemCard and openTitle; each is optional.
  */
 (() => {
   "use strict";
@@ -36,7 +46,7 @@
     { id: "person", label: "People", path: "Persons", shape: "person", limit: 40 },
     { id: "collection", label: "Collections", types: "BoxSet", shape: "poster", limit: 30 },
   ];
-  const INDEX = { episode: 2, person: 3 };
+  const INDEX = Object.fromEntries(CATEGORIES.map((category, index) => [category.id, index]));
   const REQUEST_CATEGORY = { id: "request", label: "Not in Your Library", shape: "poster" };
   const ALL = { id: "all", label: "All" };
   const KIND = { Movie: "Film", Series: "TV Show", BoxSet: "Collection", Person: "Person" };
@@ -59,18 +69,20 @@
     return response.json();
   };
 
-  const timed = new Map();
-  const remember = (cache, key, ttl) => {
-    const hit = cache.get(key);
-    return hit && Date.now() - hit.at < ttl ? hit.value : null;
-  };
-  // Every typed term leaves an answer; expired ones go as new ones arrive, and the map stays small.
-  const TIMED_KEPT = 60;
-  const keep = (cache, key, value, ttl) => {
-    const now = Date.now();
-    for (const [k, v] of cache) if (now - v.at >= v.ttl) cache.delete(k);
-    while (cache.size >= TIMED_KEPT) cache.delete(cache.keys().next().value);
-    cache.set(key, { at: now, ttl, value });
+  // Every typed term leaves an answer; expired ones go as new ones arrive, and the caches stay small.
+  const libraryCache = kit.ttlCache({ ttl: LIBRARY_TTL, max: 60 });
+  const seerrCache = kit.ttlCache({ ttl: SEERR_TTL, max: 60 });
+
+  // A newer key aborts the request it supersedes; that is not a failure to count.
+  // Counted on a side branch: the caller chains on the request itself, so its failure still
+  // reaches its own error path.
+  const counted = (promise) => {
+    const request = promise.catch((error) => {
+      if (error?.name === "AbortError") return null;
+      throw error;
+    });
+    kit.track("search", request);
+    return request;
   };
 
   const ITEM_FIELDS = "PrimaryImageAspectRatio,ProductionYear";
@@ -169,19 +181,25 @@
       const stale = () => mine !== seq;
       const key = term.toLowerCase();
       const seerrOn = hooks.seerr() && term.length >= MIN_SEERR;
+      // An answer already on its way may have been asked for by a request a newer key aborted
+      // (the cache shares it); ask again with this run's own signal.
+      const load = (cache, fetcher) =>
+        cache.get(key, () => fetcher(term, signal)).catch((error) => {
+          if (error?.name === "AbortError" && !signal.aborted) return cache.get(key, () => fetcher(term, signal));
+          throw error;
+        });
       const data = {
         term,
-        lib: remember(timed, `lib:${key}`, LIBRARY_TTL),
-        seerr: seerrOn ? remember(timed, `seerr:${key}`, SEERR_TTL) ?? "loading" : "off",
+        lib: libraryCache.peek(key) ?? null,
+        seerr: seerrOn ? seerrCache.peek(key) ?? "loading" : "off",
       };
       hooks.onStart(data);
       if (data.lib) hooks.onLibrary(data);
       else {
-        fetchLibrary(term, signal)
+        counted(load(libraryCache, fetchLibrary))
           .then((lib) => {
-            if (stale()) return;
+            if (stale() || !lib) return;
             data.lib = lib;
-            keep(timed, `lib:${key}`, lib, LIBRARY_TTL);
             hooks.onLibrary(data);
           })
           .catch((error) => {
@@ -192,16 +210,16 @@
       }
       if (data.seerr === "loading") {
         timer = setTimeout(() => {
-          fetchSeerr(term, signal)
+          load(seerrCache, fetchSeerr)
             .then((items) => {
               if (stale()) return;
               data.seerr = items;
-              keep(timed, `seerr:${key}`, items, SEERR_TTL);
               hooks.onSeerr(data);
             })
             .catch((error) => {
               if (stale() || error?.name === "AbortError") return;
-              // Requesting is an extra; a Seerr failure leaves the library's results alone.
+              // Requesting is an extra, so it is not counted; a Seerr failure leaves the library's
+              // results alone.
               data.seerr = [];
               hooks.onSeerr(data);
             });
@@ -774,6 +792,7 @@
     ui = {
       ...parts,
       seerr: false,
+      ready: false,
       term: "",
       filter: "all",
       data: null,
@@ -790,23 +809,17 @@
     ui.results.addEventListener("click", (event) => {
       if (event.target.closest?.(".hera-card")) rememberSearch(ui.term);
     });
-    // Router pushes and Back do not fire hashchange; links to a search and the history buttons are
-    // the ways the address changes under a search page that is already showing.
-    const readHash = () => new URLSearchParams(window.location.hash.split("?")[1] || "");
-    const onLink = (event) => {
-      if (event.target.closest?.('a[href^="#/search"]')) setTimeout(() => ui === mounted && adopt(readHash()), 80);
-    };
-    const onPop = () => setTimeout(() => ui === mounted && window.location.hash.startsWith("#/search") && adopt(readHash()), 80);
-    document.addEventListener("click", onLink, true);
-    window.addEventListener("popstate", onPop);
-    ui.leave = () => {
-      document.removeEventListener("click", onLink, true);
-      window.removeEventListener("popstate", onPop);
-    };
+    // Router pushes and Back do not fire hashchange, but the core's route events cover both: a new
+    // address under a search page that is already showing adopts its search. Not before mount has
+    // finished, which starts the first search itself.
+    ui.leave = kit.onRoute("search", ({ page: shown, params: next }) => {
+      if (ui === mounted && ui.ready && shown?.id === "searchPage") adopt(next);
+    });
 
     const ints = await kit.integrations();
     if (ui !== mounted) return;
     ui.seerr = Boolean(ints.seerr);
+    ui.ready = true;
 
     renderRecent();
     const start = queryOf(params);
@@ -836,10 +849,9 @@
   // header field only through the system keyboard, which hides the menu, where the page's own
   // keyboard keeps results in view and each key searches there too.
 
-  const HEADER = `${HT.jf.appBar}, ${HT.jf.legacyHeader}`;
-  const BUTTON = `${HT.jf.appBar} a[href="#/search"], ${HT.jf.legacyHeader} a[href="#/search"], .headerSearchButton`;
-
-  const capsuleOf = () => document.querySelector(HT.jf.appBarTabs) || document.querySelector(`${HT.jf.legacyHeader} .headerTabs`);
+  // The capsule of tabs the field opens over: the modern app bar's, or else the legacy header's
+  // (TV and older layouts).
+  const capsuleOf = () => kit.jf("search", "appBarTabs") || kit.jf("search", "legacyHeaderTabs");
 
   // The field opens where the button is: its right edge on the button's, centred on it, growing
   // left over the tab capsule (which fades) and no further than the capsule's left edge.
@@ -860,7 +872,7 @@
 
   // Over the home hero the app bar keeps the dark set whatever the scheme; the field follows it.
   const toneHeader = () => {
-    const bar = document.querySelector(HEADER);
+    const bar = kit.jf("search", "searchHeader");
     if (!hs || !bar) return;
     const read = (node) => getComputedStyle(node).getPropertyValue("--hera-bg").trim();
     hs.root.classList.toggle("hera-dark", read(bar) !== read(document.documentElement));
@@ -1097,6 +1109,7 @@
       active: -1,
       seerr: false,
       animation: null,
+      scope: null,
       runner: createRunner(headerHooks),
     };
     input.addEventListener("input", onHeaderInput);
@@ -1110,9 +1123,13 @@
       const next = event.relatedTarget;
       if (hs.open && next && !root.contains(next) && next !== hs.button) closeHeader({ restore: false });
     });
-    kit.integrations().then((ints) => {
-      if (hs) hs.seerr = Boolean(ints.seerr);
-    });
+    const integrations = kit.integrations();
+    kit.track("search", integrations);
+    integrations
+      .then((ints) => {
+        if (hs) hs.seerr = Boolean(ints.seerr);
+      })
+      .catch(() => {});
   };
 
   const onAway = (event) => {
@@ -1164,9 +1181,11 @@
       );
     }
     hs.input.focus({ preventScroll: true });
-    document.addEventListener("pointerdown", onAway, true);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("scroll", onScroll, { passive: true });
+    // Pointer, resize and scroll only matter while the field is open.
+    hs.scope = kit.scope();
+    hs.scope.listen(document, "pointerdown", onAway, { capture: true });
+    hs.scope.listen(window, "resize", onResize);
+    hs.scope.listen(window, "scroll", onScroll, { passive: true });
   };
 
   const closeHeader = ({ restore = true } = {}) => {
@@ -1174,9 +1193,8 @@
     hs.open = false;
     hs.runner.cancel();
     hs.data = null;
-    document.removeEventListener("pointerdown", onAway, true);
-    window.removeEventListener("resize", onResize);
-    window.removeEventListener("scroll", onScroll);
+    hs.scope?.dispose();
+    hs.scope = null;
     document.documentElement.classList.remove("hera-search-open");
     hs.button?.setAttribute("aria-expanded", "false");
     const finish = () => {
@@ -1211,9 +1229,10 @@
 
   // The field failed part-way: put the header back as Jellyfin drew it, so the capsule never stays hidden.
   const abandonHeader = () => {
-    document.removeEventListener("pointerdown", onAway, true);
-    window.removeEventListener("resize", onResize);
-    window.removeEventListener("scroll", onScroll);
+    if (hs) {
+      hs.scope?.dispose();
+      hs.scope = null;
+    }
     document.documentElement.classList.remove("hera-search-open");
     if (hs) {
       hs.open = false;
@@ -1224,7 +1243,7 @@
   // Capture phase, so Jellyfin's own link never navigates. Where there is no capsule to replace
   // (phone widths, where Jellyfin keeps its own layout) or on a TV, the button behaves as before.
   const onHeaderClick = (event) => {
-    const link = event.target.closest?.(BUTTON);
+    const link = kit.jfAll("search", "headerSearchButton").find((candidate) => candidate.contains(event.target));
     if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     if (!kit.userId() || kit.isTv()) return;
     if (window.location.hash.startsWith("#/search")) {
@@ -1237,31 +1256,43 @@
       return;
     }
     if (document.documentElement.classList.contains("layout-mobile")) return;
-    // With no capsule to replace there is nowhere for the field to open: the stock button stands.
-    if (!capsuleOf()) return;
+    // With no capsule to replace there is nowhere for the field to open: the stock button stands,
+    // and the Dashboard hears that the header has changed shape.
+    if (!capsuleOf()) {
+      kit.report("search", "partial", "No tab capsule in the header to open the search field over");
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     if (hs?.open) closeHeader();
     else {
       try {
         openHeader(link);
+        kit.report("search", "ok");
       } catch (error) {
         console.error("[Hera TV:search]", error);
+        kit.report("search", "degraded", `The header search field failed: ${error?.message || error}`);
         abandonHeader();
         kit.go(searchHash(""));
       }
     }
   };
-  document.addEventListener("click", onHeaderClick, true);
 
-  const onHash = () => closeHeader({ restore: false });
-  window.addEventListener("hashchange", onHash);
+  // Held while the module is: capture, so Jellyfin's own link never navigates; and the field
+  // closes as the address changes.
+  const header = { off: [] };
+  const armHeader = () => {
+    if (header.off.length) return;
+    header.off = [kit.intercept("search", document, "click", onHeaderClick), kit.onRoute("search", () => closeHeader({ restore: false }))];
+  };
+  const disarmHeader = () => header.off.splice(0).forEach((off) => off());
 
   HT.register({
     name: "search",
     // No `requires`: the header field takes whichever capsule is there (the modern app bar's tabs,
     // or the TV and legacy layouts' .skinHeader), and onHeaderClick already checks for one.
     async onView(page, { params }) {
+      armHeader();
       if (!kit.userId()) return;
       if (page.id === "searchPage") {
         closeHeader({ restore: false });
@@ -1279,8 +1310,7 @@
       hs?.root.remove();
       hs = null;
       unmount();
-      document.removeEventListener("click", onHeaderClick, true);
-      window.removeEventListener("hashchange", onHash);
+      disarmHeader();
       document.documentElement.classList.remove("hera-search-open");
     },
   });

@@ -1,11 +1,20 @@
 ---
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 # Runs the built plugin inside a real Jellyfin server and drives its web client with Chromium
-# (tests/compat), failing when Hera reports that any page is broken: window.HeraTV missing, safe
-# mode, or a module degraded or disabled. Pull requests and main run against the Jellyfin release
-# the plugin is built for (the Jellyfin.Controller version in the project file). The nightly run
-# adds Jellyfin's `latest` and `unstable` images, and keeps one issue per tag up to date, so a
-# Jellyfin release that changes the web client is known about before the server is updated.
+# (tests/compat). It fails when the plugin did not load or logged an error, when any Hera endpoint
+# answers with a 5xx or the wrong status, when a scheduled task fails, when Jellyfin does not stay up
+# with a film playing, and when any page, in the desktop, TV or signed-out layout, shows that Hera is
+# not working: window.HeraTV missing, safe mode, a module idle, partial, degraded or disabled, a
+# console error from the bundle, or nothing of Hera's drawn there.
+#
+# Pull requests and main run against the Jellyfin release the plugin is built for (the
+# Jellyfin.Controller version in the project file). release.yaml waits for the run on main and
+# publishes only if it passed. The nightly run adds Jellyfin's `latest` and `unstable` images, in two
+# forms: this build, as released, and a build recompiled against the newest Jellyfin.Controller on
+# NuGet (stable for `latest`, prerelease for `unstable`), so a Jellyfin member that was removed is a
+# compile error found the night it is published rather than a MissingMethodException on a server.
+# One issue per tag collects both, so a Jellyfin release that changes the web client or the server
+# API is known about before the server is updated.
 name: compat
 
 on:
@@ -149,11 +158,115 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # One issue per newer Jellyfin tag: opened or updated while it fails, closed when it passes.
+  # Nightly only: Hera recompiled against the newest Jellyfin.Controller and Jellyfin.Model on NuGet,
+  # and run against the Jellyfin image that goes with them. Nothing newer than the releases means the
+  # `unstable` run has nothing to rebuild and is skipped.
+  rebuilt:
+    name: Rebuilt for ${{ matrix.tag }}
+    if: ${{ github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: stable
+            tag: latest
+          - kind: prerelease
+            tag: unstable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: tests/compat/package-lock.json
+
+      - name: Newest Jellyfin.Controller
+        id: version
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          version=$(node tests/compat/newest.mjs "$KIND")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$version" ]; then
+            echo "Rebuilding against Jellyfin.Controller $version ($KIND)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No $KIND Jellyfin.Controller newer than the releases: nothing to rebuild" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Setup .NET
+        if: ${{ steps.version.outputs.version != '' }}
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      # `dotnet add package` rewrites the version in this checkout's project file only.
+      - name: Build
+        id: build
+        if: ${{ steps.version.outputs.version != '' }}
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -o pipefail
+          {
+            dotnet add Jellyfin.Plugin.HeraTv.csproj package Jellyfin.Controller --version "$VERSION"
+            dotnet add Jellyfin.Plugin.HeraTv.csproj package Jellyfin.Model --version "$VERSION"
+            dotnet build Jellyfin.Plugin.HeraTv.csproj -c Release -o out
+          } 2>&1 | tee build.log
+
+      - name: Summarise a build that failed
+        if: ${{ steps.build.outcome == 'failure' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ matrix.tag }}
+        run: node tests/compat/build-failure.mjs --log build.log --controller "$VERSION" --tag "$TAG" --out tests/compat/results
+
+      - name: Install
+        if: ${{ steps.build.outcome == 'success' }}
+        working-directory: tests/compat
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Test
+        if: ${{ steps.build.outcome == 'success' }}
+        working-directory: tests/compat
+        env:
+          TAG: ${{ matrix.tag }}
+        run: node run.mjs --tag "$TAG" --plugin ../../out
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: '[ ! -f tests/compat/results/summary.md ] || cat tests/compat/results/summary.md >> "$GITHUB_STEP_SUMMARY"'
+
+      - name: Upload screenshots and summary
+        if: ${{ !cancelled() && steps.version.outputs.version != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compat-${{ matrix.tag }}-rebuilt
+          path: tests/compat/results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The artifact is uploaded first; this is what turns the nightly run red.
+      - name: Fail when the build failed
+        if: ${{ steps.build.outcome == 'failure' }}
+        run: exit 1
+
+  # One issue per newer Jellyfin tag: opened or updated while either run fails, closed when both pass.
   # Only the nightly run reports, and only for the tags that are not the tested release.
   report:
     name: Report ${{ matrix.tag }}
-    needs: test
+    needs: [test, rebuilt]
     if: ${{ !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -166,12 +279,19 @@ jobs:
           - latest
           - unstable
     steps:
-      - name: Download results
+      - name: Download results of this build
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compat-${{ matrix.tag }}
-          path: results
+          path: results/built
+
+      - name: Download results of the rebuilt one
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compat-${{ matrix.tag }}-rebuilt
+          path: results/rebuilt
 
       - name: Open, update or close the issue
         env:
@@ -182,9 +302,11 @@ jobs:
           title="Compatibility: Jellyfin $TAG"
           number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title \
             | jq -r --arg title "$title" 'map(select(.title == $title)) | first | .number // empty')
-          status=$(jq -r .status results/summary.json 2>/dev/null || echo missing)
+          built=$(jq -r .status results/built/summary.json 2>/dev/null || echo missing)
+          # A rebuild that was not run (nothing newer on NuGet, or the job could not start) is no finding.
+          rebuilt=$(jq -r .status results/rebuilt/summary.json 2>/dev/null || echo none)
 
-          if [ "$status" = passed ]; then
+          if [ "$built" = passed ] && { [ "$rebuilt" = passed ] || [ "$rebuilt" = none ]; }; then
             if [ -n "$number" ]; then
               gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Hera passes against Jellyfin \`$TAG\` again: $RUN_URL"
             fi
@@ -192,10 +314,18 @@ jobs:
           fi
 
           {
-            if [ -f results/summary.md ]; then
-              cat results/summary.md
+            echo "### This build, as released"
+            echo
+            if [ -f results/built/summary.md ]; then
+              cat results/built/summary.md
             else
               echo "The run for Jellyfin \`$TAG\` produced no summary."
+            fi
+            if [ "$rebuilt" != none ]; then
+              echo
+              echo "### Recompiled against the newest Jellyfin packages"
+              echo
+              cat results/rebuilt/summary.md
             fi
             echo
             echo "Screenshots and the server log are attached to [the run]($RUN_URL)."

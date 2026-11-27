@@ -1,20 +1,35 @@
 using System.Globalization;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Stats;
 
 /// <summary>One row of Playback Reporting's history: a stretch of playback of one item. <paramref name="Start"/> is local wall-clock time.</summary>
 internal sealed record Play(DateTime Start, string User, string ItemId, string Type, string Name, string Method, string Client, string Device, long Seconds);
 
+/// <summary>Why Playback Reporting's history can't be shown; the words the Statistics page is sent.</summary>
+internal static class Unavailable
+{
+    /// <summary>There is no Playback Reporting database: the plugin isn't installed, or hasn't recorded anything yet.</summary>
+    public const string NotInstalled = "notInstalled";
+
+    /// <summary>The database is there but its tables or columns aren't the ones Hera TV reads: Playback Reporting has changed.</summary>
+    public const string SchemaChanged = "schemaChanged";
+
+    /// <summary>The database is there and looks right but couldn't be read (locked, damaged, no permission).</summary>
+    public const string Unreadable = "unreadable";
+}
+
+/// <summary>What was read from Playback Reporting: the plays, or null with the reason there are none to show (<see cref="Unavailable"/>).</summary>
+internal sealed record PlayHistory(IReadOnlyList<Play>? Plays, string? Reason);
+
 /// <summary>
 /// Reads what people watched from the Playback Reporting plugin's database. Hera TV never writes to
 /// it, and the file is opened afresh (read-only) for each query so nothing is held between them.
 /// </summary>
 /// <remarks>
-/// It fails soft: a missing file, or any SQLite error, reads as "unavailable" (logged once), never
-/// as an error the Statistics page has to handle.
+/// It fails soft: a missing file, or any SQLite error, reads as "unavailable" with the reason (not
+/// installed, schema changed, unreadable) and is reported once, never as an error the Statistics page has to handle.
 /// <para>
 /// SQLitePCLRaw isn't initialised here: Jellyfin's own <c>Microsoft.Data.Sqlite</c> (the one loaded in
 /// place of the package this builds against) finds and initialises its bundled e_sqlite3 the first time
@@ -27,7 +42,7 @@ internal sealed record Play(DateTime Start, string User, string ItemId, string T
 /// is a local time too.
 /// </para>
 /// </remarks>
-internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<PlaybackReportingSource> logger)
+internal sealed class PlaybackReportingSource(IApplicationPaths paths, ServerHealth health)
 {
     /// <summary>Plays shorter than this are skips and previews, not watching.</summary>
     public const int MinimumSeconds = 60;
@@ -39,7 +54,10 @@ internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<P
         "AND ($user IS NULL OR lower(replace(UserId, '-', '')) = $user) " +
         "ORDER BY DateCreated";
 
-    private int faulted;
+    private const string Feature = "Playback Reporting history";
+
+    // A few unreadable rows are noise; a tenth of them, and at least this many, is a format that has changed.
+    private const int ConcerningRows = 5;
 
     private string DatabaseFile => Path.Combine(paths.DataPath, "playback_reporting.db");
 
@@ -68,14 +86,15 @@ internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<P
 
     /// <summary>
     /// Reads the plays that started at or after <paramref name="from"/>, for everyone or for one user
-    /// (a GUID in N format). Null when Playback Reporting's database isn't there or can't be read.
+    /// (a GUID in N format). The plays are null, with the reason, when Playback Reporting's database
+    /// isn't there or can't be read.
     /// </summary>
-    public IReadOnlyList<Play>? Read(DateTime from, string? user)
+    public PlayHistory Read(DateTime from, string? user)
     {
         var file = DatabaseFile;
         if (!File.Exists(file))
         {
-            return null;
+            return new PlayHistory(null, Unavailable.NotInstalled);
         }
 
         try
@@ -98,42 +117,69 @@ internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<P
             command.Parameters.AddWithValue("$user", user is null ? DBNull.Value : user);
 
             var plays = new List<Play>();
+            var skipped = 0;
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
                 // Rows that can't be read as a play (no time, no user) are skipped rather than failing the page.
-                if (reader.IsDBNull(0) || reader.IsDBNull(1) || reader.IsDBNull(8)
-                    || !DateTime.TryParse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+                if (ReadPlay(reader) is { } play)
                 {
-                    continue;
+                    plays.Add(play);
                 }
-
-                plays.Add(new Play(
-                    start,
-                    reader.GetString(1).Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant(),
-                    Text(reader, 2),
-                    Text(reader, 3),
-                    Text(reader, 4),
-                    MethodLabel(Text(reader, 5)),
-                    Text(reader, 6),
-                    Text(reader, 7),
-                    reader.GetInt64(8)));
+                else
+                {
+                    skipped++;
+                }
             }
 
-            Interlocked.Exchange(ref faulted, 0);
-            return plays;
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            if (Interlocked.Exchange(ref faulted, 1) == 0)
+            if (skipped >= ConcerningRows && skipped * 10 >= skipped + plays.Count)
             {
-                logger.LogWarning(ex, "Hera TV couldn't read Playback Reporting's database; the Statistics page shows it as unavailable. Further failures are logged at debug level");
+                health.Fault(Feature, string.Create(CultureInfo.InvariantCulture, $"read {skipped} of {skipped + plays.Count} rows of Playback Reporting's history: the time or user in them isn't in the form Hera TV expects"));
             }
             else
             {
-                logger.LogDebug(ex, "Hera TV couldn't read Playback Reporting's database");
+                health.Recovered(Feature);
             }
 
+            return new PlayHistory(plays, null);
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("no such", StringComparison.OrdinalIgnoreCase))
+        {
+            // "no such table" or "no such column": the file is Playback Reporting's, and no longer in the shape this reads.
+            health.Fault(Feature, "read Playback Reporting's history: its tables or columns aren't what Hera TV expects, so the plugin's database has probably changed", ex);
+            return new PlayHistory(null, Unavailable.SchemaChanged);
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            health.Fault(Feature, "read Playback Reporting's database; the Statistics page shows it as unavailable", ex);
+            return new PlayHistory(null, Unavailable.Unreadable);
+        }
+    }
+
+    /// <summary>Reads one row as a play, or null when it has no usable time, user or length.</summary>
+    private static Play? ReadPlay(SqliteDataReader reader)
+    {
+        try
+        {
+            if (reader.IsDBNull(0) || reader.IsDBNull(1) || reader.IsDBNull(8)
+                || !DateTime.TryParse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
+            {
+                return null;
+            }
+
+            return new Play(
+                start,
+                reader.GetString(1).Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant(),
+                Text(reader, 2),
+                Text(reader, 3),
+                Text(reader, 4),
+                MethodLabel(Text(reader, 5)),
+                Text(reader, 6),
+                Text(reader, 7),
+                reader.GetInt64(8));
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
             return null;
         }
     }

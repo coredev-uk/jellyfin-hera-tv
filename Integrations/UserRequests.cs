@@ -33,7 +33,7 @@ public sealed class UserRequests(UpstreamClient upstream)
     public sealed record Result(IReadOnlyList<Entry> Entries, ArrActivity.SabQueue? Sab);
 
     // Sonarr or Radarr connected, and the dashboard's "Request progress" switch on.
-    public static bool ActivityOn() => IntegrationSettings.Current.ActivityEnabled && Plugin.Instance?.Configuration.ActivityEnabled != false;
+    public static bool ActivityOn() => IntegrationSettings.Current.ArrConnected && Plugin.Instance?.Configuration.ActivityEnabled != false;
 
     /// <summary>
     /// Reads a Seerr user's newest requests. Null when Seerr didn't answer, so a caller can tell

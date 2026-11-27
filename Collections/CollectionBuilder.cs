@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.HeraTv.Collections;
 /// <param name="Unchanged">Sets that were already right.</param>
 /// <param name="Failed">Sets that couldn't be built; the rest carried on.</param>
 /// <param name="Seconds">How long it took.</param>
-/// <param name="Note">Why nothing was done, when that is so.</param>
+/// <param name="Note">What the run did about something unusual: why nothing was done, removals it held back, or why it stopped early.</param>
 public sealed record BuildSummary(DateTimeOffset At, int Created, int Updated, int Removed, int Unchanged, int Failed, double Seconds, string? Note);
 
 /// <summary>Whether a build is running, and how the last one went.</summary>
@@ -54,10 +54,24 @@ internal sealed class CollectionBuilder(
     Catalogue catalogue,
     StreamingCache streaming,
     ICollectionsView view,
-    ILogger<CollectionBuilder> logger) : ICollectionBuilder
+    ILogger<CollectionBuilder> logger,
+    ServerHealth health) : ICollectionBuilder
 {
     /// <summary>The tag every set Hera builds carries.</summary>
     public const string HeraTag = "hera-tv";
+
+    private const string Feature = "Collections build";
+
+    /// <summary>The most sets that no longer qualify that one run removes, at the very least; see <see cref="RemovalShare"/>.</summary>
+    private const int MinRemovalLimit = 5;
+
+    /// <summary>
+    /// The share of Hera's sets one run may remove when they only stopped qualifying (too few titles, or no
+    /// longer in the data at all). A change in what Seerr sends or what the library returns can make dozens
+    /// stop qualifying at once; a real change in the library moves a few at a time. More than this is held
+    /// back unless the library itself shrank by about as much.
+    /// </summary>
+    private const double RemovalShare = 0.2;
 
     /// <summary>The prefix of the tag that names the definition a set was built from.</summary>
     public const string IdTagPrefix = "hera-tv:";
@@ -65,6 +79,9 @@ internal sealed class CollectionBuilder(
     private readonly Lock _gate = new();
     private BuildSummary? _last;
     private bool _running;
+
+    // How many films and series the last build saw; not kept across a restart, so the first build after one is cautious.
+    private int? _lastPool;
 
     public BuildStatus Status
     {
@@ -122,6 +139,7 @@ internal sealed class CollectionBuilder(
             .ToList();
 
         var wanted = new List<(Definition Definition, List<Title> Members)>();
+        var poolSize = 0;
         if (config.CollectionsEnabled)
         {
             // Streaming data is fetched here, once a day, so the home rows read a file instead of calling Seerr.
@@ -134,6 +152,7 @@ internal sealed class CollectionBuilder(
                 Recursive = true,
                 IsVirtualItem = false,
             }));
+            poolSize = pool.Count;
             if (pool.Count == 0 && existing.Count > 0)
             {
                 // A library mid-scan can answer with nothing; reconciling against that would delete every set.
@@ -204,6 +223,15 @@ internal sealed class CollectionBuilder(
                     created++;
                 }
             }
+            catch (TagNotPersistedException ex)
+            {
+                // Every further set would be made untagged too, and the next run would make them all again.
+                logger.LogError(ex, "Hera TV collections: the build stopped because Jellyfin didn't keep the tag on a set it made");
+                health.Fault(Feature, "build collections: Jellyfin didn't keep the tag on a set Hera made, so the build stopped before making any more", ex);
+                failed++;
+                progress.Report(100);
+                return Summarise(created, updated, 0, unchanged, failed, clock, ex.Message);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 failed++;
@@ -214,7 +242,8 @@ internal sealed class CollectionBuilder(
         }
 
         // Whatever is left was built before and is no longer wanted.
-        foreach (var set in byId.Values.Concat(stale))
+        var (doomed, heldBack, limit) = LimitRemovals([.. byId.Values.Concat(stale)], stale, config, existing.Count, poolSize);
+        foreach (var set in doomed)
         {
             ct.ThrowIfCancellationRequested();
             try
@@ -229,8 +258,59 @@ internal sealed class CollectionBuilder(
             }
         }
 
+        string? note = null;
+        if (heldBack > 0)
+        {
+            note = string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{heldBack} sets that no longer qualify were left in place: more than {limit} at once looks like a change in what Seerr or the library returns, and the library didn't shrink to match. They are looked at again next run.");
+            logger.LogWarning("Hera TV collections: {Note}", note);
+            health.Fault(Feature, "remove every set that no longer qualifies: " + note);
+        }
+        else
+        {
+            health.Recovered(Feature);
+        }
+
+        if (config.CollectionsEnabled)
+        {
+            _lastPool = poolSize;
+        }
+
         progress.Report(100);
-        return Summarise(created, updated, removed, unchanged, failed, clock, null);
+        return Summarise(created, updated, removed, unchanged, failed, clock, note);
+    }
+
+    /// <summary>
+    /// Works out which of the sets to remove may go this run. Sets the administrator's own choices end (collections
+    /// or the group switched off, a season out of season, a set no longer built by anyone) always go. Those that only
+    /// stopped qualifying are limited to <see cref="RemovalShare"/> of Hera's sets, and at least
+    /// <see cref="MinRemovalLimit"/>, unless the library shrank by that share since the last build: the rest wait for the next run.
+    /// </summary>
+    private (List<BoxSet> Remove, int HeldBack, int Limit) LimitRemovals(List<BoxSet> all, List<BoxSet> stale, PluginConfiguration config, int existing, int poolSize)
+    {
+        var limit = Math.Max(MinRemovalLimit, (int)Math.Ceiling(existing * RemovalShare));
+        var intentional = all.Where(set => stale.Contains(set) || Chosen(set, config)).ToList();
+        var lapsed = all.Except(intentional).OrderBy(set => set.Name, StringComparer.Ordinal).ToList();
+        var poolShrank = _lastPool is int last && poolSize * 5 <= last * 4;
+        if (lapsed.Count <= limit || poolShrank)
+        {
+            return (all, 0, limit);
+        }
+
+        return ([.. intentional, .. lapsed.Take(limit)], lapsed.Count - limit, limit);
+    }
+
+    /// <summary>Gets whether a set goes because of a choice (everything off, its group off, seasonal) rather than because its data stopped qualifying.</summary>
+    private static bool Chosen(BoxSet set, PluginConfiguration config)
+    {
+        var id = DefinitionId(set);
+        var prefix = id?.Split(':')[0];
+        return !config.CollectionsEnabled
+            || !CollectionGroups.TryParse(prefix, out var group)
+            || !group.Builds()
+            || !group.Enabled(config)
+            || group == CollectionGroup.Seasonal;
     }
 
     private BuildSummary Summarise(int created, int updated, int removed, int unchanged, int failed, Stopwatch clock, string? note)
@@ -263,6 +343,7 @@ internal sealed class CollectionBuilder(
         // Tagged before members go in, so a run that dies in between leaves a set the next run recognises as ours.
         Describe(set, definition);
         await set.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, ct).ConfigureAwait(false);
+        VerifyTagged(set, definition);
 
         await collectionManager.AddToCollectionAsync(set.Id, members.Select(m => m.Id)).ConfigureAwait(false);
 
@@ -272,6 +353,33 @@ internal sealed class CollectionBuilder(
         {
             await current.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Reads a set Hera just made back the way the next run will find it (a query for BoxSets, kept if tagged) and
+    /// checks its tags. Hera knows its sets only by those tags; if Jellyfin didn't keep or return them, every run
+    /// would make another copy of every set. So the set is removed again (it is empty and ours) and the build stops.
+    /// </summary>
+    private void VerifyTagged(BoxSet set, Definition definition)
+    {
+        var stored = libraryManager.GetItemList(new InternalItemsQuery { IncludeItemTypes = [BaseItemKind.BoxSet], Recursive = true, ItemIds = [set.Id] })
+            .OfType<BoxSet>()
+            .FirstOrDefault();
+        if (stored is not null && IsHera(stored) && string.Equals(DefinitionId(stored), definition.Id, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            libraryManager.DeleteItem(set, new DeleteOptions { DeleteFileLocation = true });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Hera TV collections: couldn't remove the untagged set {Name} either", set.Name);
+        }
+
+        throw new TagNotPersistedException($"Jellyfin didn't keep the tag on the set made for {definition.Id}, so the build stopped before making more. Hera TV can't recognise its own sets without it.");
     }
 
     /// <summary>Makes an existing set match its definition. Returns true when anything changed.</summary>
@@ -406,3 +514,6 @@ internal sealed class CollectionBuilder(
     /// <summary>The members whose poster and backdrop stand for one set.</summary>
     private readonly record struct Art(BaseItem? Primary, BaseItem? Backdrop);
 }
+
+/// <summary>A set Hera made didn't come back from Jellyfin carrying its tag; the build can't go on, or it would make every set again next run.</summary>
+internal sealed class TagNotPersistedException(string message) : Exception(message);

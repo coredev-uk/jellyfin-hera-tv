@@ -1,26 +1,49 @@
 /*
- * Hera TV: player module. Registers with window.HeraTV (hera-tv.js).
- *  - Keeps the player dark in either scheme (the picture sets the light, not the Appearance setting).
- *  - The title block at the foot of the player ("Brooklyn Nine-Nine" / "S1, E1 · Pilot").
- *  - The pause screen: after a few quiet seconds paused, the picture dims and the title's logo,
- *    synopsis, time left and a Resume / Restart pair settle at the lower left, as on tvOS.
- *  - Post-play: when the credits roll, the picture shrinks to the top left and what comes next
+ * Hera TV: player. Registers four modules with window.HeraTV (hera-tv.js): player, pause, postplay
+ * and trailer. Each reaches Jellyfin only through kit.jf under its own name, so a piece that goes
+ * missing is reported against the module that needed it.
+ *  - player: keeps the player dark in either scheme (the picture sets the light, not the Appearance
+ *    setting), titles the foot of the player ("Brooklyn Nine-Nine" / "S1, E1 · Pilot") and lifts
+ *    Intro Skipper's button over the controls.
+ *  - pause: after a few quiet seconds paused, the picture dims and the title's logo, synopsis, time
+ *    left and a Resume / Restart pair settle at the lower left, as on tvOS.
+ *  - postplay: when the credits roll, the picture shrinks to the top left and what comes next
  *    fills the screen, as on tvOS: the next episode's still, or for a film the next one in its
  *    collection (or one like it) with its trailer playing.
+ *  - trailer: a title page's Trailer button plays in Hera's own layer.
+ *
+ * Contracts with other files:
+ *  - Borrowed Jellyfin classes: `hide` and `videoOsdBottom-hidden` (the OSD's state, read through
+ *    osdShown), the overlay classes in DARK_OVERLAYS, and `iconOsd`, `volumeOsd` and `material-icons`
+ *    on the trailer's volume popup, which hera-postplay.css restyles to match Jellyfin's own.
+ *  - Expandos: the volume popup carries `heraInner` (its bar) and `heraGlyph` (its icon).
+ *  - hera-tv.css supplies `.hera-dark` (the dark token set this file puts on the page, the header
+ *    and every overlay), `.hera-btn` and the card classes; this file owns the root classes
+ *    `hera-osd-up`, `hera-postplay-on` and `hera-postplay-focus`.
  */
 (() => {
   "use strict";
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { api, el, icon, getJSON, imageUrl, runtime, userId, hera, play, reduceMotion, prefs } = heraTv.kit;
-  const { jf } = heraTv;
+  const kit = heraTv.kit;
+  const { api, el, icon, getJSON, imageUrl, runtime, userId, hera, play, reduceMotion, prefs } = kit;
 
   const PAUSE_DELAY = 3000;
   const FADE_OUT = 200;
   const NAV_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"];
 
-  const osd = { timer: 0, stop: null };
+  const osd = { scope: null };
+
+  // Jellyfin's own classes for the OSD bar's state: it slides out with the first, and `hide` is
+  // its general switch.
+  const osdShown = (bar) => !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
+
+  // Async work whose failure is counted against the module but never surfaces.
+  const quiet = (module, promise) => kit.track(module, promise).catch(() => {});
+
+  // A capture-phase listener that belongs to `scope` and stands down with the module.
+  const hold = (scope, module) => (target, type, handler, options) => scope.add(kit.intercept(module, target, type, handler, options));
 
   // What the server says is playing in this browser: the item, its position and the session id
   // that remote commands (restart) are addressed to. The page has no public handle on any of it.
@@ -38,7 +61,7 @@
   // A light poll follows autoplay into the next episode.
 
   const renderOsdTitle = async (page) => {
-    const controls = page.querySelector(".osdControls");
+    const controls = kit.jf("player", "playerOsdControls", page);
     if (!controls) return;
     const playing = await nowPlaying();
     const item = playing?.item;
@@ -64,39 +87,39 @@
   // looked up again when a new one loads (a moment later, once playback registers with the server).
   // A slow poll is the net under it, and nothing runs while the tab is hidden.
   const stopFollow = () => {
-    clearInterval(osd.timer);
-    osd.stop?.();
-    osd.stop = null;
+    osd.scope?.dispose();
+    osd.scope = null;
   };
 
   const followPlayer = (page) => {
     stopFollow();
+    const scope = (osd.scope = kit.scope());
     const tick = () => {
-      if (!document.hidden) renderOsdTitle(page).catch(() => {});
+      if (!document.hidden) quiet("player", renderOsdTitle(page));
     };
-    renderOsdTitle(page).catch(() => {});
+    quiet("player", renderOsdTitle(page));
     // Playback registers with the server a moment after the page shows.
-    setTimeout(tick, 2500);
-    osd.timer = setInterval(() => {
+    const first = setTimeout(tick, 2500);
+    const poll = setInterval(() => {
       if (page.classList.contains("hide") || !page.isConnected) stopFollow();
       else tick();
     }, 60000);
     let settle = 0;
-    // Media events do not bubble; the capture phase sees them whichever <video> the player uses.
     const onMedia = (event) => {
       if (!(event.target instanceof HTMLVideoElement)) return;
       clearTimeout(settle);
       settle = setTimeout(tick, 2500);
     };
-    document.addEventListener("loadedmetadata", onMedia, true);
-    document.addEventListener("emptied", onMedia, true);
-    document.addEventListener("visibilitychange", tick);
-    osd.stop = () => {
+    // Media events do not bubble; the capture phase sees them whichever <video> the player uses.
+    const intercept = hold(scope, "player");
+    intercept(document, "loadedmetadata", onMedia);
+    intercept(document, "emptied", onMedia);
+    scope.listen(document, "visibilitychange", tick);
+    scope.add(() => {
+      clearTimeout(first);
       clearTimeout(settle);
-      document.removeEventListener("loadedmetadata", onMedia, true);
-      document.removeEventListener("emptied", onMedia, true);
-      document.removeEventListener("visibilitychange", tick);
-    };
+      clearInterval(poll);
+    });
   };
 
   // ---------- always dark ------------------------------------------------------------------
@@ -105,7 +128,8 @@
 
   const dark = { headers: [], bodyObserver: null };
 
-  // Overlays appended to <body>, outside the page: sheets, menus and Intro Skipper's button.
+  // Overlays appended to <body>, outside the page: sheets, menus and Intro Skipper's button. These
+  // are Jellyfin's and MUI's class names, matched on nodes as they arrive.
   const DARK_OVERLAYS = ["dialogContainer", "MuiPopover-root", "MuiModal-root", "skip-button-container"];
   const isOverlay = (node) => node.nodeType === 1 && DARK_OVERLAYS.some((name) => node.classList.contains(name));
 
@@ -113,7 +137,7 @@
     page.classList.add("hera-dark");
     // Jellyfin 12 keeps two headers (the legacy one and the MUI app bar's); the player shows
     // whichever it uses, so both go dark while it is up.
-    dark.headers = [...document.querySelectorAll(jf.legacyHeader)];
+    dark.headers = kit.jfAll("player", "legacyHeader");
     dark.headers.forEach((header) => header.classList.add("hera-dark"));
     if (dark.bodyObserver) return;
     for (const node of document.body.children) if (isOverlay(node)) node.classList.add("hera-dark");
@@ -141,8 +165,7 @@
   const skipLift = { observer: null };
 
   const liftSkip = (bar) => {
-    const shown = !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
-    const capsule = shown ? bar.querySelector(".osdControls .buttons") : null;
+    const capsule = osdShown(bar) ? kit.jf("player", "playerOsdButtons", bar) : null;
     const top = capsule?.getBoundingClientRect().top;
     const root = document.documentElement;
     if (top > 0) root.style.setProperty("--hera-skip-clear", `${Math.round(window.innerHeight - top + 14)}px`);
@@ -151,7 +174,7 @@
 
   const followSkip = (page) => {
     stopSkip();
-    const bar = page.querySelector(jf.videoOsd);
+    const bar = kit.jf("player", "videoOsd", page);
     if (!bar) return;
     liftSkip(bar);
     // Measured again once the OSD's slide-in has finished, so the gap is to where it settles.
@@ -177,42 +200,34 @@
   const pauseScreen = {
     page: null,
     layer: null,
-    cleanups: [],
+    scope: null,
     timer: 0,
     pausedAt: 0,
     generation: 0,
     pointer: { x: -1, y: -1 },
-    details: new Map(),
   };
 
-  const video = () => document.querySelector(".videoPlayerContainer video") || document.querySelector("video");
+  const video = (module) => kit.jf(module, "playerVideo") || document.querySelector("video");
 
-  const osdBar = () => pauseScreen.page?.querySelector(jf.videoOsd) ?? null;
+  const osdBar = () => (pauseScreen.page ? kit.jf("pause", "videoOsd", pauseScreen.page) : null);
 
   const osdVisible = () => {
     const bar = osdBar();
-    if (!bar) return false;
-    return !bar.classList.contains("videoOsdBottom-hidden") && !bar.classList.contains("hide");
+    return !!bar && osdShown(bar);
   };
 
   // A sheet, or the post-play screen, already has the picture.
-  const sheetOpen = () => !!document.querySelector(".dialogContainer .dialog") || !!post.layer;
+  const sheetOpen = () => !!kit.jf("pause", "playerDialog") || !!post.layer;
 
   const isPaused = () => {
-    const v = video();
+    const v = video("pause");
     return !!v && v.paused && !v.ended && !v.seeking && v.readyState > 0;
   };
 
   // The few titles the pause screen has shown; the oldest goes when a new one comes in.
   const DETAILS_KEPT = 12;
-  const loadDetails = async (id) => {
-    const cache = pauseScreen.details;
-    if (!cache.has(id)) {
-      if (cache.size >= DETAILS_KEPT) cache.delete(cache.keys().next().value);
-      cache.set(id, getJSON(`Users/${userId()}/Items/${id}`).catch(() => null));
-    }
-    return cache.get(id);
-  };
+  const details = kit.ttlCache({ ttl: 30 * 60 * 1000, max: DETAILS_KEPT });
+  const loadDetails = (id) => details.get(id, () => getJSON(`Users/${userId()}/Items/${id}`)).catch(() => null);
 
   // 24-hour clock, British locale: "21:41".
   const endsAt = (ms) => new Date(Date.now() + ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -331,7 +346,7 @@
     const wait = immediate ? 0 : Math.max(0, PAUSE_DELAY - (Date.now() - pauseScreen.pausedAt));
     pauseScreen.timer = setTimeout(() => {
       pauseScreen.timer = 0;
-      if (isPaused() && !osdVisible()) showLayer().catch(() => {});
+      if (isPaused() && !osdVisible()) quiet("pause", showLayer());
     }, wait);
   };
 
@@ -456,12 +471,12 @@
 
   const resumePlayback = async (sessionId) => {
     hideLayer();
-    await sessionCommand(sessionId, "Unpause").catch(() => video()?.play());
+    await sessionCommand(sessionId, "Unpause").catch(() => video("pause")?.play());
   };
 
   const restartPlayback = async (sessionId) => {
     hideLayer();
-    const v = video();
+    const v = video("pause");
     // An Unpause that lands while the stream is still re-seeking is dropped, so wait for the
     // seek to finish (a transcode restarts its stream) before resuming.
     const landed = v ? new Promise((done) => v.addEventListener("seeked", done, { once: true })) : Promise.resolve();
@@ -472,7 +487,7 @@
     await sessionCommand(sessionId, "Unpause").catch(() => {});
     // Belt and braces: the element itself, should the command have been dropped regardless.
     setTimeout(() => {
-      if (isPaused()) video()?.play();
+      if (isPaused()) video("pause")?.play();
     }, 800);
   };
 
@@ -480,18 +495,16 @@
     if (pauseScreen.page === page) return;
     unbindPause();
     pauseScreen.page = page;
-    const on = (target, type, fn, capture) => {
-      target.addEventListener(type, fn, capture);
-      pauseScreen.cleanups.push(() => target.removeEventListener(type, fn, capture));
-    };
+    const scope = (pauseScreen.scope = kit.scope());
+    const intercept = hold(scope, "pause");
     // Media events do not bubble, but they can be caught on the way down; that survives the
     // <video> element being replaced between items.
-    for (const type of ["pause", "seeked", "canplay", "play", "playing", "ended", "emptied", "seeking"]) on(document, type, onMedia, true);
-    on(window, "keydown", onKey, true);
-    for (const type of ["pointermove", "mousemove", "pointerdown", "mousedown", "touchstart", "wheel", "pointerup", "mouseup", "click"]) on(window, type, onPointer, true);
+    for (const type of ["pause", "seeked", "canplay", "play", "playing", "ended", "emptied", "seeking"]) intercept(document, type, onMedia);
+    intercept(window, "keydown", onKey);
+    for (const type of ["pointermove", "mousemove", "pointerdown", "mousedown", "touchstart", "wheel", "pointerup", "mouseup", "click"]) intercept(window, type, onPointer);
 
     // The OSD hiding while paused is the other trigger.
-    const bar = page.querySelector(jf.videoOsd);
+    const bar = kit.jf("pause", "videoOsd", page);
     if (bar) {
       let visible = osdVisible();
       const observer = new MutationObserver(() => {
@@ -501,22 +514,24 @@
         reconcile(!now);
       });
       observer.observe(bar, { attributes: true, attributeFilter: ["class"] });
-      pauseScreen.cleanups.push(() => observer.disconnect());
+      scope.add(() => observer.disconnect());
     }
     // A sheet closing hands the screen back as well.
     const sheets = new MutationObserver(() => reconcile(false));
     sheets.observe(document.body, { childList: true });
-    pauseScreen.cleanups.push(() => sheets.disconnect());
+    scope.add(() => sheets.disconnect());
   };
 
   const unbindPause = () => {
     cancelTimer();
+    clearTimeout(pauseScreen.pointerTimer);
     pauseScreen.generation++;
     pauseScreen.layer?.remove();
     pauseScreen.layer = null;
-    pauseScreen.cleanups.splice(0).forEach((fn) => fn());
+    pauseScreen.scope?.dispose();
+    pauseScreen.scope = null;
     pauseScreen.page = null;
-    pauseScreen.details.clear();
+    details.clear();
   };
 
   // ---------- post-play ----------------------------------------------------------------------
@@ -552,11 +567,12 @@
     // The volume popup raised for the trailer, and its fade timer.
     hud: null,
     hudTimer: 0,
-    cleanups: [],
+    frame: null,
+    scope: null,
   };
 
-  const playerFrame = () => document.querySelector(".videoPlayerContainer");
-  const jellyfinUpNext = () => document.querySelector(".upNextDialog:not(.hide)");
+  const playerFrame = () => kit.jf("postplay", "playerFrame");
+  const jellyfinUpNext = () => kit.jf("postplay", "playerUpNext");
 
   // The end credits: the last outro segment, and only one that runs to within a minute of the end.
   const creditsStart = async (item) => {
@@ -611,18 +627,10 @@
   const START_MS = 12000;
 
   // A title page mounts twice (its viewshow, then the late remount for redrawn sections): ask the
-  // server once per title for the session, forgetting a failed ask; the server keeps its own answer.
-  const trailerChecks = new Map(); // itemId -> promise of the server's answer
+  // server once per title, forgetting a failed ask; the server keeps its own answer.
+  const trailerChecks = kit.ttlCache({ ttl: 30 * 60 * 1000, max: 50 });
   const trailerIds = async (item) => {
-    if (!trailerChecks.has(item.Id)) {
-      if (trailerChecks.size >= 50) trailerChecks.delete(trailerChecks.keys().next().value);
-      const ask = hera(`trailers/${item.Id}`).catch(() => {
-        trailerChecks.delete(item.Id);
-        return null;
-      });
-      trailerChecks.set(item.Id, ask);
-    }
-    const checked = await trailerChecks.get(item.Id);
+    const checked = await trailerChecks.get(item.Id, () => hera(`trailers/${item.Id}`)).catch(() => null);
     if (Array.isArray(checked?.youtube)) return checked.youtube;
     return [...new Set((item.RemoteTrailers || []).map((trailer) => youTubeId(trailer.Url)).filter(Boolean))];
   };
@@ -747,7 +755,7 @@
   // the picture fades from its corner and pauses, and the film being offered has the screen.
   const startTrailer = (frame) => {
     if (!post.layer || post.trailer) return;
-    const v = video();
+    const v = video("postplay");
     post.trailer = { frame, volume: trailerLevel(v), muted: false };
     post.creditsVolume = v ? v.volume : null;
     youTube(frame, "setVolume", [0]);
@@ -786,22 +794,21 @@
   };
 
   // ---------- the volume popup, for the trailer --------------------------------------------
-  // The same popup Jellyfin raises for the player's volume (restyled in hera-player.css), raised
+  // The same popup Jellyfin raises for the player's volume (restyled in hera-postplay.css), raised
   // for the trailer's: by the wheel, the mute button and the level.
   const HUD_MS = 1400;
 
   const showHud = (volume, muted) => {
     if (!post.hud) {
       const inner = el("div", { class: "iconOsdProgressInner" });
-      post.hud = el("div", { class: "iconOsd volumeOsd hera-volume-hud", "aria-hidden": "true" }, [
-        el("span", { class: "material-icons iconOsdIcon" }),
-        el("div", { class: "iconOsdProgressOuter" }, inner),
-      ]);
+      const glyph = el("span", { class: "material-icons iconOsdIcon" });
+      post.hud = el("div", { class: "iconOsd volumeOsd hera-volume-hud", "aria-hidden": "true" }, [glyph, el("div", { class: "iconOsdProgressOuter" }, inner)]);
       post.hud.heraInner = inner;
+      post.hud.heraGlyph = glyph;
       document.body.append(post.hud);
     }
     const silent = muted || volume === 0;
-    post.hud.querySelector(".iconOsdIcon").textContent = silent ? "volume_off" : volume < 40 ? "volume_down" : "volume_up";
+    post.hud.heraGlyph.textContent = silent ? "volume_off" : volume < 40 ? "volume_down" : "volume_up";
     post.hud.heraInner.style.width = `${silent ? 0 : volume}%`;
     post.hud.classList.add("is-on");
     clearTimeout(post.hudTimer);
@@ -830,7 +837,7 @@
   const focusTrailer = () => {
     if (!post.layer) return;
     document.documentElement.classList.add("hera-postplay-focus");
-    const v = video();
+    const v = video("postplay");
     if (v && !v.paused) {
       v.pause();
       post.creditsPaused = true;
@@ -845,7 +852,7 @@
     const mute = sound.querySelector(".hera-post__mute");
     mute.setAttribute("aria-label", silent ? "Unmute trailer" : "Mute trailer");
     mute.setAttribute("aria-pressed", String(silent));
-    mute.querySelector(".material-icons").textContent = silent ? "volume_off" : trailer.volume < 40 ? "volume_down" : "volume_up";
+    mute.firstElementChild.textContent = silent ? "volume_off" : trailer.volume < 40 ? "volume_down" : "volume_up";
     const slider = sound.querySelector(".hera-post__volume");
     slider.value = String(trailer.muted ? 0 : trailer.volume);
     slider.style.setProperty("--hera-level", `${trailer.muted ? 0 : trailer.volume}%`);
@@ -889,12 +896,12 @@
     const line = episode
       ? [episodeCode(item), item.Name].filter(Boolean).join(" · ")
       : [item.ProductionYear, (item.Genres || []).slice(0, 2).join(", "), runtime(item.RunTimeTicks)].filter(Boolean).join(" · ");
-    const primary = el("button", { class: "hera-pause__button hera-pause__button--primary hera-post__play", type: "button" }, [
+    const primary = el("button", { class: "hera-post__button hera-post__button--primary hera-post__play", type: "button" }, [
       el("span", { class: "hera-post__fill", "aria-hidden": "true" }),
       icon("play_arrow"),
       el("span", { text: episode ? "Play Next Episode" : "Play" }),
     ]);
-    const credits = el("button", { class: "hera-pause__button hera-post__credits", type: "button", text: "Watch Credits" });
+    const credits = el("button", { class: "hera-post__button hera-post__credits", type: "button", text: "Watch Credits" });
     const frame = el("button", { class: "hera-post__frame", type: "button", "aria-label": "Watch Credits", title: "Watch Credits" });
     const back = el("button", { class: "hera-post__back", type: "button", "aria-label": "Back", title: "Back" }, icon("arrow_back"));
     primary.addEventListener("click", () => startNext(next, primary));
@@ -922,11 +929,11 @@
       back,
       frame,
       el("div", { class: "hera-post__info" }, [
-        logo ? el("img", { class: "hera-pause__logo", src: logo, alt: name }) : el("h2", { class: "hera-pause__name", text: name }),
-        line ? el("p", { class: "hera-pause__line", text: line }) : null,
+        logo ? el("img", { class: "hera-post__logo", src: logo, alt: name }) : el("h2", { class: "hera-post__name", text: name }),
+        line ? el("p", { class: "hera-post__line", text: line }) : null,
         next.reason ? el("p", { class: "hera-post__reason", text: next.reason }) : null,
-        item.Overview ? el("p", { class: "hera-pause__overview", text: item.Overview }) : null,
-        el("div", { class: "hera-pause__actions" }, [primary, credits]),
+        item.Overview ? el("p", { class: "hera-post__overview", text: item.Overview }) : null,
+        el("div", { class: "hera-post__actions" }, [primary, credits]),
       ]),
       sound,
     ]);
@@ -956,13 +963,13 @@
 
   // The Play button fills as the episode runs out, ending as Jellyfin starts the next one.
   const startCountdown = (fill) => {
-    const v = video();
+    const v = video("postplay");
     const total = (post.item?.RunTimeTicks || 0) / 1e7;
     if (!v || !total) return;
     const from = Math.max(1, total - v.currentTime);
     clearInterval(post.ticker);
     post.ticker = setInterval(() => {
-      const left = Math.max(0, total - (video()?.currentTime ?? total));
+      const left = Math.max(0, total - (video("postplay")?.currentTime ?? total));
       fill.style.transform = `scaleX(${Math.min(1, 1 - left / from)})`;
     }, 250);
   };
@@ -980,6 +987,7 @@
     if (!next || post.itemId !== item.Id || post.dismissed === item.Id || !post.page || post.page.classList.contains("hide")) return;
     const frame = playerFrame();
     if (!frame) return;
+    post.frame = frame;
     const backdrop = buildBackdrop(next);
     const layer = buildPost(next);
     post.backdrop = backdrop;
@@ -997,7 +1005,9 @@
       }),
     );
     layer.querySelector(".hera-post__play")?.focus({ preventScroll: true });
-    loadTrailer(next, backdrop).catch((error) => console.warn("[Hera TV:postplay] trailer", error));
+    const trailer = loadTrailer(next, backdrop);
+    kit.track("postplay", trailer);
+    trailer.catch((error) => console.warn("[Hera TV:postplay] trailer", error));
     if (next.kind === "episode" && (await autoplayOn()) && post.layer === layer) startCountdown(layer.querySelector(".hera-post__fill"));
   };
 
@@ -1008,7 +1018,7 @@
     clearInterval(post.ticker);
     clearInterval(post.fadeTimer);
     clearTimeout(post.focusTimer);
-    const v = video();
+    const v = video("postplay");
     if (v && post.creditsVolume !== null) v.volume = post.creditsVolume;
     if (v && post.creditsPaused && resume) v.play()?.catch?.(() => {});
     post.trailer = null;
@@ -1016,7 +1026,8 @@
     post.creditsVolume = null;
     post.creditsPaused = false;
     document.documentElement.classList.remove("hera-postplay-on", "hera-postplay-focus");
-    playerFrame()?.classList.remove("hera-postplay-video");
+    post.frame?.classList.remove("hera-postplay-video");
+    post.frame = null;
     const { layer, backdrop } = post;
     post.layer = null;
     post.backdrop = null;
@@ -1050,7 +1061,7 @@
     const v = event.target;
     if (!post.item || post.stale) {
       post.stale = false;
-      preparePost().catch(() => {});
+      quiet("postplay", preparePost());
       return;
     }
     if (post.layer) {
@@ -1062,7 +1073,7 @@
     const total = (post.item.RunTimeTicks || 0) / 1e7;
     const inCredits = post.creditsAt !== null && v.currentTime >= post.creditsAt && (!total || v.currentTime < total - 1);
     const upNext = post.item.Type === "Episode" && post.creditsAt === null && !!jellyfinUpNext();
-    if (inCredits || upNext) showPost().catch(() => {});
+    if (inCredits || upNext) quiet("postplay", showPost());
   };
 
   // A new stream means a new item, or the same one again: learn it afresh on the next tick.
@@ -1079,9 +1090,9 @@
     const layer = post.layer;
     if (!layer) return;
     const active = document.activeElement;
-    const row = [...layer.querySelectorAll(".hera-pause__button, .hera-post.has-trailer .hera-post__mute")];
+    const row = [...layer.querySelectorAll(".hera-post__button, .hera-post.has-trailer .hera-post__mute")];
     const all = [layer.querySelector(".hera-post__back"), ...row, layer.classList.contains("has-trailer") ? layer.querySelector(".hera-post__volume") : null].filter(Boolean);
-    if (["Escape", "Backspace", "GoBack", "BrowserBack"].includes(event.key)) {
+    if (kit.keys.isBack(event)) {
       event.preventDefault();
       event.stopImmediatePropagation();
       hidePost({ dismiss: true });
@@ -1121,21 +1132,20 @@
     unbindPost();
     post.page = page;
     post.stale = true;
-    const on = (target, type, fn, capture) => {
-      target.addEventListener(type, fn, capture);
-      post.cleanups.push(() => target.removeEventListener(type, fn, capture));
-    };
-    on(document, "timeupdate", onPostTime, true);
-    for (const type of ["loadstart", "emptied", "ended"]) on(document, type, onPostReset, true);
-    on(window, "keydown", onPostKey, true);
-    on(window, "wheel", onPostWheel, { capture: true, passive: false });
-    on(window, "message", onTrailerMessage, false);
+    const scope = (post.scope = kit.scope());
+    const intercept = hold(scope, "postplay");
+    intercept(document, "timeupdate", onPostTime);
+    for (const type of ["loadstart", "emptied", "ended"]) intercept(document, type, onPostReset);
+    intercept(window, "keydown", onPostKey);
+    // A passive wheel listener cannot stop the page's own wheel handling.
+    intercept(window, "wheel", onPostWheel, { passive: false });
+    scope.listen(window, "message", onTrailerMessage);
   };
 
   const unbindPost = () => {
     hidePost();
-    post.cleanups.splice(0).forEach((fn) => fn());
-    Object.assign(post, { page: null, itemId: null, item: null, creditsAt: null, dismissed: null, autoplay: null });
+    post.scope?.dispose();
+    Object.assign(post, { scope: null, page: null, itemId: null, item: null, creditsAt: null, dismissed: null, autoplay: null });
   };
 
   // ---------- a title's trailer, from its page ---------------------------------------------
@@ -1145,16 +1155,22 @@
   // will play starts, then that trailer with YouTube's controls. Back, Escape or the trailer's end
   // close it. A title none of whose trailers will play loses the button; trailer files stay Jellyfin's.
 
-  const detail = { itemId: null, item: null, ids: null, run: 0, bound: new WeakSet() };
-  const sheet = { node: null, opener: null, inert: [], cleanups: [] };
+  const detail = { itemId: null, item: null, ids: null, page: null, run: 0, off: null };
+  const sheet = { node: null, opener: null, inert: [], scope: null };
 
-  const BACK_KEYS = new Set(["Escape", "Backspace", "BrowserBack", "GoBack"]);
+  // Held while a title page is up, and dropped on leaving it or with the module.
+  const leaveTrailer = () => {
+    detail.run++;
+    detail.off?.();
+    Object.assign(detail, { itemId: null, item: null, ids: null, page: null, off: null });
+  };
 
   const closeTrailerSheet = () => {
     const { node, opener } = sheet;
     if (!node) return;
     sheet.node = null;
-    sheet.cleanups.splice(0).forEach((fn) => fn());
+    sheet.scope?.dispose();
+    sheet.scope = null;
     sheet.inert.splice(0).forEach((other) => (other.inert = false));
     node.classList.remove("is-on");
     setTimeout(() => node.remove(), 360);
@@ -1165,7 +1181,7 @@
     closeTrailerSheet();
     const tag = item.BackdropImageTags?.[0];
     const still = tag ? imageUrl(item.Id, "Backdrop", { maxWidth: 1920, tag }) : null;
-    const close = el("button", { class: "hera-post__back hera-trailer__close", type: "button", "aria-label": "Close trailer", title: "Close" }, icon("arrow_back"));
+    const close = el("button", { class: "hera-trailer__close", type: "button", "aria-label": "Close trailer", title: "Close" }, icon("arrow_back"));
     const watch = item.RemoteTrailers?.[0]?.Url || `https://www.youtube.com/watch?v=${ids[0]}`;
     const note = el("div", { class: "hera-trailer__note", hidden: true }, [
       el("p", { class: "hera-trailer__text", text: "This trailer can't be played here." }),
@@ -1185,17 +1201,14 @@
       other.inert = true;
       sheet.inert.push(other);
     }
-    const on = (target, type, fn, options) => {
-      target.addEventListener(type, fn, options);
-      sheet.cleanups.push(() => target.removeEventListener(type, fn, options));
-    };
+    const scope = (sheet.scope = kit.scope());
     close.addEventListener("click", closeTrailerSheet);
-    on(window, "keydown", (event) => {
-      if (!BACK_KEYS.has(event.key) && event.keyCode !== 461) return;
+    hold(scope, "trailer")(window, "keydown", (event) => {
+      if (!kit.keys.isBack(event)) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       closeTrailerSheet();
-    }, true);
+    });
     requestAnimationFrame(() => requestAnimationFrame(() => node.classList.add("is-on")));
     close.focus({ preventScroll: true });
 
@@ -1214,7 +1227,7 @@
     }
     found.frame.classList.add("is-on");
     node.classList.add("is-playing");
-    on(window, "message", (event) => {
+    scope.listen(window, "message", (event) => {
       if (youTubeMessage(event, found.frame)?.info?.playerState === 0) closeTrailerSheet();
     });
   };
@@ -1222,13 +1235,13 @@
   // On a title's page: learn which of its trailers will play, and drop the button if none will.
   const mountTrailer = async (page, itemId) => {
     const run = ++detail.run;
-    Object.assign(detail, { itemId, item: null, ids: null });
+    Object.assign(detail, { itemId, page, item: null, ids: null });
     page.classList.remove("hera-no-trailer");
-    if (!detail.bound.has(page)) {
-      detail.bound.add(page);
-      page.addEventListener("click", onTrailerButton, true);
-    }
-    const item = await heraTv.kit.item(itemId).catch(() => null);
+    // Capture, so Jellyfin's own Trailer button never hears the press. Armed afresh for each title:
+    // the page is reused between titles, so one listener per page would outlive the module.
+    detail.off?.();
+    detail.off = kit.intercept("trailer", document, "click", onTrailerButton);
+    const item = await kit.item(itemId).catch(() => null);
     // A trailer file, or no trailer at all: Jellyfin's button as it is.
     if (!item || run !== detail.run || item.LocalTrailerCount > 0 || !item.RemoteTrailers?.length) return;
     detail.item = item;
@@ -1238,18 +1251,19 @@
   };
 
   const onTrailerButton = (event) => {
-    const button = event.target.closest?.(".btnPlayTrailer");
-    const { item, ids } = detail;
-    if (!button || !item || !ids || detail.itemId !== heraTv.kit.itemIdFromHash()) return;
+    const { item, ids, page } = detail;
+    if (!item || !ids || !page) return;
+    const button = kit.jfAll("trailer", "detailTrailerButton", page).find((candidate) => candidate.contains(event.target));
+    if (!button) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     ids.then((list) => list.length && openTrailerSheet(item, list, button)).catch((error) => console.error("[Hera TV:trailer]", error));
   };
 
   // ---------- lifecycle --------------------------------------------------------------------
-  // Four modules: the dark scheme and the title block need nothing of Jellyfin's OSD, and the dark
-  // scheme must hold even when the pause screen or post-play has stood aside (light mode would
-  // otherwise put dark text on the picture). The trailer layer belongs to a title's page.
+  // Four modules: the dark scheme and the title block need nothing of the pause screen or post-play,
+  // and the dark scheme must hold even when either has stood aside (light mode would otherwise put
+  // dark text on the picture). The trailer layer belongs to a title's page.
 
   heraTv.register({
     name: "player",
@@ -1300,12 +1314,15 @@
     requires: { itemDetailPage: ["detailButtons"] },
     onView(page, { itemId }) {
       closeTrailerSheet();
-      if (page?.id === "itemDetailPage" && itemId) mountTrailer(page, itemId).catch((error) => console.error("[Hera TV:trailer]", error));
-      else detail.run++;
+      if (page?.id === "itemDetailPage" && itemId) {
+        const mounting = mountTrailer(page, itemId);
+        kit.track("trailer", mounting);
+        mounting.catch((error) => console.error("[Hera TV:trailer]", error));
+      } else leaveTrailer();
     },
     teardown() {
       closeTrailerSheet();
-      detail.run++;
+      leaveTrailer();
     },
   });
 })();

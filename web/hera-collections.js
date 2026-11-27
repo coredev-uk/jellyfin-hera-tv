@@ -9,8 +9,12 @@
  *  - A Groups | All switch, remembered in this browser, keeps Jellyfin's own grid one tap away.
  *  - Jellyfin's grid is hidden only while the shelves are on the page (`hera-collections-on`);
  *    if the endpoint fails or has nothing to show, the stock grid is left as it is.
- * HeraTV.collections.render(container, data) draws the shelves from any response, so the same
- * code paints the live page and a sample.
+ *
+ * Contracts with other files:
+ *  - The shelves are prepended to Jellyfin's `libraryBody` on #boxsetsPage; the `libraryBody` key
+ *    names it (hera-tv.js), and `html.hera-collections-on` (this module's own root class, styled in
+ *    hera-collections.css) hides everything else in it.
+ *  - Shelves and cards are kit.shelf and kit.card (hera-tv.js, hera-tv.css).
  */
 (() => {
   "use strict";
@@ -19,6 +23,8 @@
   if (!HT?.kit) return;
   const { kit } = HT;
   const { el } = kit;
+
+  const MODULE = "collections-browse";
 
   const root = document.documentElement;
   const PAGE_ID = "boxsetsPage";
@@ -29,7 +35,10 @@
   // The Seasonal shelf leads while it is in season; the rest follow the server's order.
   const LEADING_GROUP = "seasonal";
 
-  const state = { root: null, token: 0, at: 0, pageWatch: null, loaded: null };
+  const state = { root: null, token: 0, at: 0, pageWatch: null };
+
+  /** True while `page` is the page on screen. */
+  const isShown = (page) => page.isConnected && kit.jf(MODULE, "page") === page;
 
   // ---------- the remembered view -----------------------------------------------------------
 
@@ -52,16 +61,12 @@
   // ---------- data --------------------------------------------------------------------------
 
   // One fetch per person, kept for a minute so flipping between tabs doesn't refetch each time;
-  // a failure is forgotten at once.
+  // a failure is forgotten at once and rejects.
+  const groupsCache = kit.ttlCache({ ttl: REFRESH_MS, max: 2 });
   const fetchGroups = () => {
-    const user = kit.userId();
-    if (state.loaded?.user === user && Date.now() - state.loaded.at < REFRESH_MS) return state.loaded.promise;
-    const promise = Promise.resolve(kit.hera("collections/groups")).catch((error) => {
-      if (state.loaded?.promise === promise) state.loaded = null;
-      throw error;
-    });
-    state.loaded = { user, at: Date.now(), promise };
-    return promise;
+    const request = groupsCache.get(String(kit.userId()), () => kit.hera("collections/groups"));
+    kit.track(MODULE, request);
+    return request;
   };
 
   // Empty collections and groups are dropped, so a shelf never has nothing on it.
@@ -79,8 +84,7 @@
   // "12 titles" for anything that may hold a series.
   const countText = (collection, group) => {
     const films = collection.kind ? collection.kind === "movie" : group.id === "franchises";
-    const n = collection.count;
-    return `${n.toLocaleString()} ${films ? (n === 1 ? "film" : "films") : n === 1 ? "title" : "titles"}`;
+    return kit.text.plural(collection.count, films ? "film" : "title", films ? "films" : "titles");
   };
 
   const detailsHref = (collection) => `#/details?id=${collection.id}`;
@@ -274,7 +278,7 @@
   const settleFocus = (container) => {
     if (!kit.isTv()) return;
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected && !active.closest(`#${PAGE_ID} .padded-bottom-page`)) return;
+    if (active && active !== document.body && active.isConnected && !container.parentElement.contains(active)) return;
     if (active?.closest(".hera-collections")) return;
     container.querySelector(".hera-collections__groups:not([hidden]) .hera-card, .hera-collections__mode[aria-pressed='true']")?.focus({ preventScroll: true });
   };
@@ -295,14 +299,14 @@
   const watchPage = (page) => {
     state.pageWatch?.disconnect();
     const watch = new MutationObserver(() => {
-      if (!state.root?.isConnected && !page.classList.contains("hide")) mount(page);
+      if (!state.root?.isConnected && isShown(page)) mount(page);
     });
     watch.observe(page, { childList: true });
     state.pageWatch = watch;
   };
 
   const mount = async (page) => {
-    const body = page.querySelector(HT.jf.libraryBody);
+    const body = kit.jf(MODULE, "libraryBody", page);
     if (!body || !kit.userId()) return;
     if (state.root?.isConnected && body.contains(state.root)) {
       // Back on a page Jellyfin kept: quietly bring the shelves up to date.
@@ -347,7 +351,7 @@
   };
 
   HT.register({
-    name: "collections-browse",
+    name: MODULE,
     // The shelves sit in the library page's body, in front of Jellyfin's own grid.
     requires: { [PAGE_ID]: ["libraryBody"] },
     onView(page) {
@@ -359,9 +363,7 @@
     },
     teardown() {
       unmount();
-      delete HT.collections;
+      groupsCache.clear();
     },
   });
-
-  HT.collections = { render, loading };
 })();

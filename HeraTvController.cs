@@ -38,7 +38,7 @@ public class HeraTvController : ControllerBase
             }
         }
 
-        return File(asset.Payload.Encoded(coding), asset.ContentType, null, new EntityTagHeaderValue(asset.Payload.ETag(coding)));
+        return File(asset.Payload.Encoded(coding), asset.ContentType, null, EntityTagHeaderValue.Parse(asset.Payload.ETag(coding)));
     }
 
     [HttpGet("config")]
@@ -50,6 +50,8 @@ public class HeraTvController : ControllerBase
         {
             heroItemCount = Math.Clamp(config.HeroItemCount, 1, 20),
             heroIntervalSeconds = Math.Clamp(config.HeroIntervalSeconds, 4, 60),
+            // Modules switched off in the plugin's settings: the script never runs them and their stylesheets stay off.
+            disabledModules = (config.DisabledModules ?? []).Where(name => !string.IsNullOrWhiteSpace(name) && name.Length <= 48).Distinct(StringComparer.Ordinal).Take(64),
         });
     }
 }

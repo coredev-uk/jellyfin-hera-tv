@@ -1,0 +1,120 @@
+/* Hera TV: a title's trailer sheet (hera-player.js, module `trailer`). Own sheet, so a
+ * switched-off or degraded trailer module takes only these rules with it. Expects from
+ * hera-tv.css the --hera-* tokens and .hera-dark. */
+
+:root {
+  /* Video is black in both schemes. */
+  --hera-video: #000;
+}
+/* The close disc, where the player's own back arrow sits. */
+.hera-trailer__close {
+  position: absolute;
+  top: 14px;
+  left: var(--hera-edge);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hera-label);
+  background: var(--hera-glass);
+  backdrop-filter: var(--hera-blur);
+  -webkit-backdrop-filter: var(--hera-blur);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+  cursor: pointer;
+  transition: background-color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-trailer__close:hover {
+  background: var(--hera-glass-hover);
+}
+.hera-trailer__close:active {
+  transform: scale(0.95);
+}
+.hera-trailer__close:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 3px;
+}
+
+/* ---------- a title's trailer, from its page (hera-player.js) ----------------------------------
+ * The whole screen on black: the title's backdrop, dimmed, while the trailer loads, then the
+ * trailer at 16:9, as large as the screen allows, with YouTube's own controls. A trailer that
+ * won't play leaves a line and a way to YouTube in the middle. */
+.hera-trailer {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  background: var(--hera-video);
+  color: var(--hera-label);
+  opacity: 0;
+  transition: opacity var(--hera-fast) var(--hera-ease);
+}
+.hera-trailer.is-on {
+  opacity: 1;
+  transition-duration: var(--hera-slow);
+}
+.hera-trailer__still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.35;
+  transition: opacity 600ms var(--hera-ease);
+}
+/* Once the trailer plays, the backdrop goes: only black round its letterbox. */
+.hera-trailer.is-playing .hera-trailer__still {
+  opacity: 0;
+}
+/* No trailer will play: the backdrop sinks further, so the line over it holds its contrast. */
+.hera-trailer:has(.hera-trailer__note:not([hidden])) .hera-trailer__still {
+  opacity: 0.18;
+}
+.hera-trailer__frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(100vw, 177.78vh);
+  height: min(56.25vw, 100vh);
+  border: 0;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 600ms var(--hera-ease);
+}
+.hera-trailer__frame.is-on {
+  opacity: 1;
+}
+.hera-trailer__close {
+  z-index: 1;
+}
+.hera-trailer__note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 0 var(--hera-edge);
+  text-align: center;
+}
+.hera-trailer__note[hidden] {
+  display: none;
+}
+.hera-trailer__text {
+  margin: 0;
+  font: 600 19px/1.35 var(--hera-font-display);
+}
+/* None of a title's trailers will play here: Jellyfin's Trailer button goes. */
+.hera-no-trailer .btnPlayTrailer {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-trailer,
+  .hera-trailer.is-on,
+  .hera-trailer__frame {
+    transition: none;
+  }
+}

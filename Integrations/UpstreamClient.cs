@@ -1,14 +1,24 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Integrations;
 
 /// <summary>Calls Seerr and Maintainerr from the server, with a short shared cache for reads.</summary>
-public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
+/// <remarks>
+/// Each service is heard about once when it goes wrong: the first failure is a warning that names the
+/// service, the address's path, the status and what the service said, repeats are debug, and the
+/// next good answer ends it (<see cref="ServerHealth"/>), so a service that breaks again later is a warning again.
+/// </remarks>
+public sealed class UpstreamClient(ILogger<UpstreamClient> logger, ServerHealth health)
 {
+    private const string Seerr = "Seerr";
+    private const string Maintainerr = "Maintainerr";
+
     private static readonly HttpClient Http = new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
     {
         Timeout = TimeSpan.FromSeconds(15),
@@ -24,7 +34,10 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
     // page of cards asking for the same thing doesn't ask again for each, short enough that a blip heals.
     private static readonly TimeSpan EmptyFor = TimeSpan.FromSeconds(10);
 
-    private readonly ConcurrentDictionary<string, Entry> _cache = new();
+    private readonly AsyncTtlCache<string, JsonNode?> cache = new(MaxCached, EmptyFor);
+
+    // Services that have answered 404 since they last answered well, so each is warned about once.
+    private readonly ConcurrentDictionary<string, bool> notFound = new(StringComparer.Ordinal);
 
     /// <summary>Reads JSON from Seerr. <paramref name="asUser"/> sets <c>X-Api-User</c> for per-user reads.</summary>
     public Task<JsonNode?> SeerrGetAsync(string pathAndQuery, TimeSpan cacheFor, int? asUser = null)
@@ -36,27 +49,61 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
         }
 
         var key = $"{SeerrKeyPrefix}{asUser}|{pathAndQuery}";
-        return Cached(key, cacheFor, () => SendAsync(HttpMethod.Get, new Uri(settings.SeerrUrl!, pathAndQuery), settings, asUser, null));
+        return cache.GetAsync(key, cacheFor, () => SendAsync(Seerr, new Uri(settings.SeerrUrl!, pathAndQuery), settings, asUser));
     }
 
     /// <summary>
     /// Sends a write to Seerr as <paramref name="asUser"/>; never cached. It then drops the cached reads the
-    /// write can have changed, and keeps the rest (settings, profiles, other titles' records).
+    /// write can have changed, and keeps the rest (settings, profiles, other titles' records). A Seerr that
+    /// doesn't answer, or answers with something that isn't JSON, gives a 502 and a message, never an exception.
     /// </summary>
     public async Task<(int Status, JsonNode? Body)> SeerrPostAsync(string path, JsonNode body, int asUser)
     {
         var settings = IntegrationSettings.Current;
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(settings.SeerrUrl!, path))
+        if (!settings.SeerrEnabled)
         {
-            Content = JsonContent.Create(body),
-        };
-        request.Headers.Add("X-Api-Key", settings.SeerrApiKey);
-        request.Headers.Add("X-Api-User", asUser.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        using var response = await Http.SendAsync(request).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        ForgetAfterWrite(path, body);
-        return ((int)response.StatusCode, string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text));
+            return (StatusCodes.Status502BadGateway, Message("Seerr isn't set up."));
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(settings.SeerrUrl!, path))
+            {
+                Content = JsonContent.Create(body),
+            };
+            request.Headers.Add("X-Api-Key", settings.SeerrApiKey);
+            request.Headers.Add("X-Api-User", asUser.ToString(CultureInfo.InvariantCulture));
+            using var response = await Http.SendAsync(request).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            ForgetAfterWrite(path, body);
+            var status = (int)response.StatusCode;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return (status, null);
+            }
+
+            try
+            {
+                return (status, JsonNode.Parse(text));
+            }
+            catch (JsonException ex)
+            {
+                // An HTML error page from a proxy in front of Seerr, say. A refusal still carries its status;
+                // a success that can't be read is not one Hera can vouch for.
+                health.Fault(Seerr, $"read Seerr's answer to a request (HTTP {status}, not JSON)", ex);
+                return status is >= 200 and < 300
+                    ? (StatusCodes.Status502BadGateway, Message("Seerr answered in a form Hera TV couldn't read. Check in Seerr whether the request went through."))
+                    : (status, null);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            health.Fault(Seerr, "send a request to Seerr", ex);
+            return (StatusCodes.Status502BadGateway, Message("Seerr didn't answer. Try again in a moment."));
+        }
     }
+
+    private static JsonObject Message(string text) => new() { ["message"] = text };
 
     /// <summary>
     /// A request changes the asker's request list and the status Seerr shows for that title, and the title
@@ -68,26 +115,20 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
     /// </summary>
     private void ForgetAfterWrite(string path, JsonNode body)
     {
-        string? type = null;
-        var id = 0;
-        var known = path == "api/v1/request"
-            && body is JsonObject fields
-            && fields["mediaType"] is JsonValue mediaType && mediaType.TryGetValue(out type)
-            && fields["mediaId"] is JsonValue mediaId && mediaId.TryGetValue(out id);
-        foreach (var pair in _cache)
+        var type = body.At("mediaType").Str();
+        var id = body.At("mediaId").Int() ?? 0;
+        var known = path == "api/v1/request" && type is not null && body.At("mediaId").Int() is not null;
+        cache.Remove(key =>
         {
-            if (!pair.Key.StartsWith(SeerrKeyPrefix, StringComparison.Ordinal))
+            if (!key.StartsWith(SeerrKeyPrefix, StringComparison.Ordinal))
             {
-                continue;
+                return false;
             }
 
             // The key is "seerr|{user}|{path}": the path starts after the second bar.
-            var start = pair.Key.IndexOf('|', SeerrKeyPrefix.Length) + 1;
-            if (!known || !SurvivesRequest(pair.Key.AsSpan(start), type, id))
-            {
-                _cache.TryRemove(pair);
-            }
-        }
+            var start = key.IndexOf('|', SeerrKeyPrefix.Length) + 1;
+            return !known || !SurvivesRequest(key.AsSpan(start), type, id);
+        });
     }
 
     private static bool SurvivesRequest(ReadOnlySpan<char> path, string? type, int id)
@@ -143,12 +184,12 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
             return Task.FromResult<JsonNode?>(null);
         }
 
-        return Cached($"maintainerr|{path}", cacheFor, () => SendAsync(HttpMethod.Get, new Uri(settings.MaintainerrUrl!, path), settings, null, null));
+        return cache.GetAsync($"maintainerr|{path}", cacheFor, () => SendAsync(Maintainerr, new Uri(settings.MaintainerrUrl!, path), settings, null));
     }
 
     private static readonly TimeSpan ArrTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan ArrBackoff = TimeSpan.FromSeconds(15);
-    private readonly ConcurrentDictionary<ArrService, DateTime> _arrDownUntil = new();
+    private readonly ConcurrentDictionary<ArrService, DateTime> arrDownUntil = new();
 
     /// <summary>
     /// Reads JSON from Sonarr, Radarr (<c>api/v3/...</c>) or SABnzbd (<c>api?mode=...</c>). Fails
@@ -158,16 +199,21 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
     public Task<JsonNode?> ArrGetAsync(ArrService service, string pathAndQuery, TimeSpan cacheFor)
     {
         var (url, key) = IntegrationSettings.Current.Endpoint(service);
-        if (url is null || string.IsNullOrEmpty(key) || (_arrDownUntil.TryGetValue(service, out var until) && until > DateTime.UtcNow))
+        if (url is null || string.IsNullOrEmpty(key) || (arrDownUntil.TryGetValue(service, out var until) && until > DateTime.UtcNow))
         {
             return Task.FromResult<JsonNode?>(null);
         }
 
-        return Cached($"{service}|{pathAndQuery}", cacheFor, () => SendArrAsync(service, url, key, pathAndQuery));
+        return cache.GetAsync($"{service}|{pathAndQuery}", cacheFor, () => SendArrAsync(service, url, key, pathAndQuery));
     }
+
+    private static string NameOf(ArrService service) => IntegrationSettings.Arr.First(d => d.Service == service).Name;
 
     private async Task<JsonNode?> SendArrAsync(ArrService service, Uri baseUri, string key, string pathAndQuery)
     {
+        var name = NameOf(service);
+        var path = pathAndQuery.Split('?')[0];
+
         // SABnzbd takes its key and the JSON switch in the query; Sonarr and Radarr in a header.
         var target = service == ArrService.Sabnzbd
             ? $"{pathAndQuery}&output=json&apikey={Uri.EscapeDataString(key)}"
@@ -182,118 +228,45 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
         try
         {
             using var response = await Http.SendAsync(request, timeout.Token).ConfigureAwait(false);
-            _arrDownUntil.TryRemove(service, out _);
+            arrDownUntil.TryRemove(service, out _);
             if (!response.IsSuccessStatusCode)
             {
-                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
-                {
-                    logger.LogWarning("Hera TV: {Service} {Path} returned {Status}", service, pathAndQuery.Split('?')[0], (int)response.StatusCode);
-                }
-
+                await RefusedAsync(name, path, response, timeout.Token).ConfigureAwait(false);
                 return null;
             }
 
             var text = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
             var body = string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+
             // SABnzbd answers a wrong key or a bad mode with HTTP 200 and an error object.
-            return service == ArrService.Sabnzbd && body?["error"] is not null ? null : body;
+            if (service == ArrService.Sabnzbd && body.At("error") is { } error)
+            {
+                health.Fault(name, $"use {name}'s API (it answered \"{Clip(error.Str() ?? error.ToJsonString())}\"; is the API key right?)");
+                return null;
+            }
+
+            notFound.TryRemove(name, out _);
+            health.Recovered(name);
+            return body;
         }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException)
         {
-            _arrDownUntil[service] = DateTime.UtcNow + ArrBackoff;
-            logger.LogWarning("Hera TV: {Service} {Path} failed: {Reason}", service, pathAndQuery.Split('?')[0], ex.GetType().Name);
+            arrDownUntil[service] = DateTime.UtcNow + ArrBackoff;
+            health.Fault(name, $"read {path} from {name}", ex);
             return null;
         }
     }
 
-    /// <summary>
-    /// Serves a read from the cache, or runs <paramref name="load"/> once for however many callers ask
-    /// while it is out. A <paramref name="cacheFor"/> of zero or less reads through the cache without
-    /// adding to it, for a sweep (the nightly streaming refresh) that would otherwise push out what pages use.
-    /// </summary>
-    private Task<JsonNode?> Cached(string key, TimeSpan cacheFor, Func<Task<JsonNode?>> load)
+    private async Task<JsonNode?> SendAsync(string service, Uri uri, IntegrationSettings settings, int? asUser)
     {
-        var now = DateTime.UtcNow;
-        if (_cache.TryGetValue(key, out var hit) && hit.Expires > now && !hit.Read.IsFaulted)
-        {
-            return hit.Read;
-        }
-
-        if (cacheFor <= TimeSpan.Zero)
-        {
-            return load();
-        }
-
-        var created = new Entry(now + cacheFor, load);
-        var entry = _cache.AddOrUpdate(key, created, (_, old) => old.Expires > now && !old.Read.IsFaulted ? old : created);
-        if (!ReferenceEquals(entry, created))
-        {
-            return entry.Read;
-        }
-
-        // Only the call that started the load decides how long its answer is kept: an empty one only briefly.
-        var task = created.Read;
-        var emptyFor = cacheFor < EmptyFor ? cacheFor : EmptyFor;
-        _ = task.ContinueWith(
-            t =>
-            {
-                if (t.Status != TaskStatus.RanToCompletion || t.Result is null)
-                {
-                    created.ExpireIn(emptyFor);
-                }
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-        CachePruning.Prune(_cache, MaxCached, e => e.Expires, key);
-        return task;
-    }
-
-    private sealed class Entry
-    {
-        private readonly Lazy<Task<JsonNode?>> _load;
-        private long _expires;
-
-        public Entry(DateTime expires, Func<Task<JsonNode?>> load)
-        {
-            _expires = expires.Ticks;
-            // A load that throws before it returns a task is a failed read like any other.
-            _load = new Lazy<Task<JsonNode?>>(() =>
-            {
-                try
-                {
-                    return load();
-                }
-                catch (Exception ex)
-                {
-                    return Task.FromException<JsonNode?>(ex);
-                }
-            });
-        }
-
-        /// <summary>Gets the read: started by whoever asks first, shared by everyone after.</summary>
-        public Task<JsonNode?> Read => _load.Value;
-
-        public DateTime Expires => new(Volatile.Read(ref _expires), DateTimeKind.Utc);
-
-        public void ExpireIn(TimeSpan span) => Volatile.Write(ref _expires, (DateTime.UtcNow + span).Ticks);
-    }
-
-    private async Task<JsonNode?> SendAsync(HttpMethod method, Uri uri, IntegrationSettings settings, int? asUser, JsonNode? body)
-    {
-        using var request = new HttpRequestMessage(method, uri);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         if (settings.SeerrUrl is not null && uri.Host == settings.SeerrUrl.Host)
         {
             request.Headers.Add("X-Api-Key", settings.SeerrApiKey);
             if (asUser is int user)
             {
-                request.Headers.Add("X-Api-User", user.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                request.Headers.Add("X-Api-User", user.ToString(CultureInfo.InvariantCulture));
             }
-        }
-
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body);
         }
 
         try
@@ -301,28 +274,123 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
             using var response = await Http.SendAsync(request).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Hera TV: {Method} {Path} returned {Status}", method, uri.AbsolutePath, (int)response.StatusCode);
+                await RefusedAsync(service, uri.AbsolutePath, response, CancellationToken.None).ConfigureAwait(false);
                 return null;
             }
 
             var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+            var body = string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+            notFound.TryRemove(service, out _);
+            health.Recovered(service);
+            return body;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            logger.LogWarning(ex, "Hera TV: {Method} {Path} failed", method, uri.AbsolutePath);
+            health.Fault(service, $"read {uri.AbsolutePath} from {service}", ex);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Notes a refusal with the status and what the service said. A 404 is how a missing title answers, so it
+    /// is warned about once per service (a retired or wrong API looks the same, and nothing else would say so)
+    /// and doesn't count as the service failing; any other status does.
+    /// </summary>
+    private async Task RefusedAsync(string service, string path, HttpResponseMessage response, CancellationToken ct)
+    {
+        var status = (int)response.StatusCode;
+        var said = await SaidAsync(response, ct).ConfigureAwait(false);
+        var detail = said is null ? string.Empty : $": {said}";
+        if (status != 404)
+        {
+            health.Fault(service, $"read {path} from {service} (HTTP {status.ToString(CultureInfo.InvariantCulture)}{detail})");
+            return;
+        }
+
+        if (notFound.TryAdd(service, true))
+        {
+            logger.LogWarning(
+                "Hera TV: {Service} answered 404 for {Path}{Detail}. A title it doesn't know does this; if it is every call, check the address and that the service is a version Hera TV supports (Sonarr and Radarr need v3 or later). Further 404s are logged at debug level",
+                service,
+                path,
+                detail);
+        }
+        else
+        {
+            logger.LogDebug("Hera TV: {Service} answered 404 for {Path}", service, path);
+        }
+    }
+
+    /// <summary>What a failing service said in its own words (<c>message</c> or <c>error</c> of a JSON body), or null.</summary>
+    private static async Task<string?> SaidAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 8192)
+            {
+                return null;
+            }
+
+            var body = JsonNode.Parse(text);
+            return (body.At("message").Str() ?? body.At("error").Str()) is { } said ? Clip(said) : null;
+        }
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or OperationCanceledException or IOException)
+        {
+            return null;
+        }
+    }
+
+    private static string Clip(string text)
+    {
+        var line = text.Trim().ReplaceLineEndings(" ");
+        return line.Length > 160 ? line[..160] + "..." : line;
     }
 
     /// <summary>What a connection test saw: the HTTP status and JSON body, or why nothing answered.</summary>
     public sealed record Probe(int? Status, JsonNode? Body, string? Failure);
 
+    /// <summary>
+    /// Maps each record of a list a service sent, leaving out any that can't be mapped, so one record of an
+    /// unexpected shape costs itself and not the whole row or page. The first such record is a warning that
+    /// names the service and says what was wrong; later ones are debug until a list maps cleanly again.
+    /// </summary>
+    public List<T> MapEach<T>(string service, IEnumerable<JsonNode> records, Func<JsonNode, T> map)
+    {
+        var mapped = new List<T>();
+        var failed = 0;
+        Exception? first = null;
+        foreach (var record in records)
+        {
+            try
+            {
+                mapped.Add(map(record));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failed++;
+                first ??= ex;
+            }
+        }
+
+        var feature = $"{service} records";
+        if (first is null)
+        {
+            health.Recovered(feature);
+        }
+        else
+        {
+            health.Fault(feature, string.Create(CultureInfo.InvariantCulture, $"read {failed} of {failed + mapped.Count} records from {service}: they aren't in the shape Hera TV expects, so they are left out"), first);
+        }
+
+        return mapped;
+    }
+
     /// <summary>Drops cached reads, so a changed URL or key never serves the old server's answers.</summary>
     public void ClearCache()
     {
-        _cache.Clear();
-        _arrDownUntil.Clear();
+        cache.Clear();
+        arrDownUntil.Clear();
     }
 
     /// <summary>One uncached GET against a base URL that may not be saved yet: the settings page's Test connection.</summary>
@@ -344,7 +412,7 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
             {
                 body = string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
             }
-            catch (System.Text.Json.JsonException)
+            catch (JsonException)
             {
                 // An HTML page or plain text: the status alone says what it was.
             }

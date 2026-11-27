@@ -48,12 +48,22 @@ const svgEl = (tag, attrs = {}, children = []) => {
 
 const icon = (name) => el("span", { class: "material-icons", "aria-hidden": "true", text: name });
 
-const get = (path, params) =>
-  window.ApiClient.ajax({
-    type: "GET",
-    url: window.ApiClient.getUrl(`HeraTV/stats/${path}`, params),
-    dataType: "json",
+// A call that never answers must not leave the page on "Checking…" for ever.
+const REQUEST_TIMEOUT_MS = 20000;
+const withTimeout = (promise) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("The server took too long to answer.")), REQUEST_TIMEOUT_MS);
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
   });
+
+const get = (path, params) =>
+  withTimeout(
+    window.ApiClient.ajax({
+      type: "GET",
+      url: window.ApiClient.getUrl(`HeraTV/stats/${path}`, params),
+      dataType: "json",
+    }),
+  );
 
 /** The server's own words for a failed call, when it sent any. */
 const reason = async (error) => {
@@ -843,12 +853,20 @@ export default function (view) {
     );
   };
 
-  const unavailable = () =>
-    notice("extension", "Install the Playback Reporting plugin to see history.", el("a", { class: "hera-stats-link", href: CATALOGUE, text: "Find it in the plugin catalogue" }));
+  /** Why there is no history, in the words for each cause: the plugin missing, its tables changed, or its file unreadable. */
+  const unavailable = (why) => {
+    if (why === "schemaChanged") {
+      return notice("report_problem", "Playback Reporting is installed, but its database is no longer laid out the way Hera TV reads it, probably after an update to that plugin. Hera TV needs a new release to read it; recording of live streams below is not affected.");
+    }
+    if (why === "unreadable") {
+      return notice("error_outline", "Playback Reporting's database couldn't be read. Check the server log for the error; history returns once the file can be opened.");
+    }
+    return notice("extension", "Install the Playback Reporting plugin to see history.", el("a", { class: "hera-stats-link", href: CATALOGUE, text: "Find it in the plugin catalogue" }));
+  };
 
   const renderHistory = (data) => {
     if (!data.available) {
-      historyBody.replaceChildren(unavailable());
+      historyBody.replaceChildren(unavailable(data.reason));
     } else {
       const lede = el("p", { class: "hera-stats-lede", text: historySentences(data) });
       const daily = dailyCard(data);
@@ -1006,16 +1024,21 @@ export default function (view) {
 
   const onVisibility = () => startNow();
 
-  view.addEventListener("viewshow", () => {
+  const show = () => {
+    if (shown) return;
     shown = true;
     if (!nowList) build();
     document.addEventListener("visibilitychange", onVisibility);
     startNow();
     loadHistory();
-  });
+  };
+  view.addEventListener("viewshow", show);
   view.addEventListener("viewhide", () => {
     shown = false;
     stopNow();
     document.removeEventListener("visibilitychange", onVisibility);
   });
+  // The controller can finish loading after Jellyfin has already fired viewshow, and the page would
+  // then stay empty for ever; so it also starts itself if it finds the view showing.
+  if (view.isConnected && !view.classList.contains("hide")) show();
 }

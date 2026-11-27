@@ -1,7 +1,6 @@
 using System.Globalization;
 using Jellyfin.Plugin.HeraTv.Stats;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Letterboxd;
 
@@ -52,7 +51,7 @@ public static class WatchState
 /// as "nobody linked, nothing queued" and writes report false, so a broken file costs the Letterboxd
 /// diary and never a page or a playback.
 /// </remarks>
-public sealed class LetterboxdStore
+public sealed class LetterboxdStore : SqliteStore
 {
     /// <summary>How many times a failing watch is retried before it is left alone.</summary>
     public const int MaxAttempts = 10;
@@ -95,16 +94,16 @@ public sealed class LetterboxdStore
 
     private const string WatchColumns = "id, userId, itemId, tmdb, imdb, name, year, watchedOn, state, detail, attempts, updatedAt";
 
-    private readonly ILogger<LetterboxdStore> logger;
-    private readonly Lock gate = new();
-    private string? path;
-    private int faulted;
-    private bool ready;
+    // Version 1 is the schema as it stood before versions were kept.
+    private static readonly Migration[] Migrations = [new(1, Schema)];
 
-    public LetterboxdStore(ILogger<LetterboxdStore> logger) => this.logger = logger;
+    public LetterboxdStore(ServerHealth health)
+        : base(health, "Letterboxd", "use its Letterboxd database, so films aren't being queued or logged", "letterboxd.db", Migrations)
+    {
+    }
 
     /// <summary>Gets a user's link, or null when they haven't linked an account.</summary>
-    public LetterboxdLink? GetLink(string userId) => Run(
+    public LetterboxdLink? GetLink(string userId) => Reading(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -116,7 +115,7 @@ public sealed class LetterboxdStore
         null);
 
     /// <summary>Gets every link, oldest first.</summary>
-    public IReadOnlyList<LetterboxdLink> Links() => Run(
+    public IReadOnlyList<LetterboxdLink> Links() => Reading(
         connection =>
         {
             var links = new List<LetterboxdLink>();
@@ -136,7 +135,7 @@ public sealed class LetterboxdStore
     /// Saves a link after a sign-in. Signing in again as the same member keeps the person's choice and
     /// link date and clears any error; a different account starts afresh.
     /// </summary>
-    public bool SaveLink(string userId, string username, string memberId, string refreshToken, DateTime nowUtc) => Run(
+    public bool SaveLink(string userId, string username, string memberId, string refreshToken, DateTime nowUtc) => Writing(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -159,7 +158,7 @@ public sealed class LetterboxdStore
         false);
 
     /// <summary>Removes a user's link and everything queued or recorded for them.</summary>
-    public bool Unlink(string userId) => Run(
+    public bool Unlink(string userId) => Writing(
         connection =>
         {
             using var transaction = connection.BeginTransaction();
@@ -177,27 +176,27 @@ public sealed class LetterboxdStore
         },
         false);
 
-    public bool SetLogFinished(string userId, bool on) => Run(
+    public bool SetLogFinished(string userId, bool on) => Writing(
         connection => Update(connection, "UPDATE links SET logFinished = $value WHERE userId = $user", userId, on ? 1 : 0),
         false);
 
     /// <summary>Records (or, with null, clears) what is wrong with a link.</summary>
-    public bool SetError(string userId, string? error) => Run(
+    public bool SetError(string userId, string? error) => Writing(
         connection => Update(connection, "UPDATE links SET lastError = $value WHERE userId = $user", userId, Db(error)),
         false);
 
     /// <summary>Saves the refresh token Letterboxd rotated to.</summary>
-    public bool SetRefreshToken(string userId, string token) => Run(
+    public bool SetRefreshToken(string userId, string token) => Writing(
         connection => Update(connection, "UPDATE links SET refreshToken = $value WHERE userId = $user", userId, token),
         false);
 
     /// <summary>Notes that a diary entry was written: the time, and no error any more.</summary>
-    public bool MarkLogged(string userId, DateTime nowUtc) => Run(
+    public bool MarkLogged(string userId, DateTime nowUtc) => Writing(
         connection => Update(connection, "UPDATE links SET lastLoggedAt = $value, lastError = NULL WHERE userId = $user", userId, Clock.UtcString(nowUtc)),
         false);
 
     /// <summary>Queues a watch. False when it was already known (the same film on the same day) or couldn't be saved.</summary>
-    public bool Enqueue(WatchDraft draft, DateTime nowUtc) => Run(
+    public bool Enqueue(WatchDraft draft, DateTime nowUtc) => Writing(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -221,7 +220,7 @@ public sealed class LetterboxdStore
     /// Queues many watches in one step. Returns how many were new: the rest were already known (the
     /// same film on the same day). Nothing is queued when the database can't be written.
     /// </summary>
-    public int EnqueueMany(IReadOnlyList<WatchDraft> drafts, DateTime nowUtc) => drafts.Count == 0 ? 0 : Run(
+    public int EnqueueMany(IReadOnlyList<WatchDraft> drafts, DateTime nowUtc) => drafts.Count == 0 ? 0 : Writing(
         connection =>
         {
             using var transaction = connection.BeginTransaction();
@@ -267,7 +266,7 @@ public sealed class LetterboxdStore
     /// At most <paramref name="limit"/> rows per person come back, so one person's long queue never
     /// keeps everyone else's from the run; a run settles a few dozen, and the rest wait for the next.
     /// </summary>
-    public IReadOnlyList<WatchRow> Due(string? userId, bool includeFailed, int limit = DueLimit) => Run(
+    public IReadOnlyList<WatchRow> Due(string? userId, bool includeFailed, int limit = DueLimit) => Reading(
         connection =>
         {
             var rows = new List<WatchRow>();
@@ -289,7 +288,7 @@ public sealed class LetterboxdStore
         []);
 
     /// <summary>Settles a watch. A failure counts as an attempt.</summary>
-    public bool Settle(long id, string state, string? detail, DateTime nowUtc) => Run(
+    public bool Settle(long id, string state, string? detail, DateTime nowUtc) => Writing(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -305,7 +304,7 @@ public sealed class LetterboxdStore
         false);
 
     /// <summary>Settles many watches to one state in one step. A failure counts as an attempt.</summary>
-    public bool SettleMany(IReadOnlyList<long> ids, string state, string? detail, DateTime nowUtc) => ids.Count == 0 || Run(
+    public bool SettleMany(IReadOnlyList<long> ids, string state, string? detail, DateTime nowUtc) => ids.Count == 0 || Writing(
         connection =>
         {
             using var transaction = connection.BeginTransaction();
@@ -330,7 +329,7 @@ public sealed class LetterboxdStore
         false);
 
     /// <summary>Gets how many of a user's (or everyone's) watches are in a state.</summary>
-    public int Count(string? userId, string state) => Run(
+    public int Count(string? userId, string state) => Reading(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -342,7 +341,7 @@ public sealed class LetterboxdStore
         0);
 
     /// <summary>Gets a user's latest settled watches (logged or skipped), newest first.</summary>
-    public IReadOnlyList<WatchRow> Recent(string userId, int limit) => Run(
+    public IReadOnlyList<WatchRow> Recent(string userId, int limit) => Reading(
         connection =>
         {
             var rows = new List<WatchRow>();
@@ -363,7 +362,7 @@ public sealed class LetterboxdStore
         []);
 
     /// <summary>Forgets settled watches older than a year; the diary on Letterboxd is the real record.</summary>
-    public bool Prune(DateTime nowUtc) => Run(
+    public bool Prune(DateTime nowUtc) => Writing(
         connection =>
         {
             using var command = connection.CreateCommand();
@@ -406,65 +405,4 @@ public sealed class LetterboxdStore
         Text(reader, 9),
         reader.GetInt32(10),
         reader.GetString(11));
-
-    private static object Db(string? value) => value is null ? DBNull.Value : value;
-
-    private static string? Text(SqliteDataReader reader, int column) => reader.IsDBNull(column) ? null : reader.GetString(column);
-
-    /// <summary>Runs one unit of work on a fresh connection, creating the database first if need be. The fallback stands in when it fails.</summary>
-    private T Run<T>(Func<SqliteConnection, T> work, T fallback)
-    {
-        try
-        {
-            T result;
-            lock (gate)
-            {
-                var file = path ??= Locate();
-                var builder = new SqliteConnectionStringBuilder
-                {
-                    DataSource = file,
-                    Mode = SqliteOpenMode.ReadWriteCreate,
-                    DefaultTimeout = 5,
-                    Pooling = false,
-                };
-                using var connection = new SqliteConnection(builder.ConnectionString);
-                connection.Open();
-                // The tables are made once per process, not on every call.
-                if (!ready)
-                {
-                    using var schema = connection.CreateCommand();
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                    ready = true;
-                }
-
-                result = work(connection);
-            }
-
-            Interlocked.Exchange(ref faulted, 0);
-            return result;
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            // A database that went wrong may be gone or replaced: make the tables again next time.
-            ready = false;
-            if (Interlocked.Exchange(ref faulted, 1) == 0)
-            {
-                logger.LogWarning(ex, "Hera TV couldn't use its Letterboxd database; films aren't being queued or logged until it can. Further failures are logged at debug level");
-            }
-            else
-            {
-                logger.LogDebug(ex, "Hera TV couldn't use its Letterboxd database");
-            }
-
-            return fallback;
-        }
-    }
-
-    private static string Locate()
-    {
-        var folder = Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin hasn't loaded yet.");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, "letterboxd.db");
-    }
 }

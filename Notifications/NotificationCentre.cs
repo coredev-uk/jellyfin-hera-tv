@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using Jellyfin.Data.Enums;
@@ -8,8 +7,6 @@ using Jellyfin.Plugin.HeraTv.Stats;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Notifications;
 
@@ -31,8 +28,11 @@ internal sealed class NotificationCentre(
     UserRequests requests,
     LibraryLookup lookup,
     NotificationStore store,
-    ILogger<NotificationCentre> logger) : BackgroundService
+    ServerHealth health) : GuardedBackgroundService(Feature, health)
 {
+    /// <summary>The name the dashboard and the log know this feature by.</summary>
+    internal const string Feature = "Notifications";
+
     /// <summary>How often each user's requests are read.</summary>
     private const int RequestMinutes = 5;
 
@@ -54,7 +54,6 @@ internal sealed class NotificationCentre(
 
     private readonly Lock gate = new();
     private readonly Dictionary<Guid, HashSet<Guid>> pending = [];
-    private readonly ConcurrentDictionary<string, bool> failing = new();
     private DateTime firstAdded;
     private DateTime lastAdded;
     private DateTime prunedOn = DateTime.MinValue;
@@ -62,7 +61,7 @@ internal sealed class NotificationCentre(
     /// <summary>Gets a value indicating whether the server-wide switch is on.</summary>
     internal static bool Enabled => Plugin.Instance?.Configuration.NotificationsEnabled != false;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         library.ItemAdded += OnItemAdded;
         try
@@ -110,7 +109,7 @@ internal sealed class NotificationCentre(
         {
             if (await work().ConfigureAwait(false))
             {
-                failing.TryRemove(what, out _);
+                Health.Recovered(FeatureOf(what));
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -123,17 +122,9 @@ internal sealed class NotificationCentre(
         }
     }
 
-    private void Failed(string what, Exception ex)
-    {
-        if (failing.TryAdd(what, true))
-        {
-            logger.LogWarning(ex, "Hera TV couldn't {What}; it will try again. Further failures are logged at debug level", what);
-        }
-        else
-        {
-            logger.LogDebug(ex, "Hera TV couldn't {What}", what);
-        }
-    }
+    private void Failed(string what, Exception ex) => Health.Fault(FeatureOf(what), what, ex);
+
+    private static string FeatureOf(string what) => "Notifications: " + what;
 
     // ---------- requests -----------------------------------------------------------------------
 

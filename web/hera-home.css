@@ -1,5 +1,12 @@
 /* Hera TV: home module. Loaded after hera-tv.css. */
 
+/* Jellyfin's own home sections that hera-home.js has judged stock: it adds this class to a slot
+ * (never to a Hera row) while the slot is held back or replaced by Hera's rows, and takes it off
+ * again when Up Next fails or the module is torn down. */
+.homeSectionsContainer > .hera-stock-hidden {
+  display: none !important;
+}
+
 .hera-row[hidden] {
   display: none;
 }

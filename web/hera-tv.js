@@ -25,18 +25,26 @@
     if (asked === "on") sessionStorage.removeItem("hera-off");
     if (sessionStorage.getItem("hera-off") === "1") {
       document.querySelectorAll("link[data-hera-tv]").forEach((node) => node.remove());
+      [...root.classList].filter((name) => name === "hera" || name.startsWith("hera-")).forEach((name) => root.classList.remove(name));
       root.removeAttribute("data-hera-scheme");
-      console.info("[Hera TV] off for this tab; add ?hera=on to the address to bring it back");
+      console.info("[Hera TV:core] off for this tab; add ?hera=on to the address to bring it back");
       return;
     }
   } catch {
     /* no sessionStorage: carry on */
   }
 
-  root.classList.add("hera");
+  // hera-on switches on the core stylesheets and hera-m-<module> each module's (the bundler gates
+  // every rule behind one of them). The server's head script puts them on before first paint, so
+  // nothing draws unstyled while this script loads; from here core only takes them away: in safe
+  // mode, while a module stands aside or is off, and for modules the plugin's settings have
+  // switched off since the page was served. hera-on is added again here for a page served without it.
+  root.classList.add("hera", "hera-on");
 
   const state = {
-    config: { heroItemCount: 8, heroIntervalSeconds: 8 },
+    config: { heroItemCount: 8, heroIntervalSeconds: 8, disabledModules: [] },
+    ready: false, // the server's settings have arrived and registered modules are running
+    disabled: new Set(), // modules switched off in the plugin's settings
     heroItems: null,
     heroUser: null,
     heroLoad: null,
@@ -46,6 +54,278 @@
   };
 
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // ---------- Jellyfin's own markup and storage, in one place --------------------------------
+  // Every selector into Jellyfin's web client lives here, so an update that renames something is
+  // fixed once, and the Dashboard can name the piece that went missing. Each entry is
+  // [selector, scope, required]. "page" keys are looked for inside the page showing (a hidden,
+  // cached page never satisfies one); "chrome" keys live outside any page. A required key that
+  // kit.jf can't find makes the calling module report partial; an optional one is allowed to be
+  // absent (a film with no logo). Modules also list keys in their `requires`, which is stronger:
+  // until they are there the module doesn't run on that page.
+  const JF_TABLE = {
+    page: [".page:not(.hide)", "chrome", false],
+    pageRoot: [".page", "chrome", true],
+    appBar: [".MuiAppBar-root", "chrome", false],
+    appBarTabs: [".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root", "chrome", false],
+    appBarTitle: [".MuiAppBar-root .MuiTypography-h2", "chrome", false],
+    legacyHeader: [".skinHeader", "chrome", false],
+    // The admin Dashboard's own document and header: its app bar has no search button, by design.
+    dashboardDocument: [".dashboardDocument", "chrome", false],
+    // The avatar button of Jellyfin's React header (its aria-controls is the id of the user menu it opens) and the legacy header's.
+    profileButton: ['.MuiAppBar-root button[aria-controls="app-user-menu"], .headerUserButton', "chrome", false],
+    libraryMenu: ["#library-view-menu", "chrome", false],
+    branding: ["#cssBranding", "chrome", false],
+    scroller: [".emby-scroller", "chrome", false],
+    videoOsdPage: ["#videoOsdPage", "chrome", false],
+    homePage: ["#indexPage", "chrome", false],
+    homeTab: ["#homeTab", "page", true],
+    homeSections: ["#homeTab .homeSectionsContainer", "page", false],
+    homeSection: [".homeSectionsContainer .verticalSection:not(.hide)", "page", false],
+    homeOfficialRating: [".mediaInfoOfficialRating", "page", false],
+    sectionTitle: ["h2.sectionTitle", "page", false],
+    verticalSection: [".verticalSection", "page", false],
+    card: [".card", "page", false],
+    cardArt: [".cardScalable, .cardImageContainer", "page", false],
+    detailRibbon: [".detailRibbon", "page", true],
+    detailRibbonInfo: [".detailRibbon .infoWrapper", "page", false],
+    detailButtons: [".mainDetailButtons", "page", true],
+    detailPlay: [".mainDetailButtons .btnPlay", "page", false],
+    detailButtonContent: [".detailButton-content", "page", false],
+    detailPrimary: [".detailPagePrimaryContent", "page", true],
+    detailSection: [".detailPagePrimaryContent .detailSection", "page", true],
+    detailMisc: [".itemMiscInfo-primary", "page", true],
+    detailBanner: ["#itemBackdrop", "page", true],
+    detailLogo: [".detailLogo", "page", true],
+    detailSecondary: [".detailPageSecondaryContainer", "page", true],
+    miscInfo: [".itemMiscInfo", "page", false],
+    miscAllItems: [".itemMiscInfo .mediaInfoItem", "page", false],
+    miscItems: [".itemMiscInfo-primary .mediaInfoItem", "page", false],
+    miscRating: [".itemMiscInfo .mediaInfoOfficialRating", "page", false],
+    videoOsd: [".videoOsdBottom", "page", true],
+    prefsLinks: [".readOnlyContent a.listItem-border", "page", true],
+    loginForm: [".manualLoginForm", "page", true],
+    loginStack: [".margin-auto-y", "page", true],
+    loginActions: [".readOnlyContent", "page", false],
+    loginUsers: [".visualLoginForm", "page", false],
+    // The Collections library page (#boxsetsPage): the box holding the alphabet picker and grid.
+    libraryBody: [".libraryPage .padded-bottom-page", "page", true],
+    headerTabsSlider: [".headerTabs .emby-tabs-slider", "chrome", false],
+    headerTabButton: [".headerTabs .emby-tab-button", "chrome", false],
+    personNameContainer: [".nameContainer", "page", false],
+    seerrChildrenContent: ["#childrenContent", "page", false],
+    seerrChildrenSections: ["#childrenContent > .verticalSection", "page", false],
+    seerrStockCard: [".card[data-id]", "page", false],
+    seerrListChildren: ["#listChildrenCollapsible", "page", false],
+    seerrSimilar: ["#similarCollapsible", "page", false],
+    extrasStockCards: ['.card[data-id][data-type="Movie"], .card[data-id][data-type="Series"], .card[data-id][data-type="Episode"], .card[data-id][data-type="Video"]', "page", false],
+    extrasCardArt: [".cardScalable", "page", false],
+    extrasCardProgress: [".itemProgressBar", "page", false],
+    extrasDetailContent: [".detailPagePrimaryContent .detailSectionContent", "page", false],
+    extrasEndsAt: [".endsAt", "page", false],
+    playerOsdControls: [".osdControls", "page", true],
+    playerOsdButtons: [".osdControls .buttons", "page", false],
+    playerVideo: [".videoPlayerContainer video", "chrome", false],
+    playerFrame: [".videoPlayerContainer", "chrome", true],
+    playerUpNext: [".upNextDialog:not(.hide)", "chrome", false],
+    playerDialog: [".dialogContainer .dialog", "chrome", false],
+    detailTrailerButton: [".btnPlayTrailer", "page", false],
+    headerSearchButton: ['.MuiAppBar-root a[href="#/search"], .skinHeader a[href="#/search"], .headerSearchButton', "chrome", false],
+    searchHeader: [".MuiAppBar-root, .skinHeader", "chrome", false],
+    legacyHeaderTabs: [".skinHeader .headerTabs", "chrome", false],
+    loginPage: ["#loginPage", "page", false],
+    loginStandalone: [".standalonePage", "page", false],
+    loginHidden: [".hide", "page", false],
+    loginDisclaimer: [".loginDisclaimerContainer", "page", false],
+    loginDisclaimerBox: [".loginDisclaimer", "page", false],
+    loginQuick: [".btnQuick", "page", false],
+    loginForgot: [".btnForgotPassword", "page", false],
+    loginSubmit: [".button-submit", "page", false],
+    loginSelectServer: [".btnSelectServer", "page", false],
+    loginUsername: ["#txtManualName", "page", false],
+    loginPassword: ["#txtManualPassword", "page", false],
+    loginSso: [".sso-login button", "page", false],
+    loginDialog: [".formDialog", "chrome", false],
+    loginQuickDialog: ["#quickConnectAlert", "chrome", false],
+    loginDialogText: [".dialogContentInner .text", "chrome", false],
+    prefsMenu: [".readOnlyContent", "page", false],
+    prefsLinkLabel: [".listItemBodyText", "page", false],
+    prefsLinkIcon: [".listItemIcon", "page", false],
+    prefsAdmin: [".adminSection", "page", false],
+    prefsSubpage: [".userPreferencesPage", "page", false],
+    prefsSubpageBody: [":scope > .padded-left", "page", false],
+    appBarEnd: [".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiBox-root:last-child", "chrome", false],
+    notifyCard: [".card[data-id]", "page", false],
+    notifyCardArt: [".cardScalable", "page", false],
+  };
+  const JF = Object.freeze(Object.fromEntries(Object.entries(JF_TABLE).map(([key, [selector]]) => [key, selector])));
+  const JF_META = Object.freeze(Object.fromEntries(Object.entries(JF_TABLE).map(([key, [, place, required]]) => [key, Object.freeze({ scope: place, required })])));
+
+  // Jellyfin's own localStorage keys, by the name its settings code uses; each says which
+  // jellyfin-web module it mirrors, so a rename there is found by reading one list. "user" keys are
+  // stored as <user id>-<name>.
+  const JF_STORAGE = Object.freeze({
+    // The ApiClient's saved sign-ins (jellyfin-apiclient, credentials provider).
+    credentials: { key: "jellyfin_credentials", user: false },
+    // The device id (src/components/apphost.js).
+    deviceId: { key: "_deviceId2", user: false },
+    // The layout choice: appSettings.get("layout") in src/components/layoutManager.js.
+    layout: { key: "layout", user: false },
+    // Per-user settings (src/scripts/settings/userSettings.js, through appSettings's <user>-<name> keys).
+    language: { key: "language", user: true },
+    enableBackdrops: { key: "enableBackdrops", user: true },
+    detailsBanner: { key: "detailsBanner", user: true },
+    blurhash: { key: "blurhash", user: true },
+    segmentTypeAction: { key: "segmentTypeAction", user: true },
+  });
+  const storageName = (name, user) => {
+    const base = name.split("__")[0];
+    const entry = JF_STORAGE[base];
+    if (!entry || entry.user !== user) console.warn("[Hera TV:core] " + name + " is not a known Jellyfin " + (user ? "user" : "device") + " storage key (JF_STORAGE)");
+    const key = entry ? entry.key + name.slice(base.length) : name;
+    return user ? userId() + "-" + key : key;
+  };
+
+  // ---------- errors: where they came from -------------------------------------------------
+  // The bundle is every script joined; its wrapper hands over each file's first line (HeraBundle),
+  // so a frame in hera-bundle.js reads as the file and line it came from.
+  const bundleFiles = window.HeraBundle?.files ?? [];
+  const BUNDLE_FRAME = /hera-bundle\.js(?:\?[^:\s)]*)?:(\d+):(\d+)/;
+  const firstHeraFrame = (error) => {
+    for (const line of String(error?.stack || "").split("\n")) {
+      const hit = BUNDLE_FRAME.exec(line);
+      if (!hit) continue;
+      const row = Number(hit[1]);
+      let file = null;
+      for (const entry of bundleFiles) if (entry[1] <= row) file = entry;
+      return file ? file[0] + ":" + (row - file[1] + 1) + ":" + hit[2] : "hera-bundle.js:" + row + ":" + hit[2];
+    }
+    return null;
+  };
+  /** A failure as one line: the message and the first place in Hera's own code it passed through. */
+  const formatError = (error) => {
+    const message = String(error?.message || error).slice(0, 250);
+    const frame = firstHeraFrame(error);
+    return frame ? message + " (" + frame + ")" : message;
+  };
+
+  // ---------- small tools for modules ---------------------------------------------------------
+
+  /** Listeners and other clean-up for one lifetime: dispose() runs them newest first and the scope can be used again. */
+  const scope = () => {
+    let cleanups = [];
+    return {
+      listen(target, type, handler, options) {
+        target.addEventListener(type, handler, options);
+        const off = () => target.removeEventListener(type, handler, options);
+        cleanups.push(off);
+        return off;
+      },
+      add(fn) {
+        cleanups.push(fn);
+        return fn;
+      },
+      dispose() {
+        const run = cleanups;
+        cleanups = [];
+        for (let i = run.length - 1; i >= 0; i--) {
+          try {
+            run[i]();
+          } catch (error) {
+            console.warn("[Hera TV:core] clean-up failed", error);
+          }
+        }
+      },
+    };
+  };
+
+  /**
+   * Answers kept for `ttl` ms, at most `max` of them. get() shares one in-flight load between callers;
+   * a failure is forgotten at once; peek() is the settled value, or undefined; expired entries go
+   * whenever the cache grows past its size.
+   */
+  const ttlCache = ({ ttl, max = 100 }) => {
+    const entries = new Map(); // key -> { at, promise, value, settled }
+    const trim = (now) => {
+      if (entries.size <= max) return;
+      for (const [key, entry] of entries) if (now - entry.at >= ttl) entries.delete(key);
+      for (const key of entries.keys()) {
+        if (entries.size <= max) break;
+        entries.delete(key);
+      }
+    };
+    return {
+      get(key, loader) {
+        const now = Date.now();
+        const held = entries.get(key);
+        if (held && now - held.at < ttl) return held.promise;
+        const entry = { at: now, promise: null, value: undefined, settled: false };
+        entry.promise = new Promise((resolve) => resolve(loader())).then(
+          (value) => {
+            entry.value = value;
+            entry.settled = true;
+            return value;
+          },
+          (error) => {
+            if (entries.get(key) === entry) entries.delete(key);
+            throw error;
+          },
+        );
+        entries.set(key, entry);
+        trim(now);
+        return entry.promise;
+      },
+      peek(key) {
+        const held = entries.get(key);
+        return held?.settled && Date.now() - held.at < ttl ? held.value : undefined;
+      },
+      delete: (key) => entries.delete(key),
+      clear: () => entries.clear(),
+    };
+  };
+
+  const textTools = {
+    /** "1 film", "3 films": the count (with its thousands separators) and the word that fits it. */
+    plural: (n, one, many = one + "s") => n.toLocaleString() + " " + (n === 1 ? one : many),
+    /** "9 December 2026" from a yyyy-mm-dd date. */
+    longDate: (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+  };
+
+  // Back, as a keyboard, a webOS remote (461) and a Tizen remote (10009) send it.
+  const BACK_KEYS = new Set(["Escape", "Backspace", "GoBack", "BrowserBack"]);
+  const keyTools = { isBack: (event) => BACK_KEYS.has(event.key) || event.keyCode === 461 || event.keyCode === 10009 };
+
+  // ---------- the classes Hera puts on <html> --------------------------------------------------
+  // Core alone writes the view classes, from three facts: the home tab is showing, a detail page's
+  // banner is, or a module's own full-page view has taken the page over (Discover, Requests, Your
+  // Watching, a person). While one has, Jellyfin's home content and backdrop step aside (one block
+  // in hera-tv.css, keyed on html.hera-view-taken) and the home hero's classes are off.
+  const view = { home: false, detailArt: false, taken: null };
+  const applyView = () => {
+    if (health.boot === "safe") return; // Hera is off for this tab; late work must not put its classes back
+    root.classList.toggle("hera-view-taken", !!view.taken);
+    if (view.taken) root.dataset.heraTaken = view.taken.name;
+    else delete root.dataset.heraTaken;
+    root.classList.toggle("hera-home", view.home && !view.taken);
+    root.classList.toggle("hera-art-top", view.detailArt || !!view.taken?.art);
+  };
+  const setView = (patch) => {
+    Object.assign(view, patch);
+    applyView();
+  };
+  /** Takes the page over for `name`; calling it again with the same name updates `art` (whether artwork runs under the header). */
+  const takeView = (name, { art = false } = {}) => setView({ taken: { name, art } });
+  /** Gives the page back, if `name` still has it. */
+  const releaseView = (name) => {
+    if (view.taken?.name === name) setView({ taken: null });
+  };
+  const clearRootClasses = () => {
+    [...root.classList].filter((name) => name === "hera" || name.startsWith("hera-")).forEach((name) => root.classList.remove(name));
+    root.removeAttribute("data-hera-scheme");
+    root.removeAttribute("data-hera-view");
+    root.removeAttribute("data-hera-taken");
+    Object.assign(view, { home: false, detailArt: false, taken: null });
+  };
 
   // ---------- helpers -----------------------------------------------------------------
 
@@ -67,28 +347,15 @@
     return node;
   };
 
-  const icon = (name) => el("span", { class: "material-icons", "aria-hidden": "true", text: name });
+  // The material-icons class is the icon font's; hera-icon is how Hera finds its own icons again.
+  const icon = (name) => el("span", { class: "material-icons hera-icon", "aria-hidden": "true", text: name });
 
   const getJSON = (path, params) => api().getJSON(api().getUrl(path, params));
 
   // One fetch of an item, whoever asks: a title page's banner, overview, shelf and modules all
-  // want the same Users/{user}/Items/{id} at once. Kept for half a minute; a failure is forgotten
-  // at once, and expired entries go whenever the map grows past a screenful.
-  const ITEM_TTL = 30 * 1000;
-  const items = new Map(); // `${user}:${id}` -> { at, promise }
-  const fetchItem = (id) => {
-    const key = `${userId()}:${id}`;
-    const now = Date.now();
-    const held = items.get(key);
-    if (held && now - held.at < ITEM_TTL) return held.promise;
-    const promise = Promise.resolve(api().getItem(userId(), id));
-    promise.catch(() => {
-      if (items.get(key)?.promise === promise) items.delete(key);
-    });
-    items.set(key, { at: now, promise });
-    if (items.size > 100) for (const [k, v] of items) if (now - v.at >= ITEM_TTL) items.delete(k);
-    return promise;
-  };
+  // want the same Users/{user}/Items/{id} at once. Kept for half a minute.
+  const itemCache = ttlCache({ ttl: 30 * 1000, max: 100 });
+  const fetchItem = (id) => itemCache.get(userId() + ":" + id, () => api().getItem(userId(), id));
 
   // Quality 80: indistinguishable from 90 at card and banner sizes, about a third fewer bytes.
   const imageUrl = (itemId, type, opts = {}) =>
@@ -152,7 +419,7 @@
   const playAction = (item) => ({
     icon: "play_arrow",
     label: `Play ${item.Name}`,
-    run: () => play(item).catch((error) => console.error("[Hera TV]", error)),
+    run: () => track("core", play(item)),
   });
 
   const toggleFavourite = async (item, button) => {
@@ -160,7 +427,7 @@
     await api().updateFavoriteStatus(userId(), item.Id, next);
     item.UserData = { ...(item.UserData || {}), IsFavorite: next };
     button.setAttribute("aria-pressed", String(next));
-    button.querySelector(".material-icons").textContent = next ? "favorite" : "favorite_border";
+    button.querySelector(".hera-icon").textContent = next ? "favorite" : "favorite_border";
     button.setAttribute("aria-label", next ? "Remove from Favourites" : "Add to Favourites");
   };
 
@@ -351,8 +618,8 @@
   // (Recently Added, Episodes, Cast & Crew); they are made the first time a pointer comes over
   // the row. A remote or a keyboard moves focus through the cards instead and the row follows
   // it, so the paddles stay out of the tab order and off the TV layout.
-  const SCROLLERS = ".hera-shelf, .emby-scroller";
-  const ART = ".hera-card__art, .hera-episode__still, .cardScalable, .cardImageContainer, img";
+  const SCROLLERS = `.hera-shelf, ${JF.scroller}`;
+  const ART = `.hera-card__art, .hera-episode__still, ${JF.cardArt}, img`;
   const PADDLE = 44;
 
   const paddlesFor = (track) => {
@@ -360,7 +627,7 @@
     if (!host) return null;
     if (getComputedStyle(host).position === "static") host.classList.add("hera-paddle-host");
     host.classList.add("hera-paddled");
-    const title = track.closest("section, .verticalSection")?.querySelector("h2, h3")?.textContent.trim() || "row";
+    const title = track.closest(`section, ${JF.verticalSection}`)?.querySelector("h2, h3")?.textContent.trim() || "row";
     const paddle = (dir) =>
       el(
         "button",
@@ -423,105 +690,220 @@
   /** A short date, as tvOS writes them: "9 Dec". */
   const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
-  const modules = [];
+  const modules = []; // running: registered and not switched off in the plugin's settings
+  const pending = []; // registered before the server's settings arrived
 
   // ---------- compatibility ------------------------------------------------------------
-  // What Hera leans on in Jellyfin's own web client, in one place, so a Jellyfin update that
-  // renames something is fixed here once. Each module names the pieces it needs on each kind of
-  // page (`requires`); when one is missing after the page has settled, that module stands aside
-  // on that page and stock Jellyfin shows, instead of a half-built page, and the Dashboard's Hera
-  // TV page says which piece went missing. A module that keeps throwing is switched off for the
-  // session. If the web client itself is unrecognisable (no ApiClient), Hera removes its
-  // stylesheets and stops: Jellyfin then looks exactly as it does without the plugin.
-  // `?hera=off` in the address does the same by hand, for this tab, until it is closed.
-  const JF = Object.freeze({
-    page: ".page:not(.hide)",
-    appBar: ".MuiAppBar-root",
-    appBarTabs: ".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root",
-    legacyHeader: ".skinHeader",
-    homeTab: "#homeTab",
-    homeSections: "#homeTab .homeSectionsContainer",
-    detailRibbon: ".detailRibbon",
-    detailButtons: ".mainDetailButtons",
-    detailPlay: ".mainDetailButtons .btnPlay",
-    detailPrimary: ".detailPagePrimaryContent",
-    detailSection: ".detailPagePrimaryContent .detailSection",
-    detailMisc: ".itemMiscInfo-primary",
-    detailBanner: ".itemBackdrop",
-    detailSecondary: ".detailPageSecondaryContainer",
-    collectionItems: ".collectionItems",
-    videoOsd: ".videoOsdBottom",
-    prefsLinks: ".readOnlyContent a.listItem-border",
-    loginForm: ".manualLoginForm",
-    loginStack: ".margin-auto-y",
-    loginActions: ".readOnlyContent",
-    loginUsers: ".visualLoginForm",
-    // The Collections library page (#boxsetsPage): the box holding the alphabet picker and grid.
-    libraryBody: ".libraryPage .padded-bottom-page",
-  });
-  // Pages every module may lean on without saying so: if these are gone, Hera's built-ins stand
-  // aside on that page too.
-  const CORE_REQUIRES = {
-    itemDetailPage: ["detailRibbon", "detailButtons", "detailPrimary"],
-  };
+  // What Hera leans on in Jellyfin's own web client is listed in JF (top of this file), so a
+  // Jellyfin update that renames something is fixed there once. Each module names the pieces it
+  // needs on each kind of page (`requires`); when one is missing after the page has settled, that
+  // module stands aside on that page and stock Jellyfin shows, instead of a half-built page, and the
+  // Dashboard's Hera TV page says which piece went missing. A module that looks something up
+  // through kit.jf and doesn't find it reports itself partial; one that keeps throwing is switched
+  // off for the session. If the web client itself is unrecognisable (no ApiClient, or one without
+  // the methods Hera calls), Hera removes its stylesheets and stops: Jellyfin then looks exactly as
+  // it does without the plugin. `?hera=off` in the address does the same by hand, for this tab.
   const ERROR_LIMIT = 3;
   const SETTLE_MS = 2500;
+
+  // The ApiClient methods Hera cannot start without, and the ones only one feature uses.
+  const API_REQUIRED = ["getCurrentUserId", "getUrl", "ajax", "getJSON", "getItem", "getScaledImageUrl", "deviceId", "accessToken"];
+  const API_OPTIONAL = ["getCurrentUser", "updateUserConfiguration", "updateFavoriteStatus", "updateUserPassword", "uploadUserImage", "deleteUserImage"];
 
   const health = {
     boot: "starting", // starting | ok | untested | safe
     reason: null,
     jellyfin: null,
     tested: null,
-    modules: new Map(), // name -> { status, missing, page, errors, streak, lastError }
+    modules: new Map(), // name -> see moduleHealth
   };
   const moduleHealth = (name) => {
     if (!health.modules.has(name)) {
-      health.modules.set(name, { status: "idle", missing: [], page: null, errors: 0, streak: 0, lastError: null });
+      health.modules.set(name, {
+        status: "idle", // idle | ok | partial | degraded | disabled
+        missing: [],
+        page: null,
+        errors: 0,
+        streak: 0, // throws in a row, for the three-strikes switch-off
+        lastError: null,
+        registered: false,
+        live: false, // active last time refresh looked: a change to active delivers the current route to the module
+        aside: false, // standing aside on the page showing now: its stylesheet and interceptors go quiet
+        runs: 0,
+        lastPage: null,
+        ranOn: new Set(),
+        byPage: new Map(), // page id -> what was missing there, until a later pass on it finds it all
+        soft: new Set(), // kit.jf lookups that found nothing since the last pass
+        failures: 0, // throws and tracked rejections since the last pass
+        self: null, // what the module said about itself through kit.report
+      });
     }
     return health.modules.get(name);
   };
+  const isActive = (name) => {
+    const m = health.modules.get(name);
+    return !!m?.registered && !m.aside && m.status !== "disabled" && health.boot !== "safe";
+  };
+  const moduleEntry = (name, m) => ({ name, status: m.status, missing: m.missing, page: m.page, errors: m.errors, lastError: m.lastError });
+  /** Everything known, idle modules too (`HeraTV.health()`); what goes to the server leaves the idle ones out. */
   const healthSnapshot = () => ({
     boot: health.boot,
     reason: health.reason,
     jellyfin: health.jellyfin,
     tested: health.tested,
-    modules: [...health.modules].map(([name, m]) => ({ name, status: m.status, missing: m.missing, page: m.page, errors: m.errors, lastError: m.lastError })),
+    modules: [...health.modules].map(([name, m]) => ({ ...moduleEntry(name, m), runs: m.runs, lastPage: m.lastPage, ranOn: [...m.ranOn] })),
   });
+  const currentPageId = () => document.querySelector(JF.page)?.id || null;
 
-  // A change worth telling the server about (a module standing aside or switched off, or coming
-  // back after one) is sent once, a moment later, with everything else that changed meanwhile.
-  // Whether the last report from this browser was a problem is kept across reloads, so the first
-  // healthy visit after one tells the server, and the Dashboard clears.
-  const PROBLEM_KEY = "hera-reported-problem";
-  let reportTimer = 0;
-  let reported = "";
-  let reportedProblem = (() => {
-    try {
-      return localStorage.getItem(PROBLEM_KEY) === "1";
-    } catch {
-      return false;
-    }
-  })();
-  const reportHealth = () => {
-    clearTimeout(reportTimer);
-    reportTimer = setTimeout(() => {
-      const snapshot = healthSnapshot();
-      const problem = snapshot.boot !== "ok" || snapshot.modules.some((m) => m.status === "degraded" || m.status === "disabled");
-      const key = JSON.stringify(snapshot.modules.map((m) => [m.name, m.status, m.missing]).concat([snapshot.boot]));
-      if ((!problem && !reportedProblem) || key === reported || !api() || !userId()) return;
-      reported = key;
-      reportedProblem = problem;
-      try {
-        if (problem) localStorage.setItem(PROBLEM_KEY, "1");
-        else localStorage.removeItem(PROBLEM_KEY);
-      } catch {
-        /* no storage: the next restart clears it instead */
+  // A module's published status is the worst thing still true of it: a piece missing on a page it
+  // hasn't since run cleanly on, a throw, a lookup that found nothing, or what it said itself.
+  const refresh = (name) => {
+    const m = moduleHealth(name);
+    if (m.status !== "disabled") {
+      const stuck = m.byPage.entries().next().value;
+      if (stuck || m.self?.status === "degraded") {
+        const [page, missing] = stuck ?? [m.self.page, m.self.missing];
+        Object.assign(m, { status: "degraded", page, missing: [...missing] });
+      } else if (m.self?.status === "partial" || m.soft.size || m.failures) {
+        Object.assign(m, { status: "partial", page: m.self?.page ?? m.lastPage ?? currentPageId(), missing: [...new Set([...(m.self?.missing ?? []), ...m.soft])] });
+      } else if (m.runs || m.self?.status === "ok") {
+        Object.assign(m, { status: "ok", page: null, missing: [] });
+      } else {
+        Object.assign(m, { status: "idle", page: null, missing: [] });
       }
-      hera("health", { method: "POST", body: { ...snapshot, page: root.dataset.heraView || null } }).catch(() => {});
-    }, 3000);
+    }
+    const active = isActive(name);
+    root.classList.toggle("hera-m-" + name, active);
+    syncIntercepts(name);
+    // A module that comes back from standing aside missed the route it stood aside on: it gets it now.
+    if (active !== m.live) {
+      m.live = active;
+      if (active) deliverCurrent(name);
+    }
+    reportHealth();
   };
 
-  const missingOn = (page, keys) => keys.filter((key) => !(JF[key] && (page.querySelector(JF[key]) || document.querySelector(JF[key]))));
+  // A change worth telling the server about is sent once, a moment later, with everything else that
+  // changed meanwhile. The first full pass of a session is always sent: it is the browser checking
+  // in, even when everything is well, and a later healthy report replaces this browser's own
+  // earlier problem on the server (the server keys entries by module and reporter).
+  let reportTimer = 0;
+  let reported = "";
+  const reporterId = () => {
+    try {
+      return String(api()?.deviceId?.() || localStorage.getItem(JF_STORAGE.deviceId.key) || "unknown");
+    } catch {
+      return "unknown";
+    }
+  };
+  const reportBody = () => {
+    const snapshot = healthSnapshot();
+    return {
+      reporter: reporterId(),
+      boot: snapshot.boot,
+      reason: snapshot.reason,
+      jellyfin: snapshot.jellyfin,
+      tested: snapshot.tested,
+      page: root.dataset.heraView || null,
+      // Only modules that ran or reported: an idle one says nothing about this Jellyfin.
+      modules: snapshot.modules.filter((m) => m.status !== "idle").map(({ name, status, missing, page, errors, lastError }) => ({ name, status, missing, page, errors, lastError })),
+    };
+  };
+  function reportHealth() {
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(() => {
+      if (!api() || !userId() || health.boot === "starting" || health.boot === "safe") return;
+      const body = reportBody();
+      const key = JSON.stringify([body.boot, body.modules.map((m) => [m.name, m.status, m.missing])]);
+      if (key === reported) return;
+      reported = key;
+      hera("health", { method: "POST", body }).catch(() => {
+        if (reported === key) reported = "";
+      });
+    }, 3000);
+  }
+
+  // Counts a failure of async work (a fetch behind a row, a card's Play) against the module, which
+  // then reports partial until its next clean pass. It never counts towards the three strikes.
+  const noteFailure = (name, error) => {
+    const m = moduleHealth(name);
+    m.errors += 1;
+    m.failures += 1;
+    m.lastError = formatError(error);
+    console.error("[Hera TV:" + name + "]", error);
+    refresh(name);
+  };
+  /** Watches a promise for `name`: resolves to its value, or to undefined after counting its failure. Never rejects. */
+  const track = (name, promise) =>
+    Promise.resolve(promise).catch((error) => {
+      noteFailure(name, error);
+    });
+
+  const noteMiss = (name, key) => {
+    const m = moduleHealth(name);
+    if (m.soft.has(key)) return;
+    m.soft.add(key);
+    console.warn("[Hera TV:" + name + "] Jellyfin has no " + (JF[key] ?? key) + " where it was expected");
+    refresh(name);
+  };
+  // The one way for a module to look at Jellyfin's markup. Page-scoped keys are looked for inside
+  // the page showing (a hidden, cached page never satisfies one) unless a root is given.
+  const jfLookup = (module, key, from, all) => {
+    const selector = JF[key];
+    const meta = JF_META[key];
+    let found;
+    if (!selector) {
+      found = all ? [] : null;
+    } else if ((!from || from === document) && meta.scope === "page") {
+      const base = document.querySelector(JF.page) ?? document;
+      const self = base !== document && base.matches(selector) ? base : null;
+      found = all ? (self ? [self] : []).concat([...base.querySelectorAll(selector)]) : (self ?? base.querySelector(selector));
+    } else {
+      const scopeRoot = from ?? document;
+      found = all ? [...scopeRoot.querySelectorAll(selector)] : scopeRoot.querySelector(selector);
+    }
+    if ((all ? !found.length : !found) && (meta?.required ?? true)) noteMiss(module, key);
+    return found;
+  };
+  const jfFirst = (module, key, from) => jfLookup(module, key, from, false);
+  const jfAll = (module, key, from) => jfLookup(module, key, from, true);
+
+  /** For a module with no onView (or one that knows better than a pass does): says how it is getting on. */
+  const report = (name, status, detail) => {
+    if (!["ok", "partial", "degraded", "idle"].includes(status)) return;
+    const m = moduleHealth(name);
+    const given = typeof detail === "string" ? { error: detail } : (detail ?? {});
+    m.self = { status, missing: given.missing ?? [], page: given.page ?? currentPageId() };
+    if (given.error) m.lastError = String(given.error).slice(0, 300);
+    m.aside = status === "degraded";
+    refresh(name);
+  };
+
+  // Capture-phase listeners that must stand down when their module does: attached while it is
+  // running, detached while it is standing aside or switched off, and gone for good with its
+  // unsubscribe.
+  const intercepts = new Set();
+  const attach = (entry, on) => {
+    if (on === entry.attached) return;
+    entry.attached = on;
+    if (on) entry.target.addEventListener(entry.type, entry.handler, entry.options);
+    else entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  };
+  function syncIntercepts(name) {
+    const on = isActive(name);
+    for (const entry of intercepts) if (entry.module === name) attach(entry, on);
+  }
+  const intercept = (module, target, type, handler, options = {}) => {
+    const entry = { module, target, type, handler, options: { ...options, capture: true }, attached: false };
+    intercepts.add(entry);
+    attach(entry, isActive(module));
+    return () => {
+      attach(entry, false);
+      intercepts.delete(entry);
+    };
+  };
+
+  const missingOn = (page, keys) => keys.filter((key) => !(JF[key] && (JF_META[key].scope === "page" ? page : document).querySelector(JF[key])));
 
   // Jellyfin draws a page in pieces; a piece counts as missing only once the page has had a
   // moment to settle and it still isn't there.
@@ -541,15 +923,17 @@
       observer.observe(page, { childList: true, subtree: true });
     });
 
-  const requiresFor = (module, page) => [...(CORE_REQUIRES[page.id] ?? []), ...(module.requires?.[page.id] ?? []), ...(module.requires?.["*"] ?? [])];
+  const requiresFor = (module, page) => [...(module.requires?.[page.id] ?? []), ...(module.requires?.["*"] ?? [])];
 
   /**
    * Runs one module on a page: probes what it needs first, and keeps count of what it throws.
    * `settled` carries what one showing of a page has already waited for and not found, so the
    * modules after the first don't each wait again for the same missing piece. Returns false when
-   * the page went away while it waited (`stale`), so the caller stops there.
+   * the page went away while it waited (`stale`), so the caller stops there. A module with no
+   * onView isn't run: it reports through kit.report.
    */
   const runModule = async (module, page, context, settled = new Set(), stale = () => false) => {
+    if (!module.onView) return true;
     const m = moduleHealth(module.name);
     if (m.status === "disabled") return true;
     const keys = requiresFor(module, page);
@@ -558,37 +942,39 @@
     if (stale()) return false;
     missing.forEach((key) => settled.add(key));
     if (missing.length) {
-      if (m.status !== "degraded" || m.page !== page.id || m.missing.join() !== missing.join()) {
-        console.warn(`[Hera TV:${module.name}] standing aside on ${page.id}: Jellyfin has no ${missing.map((key) => JF[key]).join(", ")}`);
+      if (m.byPage.get(page.id)?.join() !== missing.join()) {
+        console.warn("[Hera TV:" + module.name + "] standing aside on " + page.id + ": Jellyfin has no " + missing.map((key) => JF[key]).join(", "));
       }
-      Object.assign(m, { status: "degraded", missing, page: page.id });
-      reportHealth();
+      m.byPage.set(page.id, missing);
+      m.aside = true;
+      refresh(module.name);
       return true;
     }
+    m.byPage.delete(page.id);
+    m.aside = false;
+    m.soft.clear();
+    m.failures = 0;
+    m.self = null;
     try {
-      await module.onView?.(page, context);
-      if (m.status !== "ok") {
-        const recovered = m.status === "degraded";
-        Object.assign(m, { status: "ok", missing: [], page: null });
-        if (recovered) reportHealth();
-      }
+      await module.onView(page, context);
+      m.runs += 1;
+      m.lastPage = page.id;
+      m.ranOn.add(page.id);
       m.streak = 0;
+      m.aside = m.self?.status === "degraded";
     } catch (error) {
-      console.error(`[Hera TV:${module.name}]`, error);
+      console.error("[Hera TV:" + module.name + "]", error);
       m.errors += 1;
+      m.failures += 1;
       m.streak += 1;
-      m.lastError = String(error?.message || error).slice(0, 300);
+      m.lastError = formatError(error);
       if (m.streak >= ERROR_LIMIT) {
-        console.warn(`[Hera TV:${module.name}] switched off for this session after ${ERROR_LIMIT} failures in a row`);
+        console.warn("[Hera TV:" + module.name + "] switched off for this session after " + ERROR_LIMIT + " failures in a row");
         m.status = "disabled";
-        try {
-          module.teardown?.();
-        } catch {
-          /* already failing */
-        }
+        stopModule(module);
       }
-      reportHealth();
     }
+    refresh(module.name);
     return true;
   };
 
@@ -597,26 +983,23 @@
     if (health.boot === "safe") return;
     health.boot = "safe";
     health.reason = reason;
-    console.warn(`[Hera TV] off for this tab: ${reason}`);
+    console.warn("[Hera TV:core] off for this tab: " + reason);
     document.querySelectorAll("link[data-hera-tv], style[data-hera-tv]").forEach((node) => node.remove());
     window.HeraTV?.teardown();
-    [...root.classList].filter((name) => name === "hera" || name.startsWith("hera-")).forEach((name) => root.classList.remove(name));
-    root.removeAttribute("data-hera-scheme");
-    root.removeAttribute("data-hera-view");
     reportSafe();
   };
 
-  // Safe mode usually means there is no ApiClient to report through, so this goes to the server
-  // directly, signed with the token Jellyfin keeps for the signed-in user.
+  // Safe mode usually means the ApiClient can't be trusted to report through, so this goes to the
+  // server directly, signed with the token Jellyfin keeps for the signed-in user.
   const reportSafe = () => {
     try {
-      const credentials = JSON.parse(localStorage.getItem("jellyfin_credentials") || "{}");
+      const credentials = JSON.parse(localStorage.getItem(JF_STORAGE.credentials.key) || "{}");
       const token = credentials.Servers?.find((server) => server.AccessToken)?.AccessToken;
       if (!token) return;
       fetch(new URL("../HeraTV/health", document.baseURI), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `MediaBrowser Token="${token}"` },
-        body: JSON.stringify({ ...healthSnapshot(), page: null }),
+        body: JSON.stringify(reportBody()),
       }).catch(() => {});
     } catch {
       /* nothing to report with */
@@ -633,9 +1016,9 @@
       health.tested = compat.tested ?? null;
       if (health.boot === "starting" || health.boot === "ok") health.boot = compat.supported === false ? "untested" : "ok";
       if (health.boot === "untested") {
-        console.warn(`[Hera TV] Jellyfin ${health.jellyfin} is newer than the releases this build was tested on (${(health.tested || []).join(", ")})`);
-        reportHealth();
+        console.warn(`[Hera TV:core] Jellyfin ${health.jellyfin} is newer than the releases this build was tested on (${(health.tested || []).join(", ")})`);
       }
+      reportHealth();
     } catch {
       /* the server answers this for every page; without it, carry on */
     }
@@ -651,7 +1034,7 @@
     let queued = false;
     const move = () => {
       queued = false;
-      const custom = document.getElementById("cssBranding");
+      const custom = document.querySelector(JF.branding);
       const anchor = custom && custom.parentNode === document.head ? custom : null;
       const ours = links();
       const last = ours[ours.length - 1];
@@ -743,7 +1126,7 @@
       },
       icon(favourite ? "favorite" : "favorite_border"),
     );
-    favButton.addEventListener("click", () => toggleFavourite(item, favButton).catch(console.error));
+    favButton.addEventListener("click", () => track("hero", toggleFavourite(item, favButton)));
 
     return el(
       "article",
@@ -765,7 +1148,7 @@
               {
                 type: "button",
                 class: "hera-btn hera-btn--primary",
-                onclick: () => play(item).catch(console.error),
+                onclick: () => track("hero", play(item)),
               },
               [icon("play_arrow"), el("span", { text: resumable ? "Resume" : "Play" })],
             ),
@@ -812,7 +1195,7 @@
       shown?.classList.remove("is-on");
     },
     hide() {
-      this.node?.querySelectorAll(".is-on").forEach((layer) => layer.classList.remove("is-on"));
+      this.node?.querySelectorAll(".hera-ambient__layer.is-on").forEach((layer) => layer.classList.remove("is-on"));
     },
     remove() {
       this.node?.remove();
@@ -940,12 +1323,10 @@
         // Down leaves the hero for the first shelf, as on tvOS; Jellyfin's spatial navigation
         // otherwise stays among the stacked slides.
         if (e.key === "ArrowDown") {
-          const page = this.node.closest(".page");
+          const page = this.node.closest(JF.pageRoot);
           // A comma list, not :is(): older webOS Chromium lacks :is, and querySelector returns the
           // first match in document order either way.
-          const card = page?.querySelector(
-            ".homeSectionsContainer .verticalSection:not(.hide) .card, .homeSectionsContainer .verticalSection:not(.hide) .hera-card",
-          );
+          const card = page?.querySelector(`${JF.homeSection} ${JF.card}, ${JF.homeSection} .hera-card`);
           if (card) {
             e.preventDefault();
             e.stopPropagation();
@@ -957,8 +1338,8 @@
       // Up from the first shelf returns to the hero's Play button.
       this.onKeyUp = (e) => {
         if (e.key !== "ArrowUp" || !this.node.isConnected) return;
-        const section = e.target.closest?.(".homeSectionsContainer .verticalSection:not(.hide)");
-        const first = this.node.closest(".page")?.querySelector(".homeSectionsContainer .verticalSection:not(.hide)");
+        const section = e.target.closest?.(JF.homeSection);
+        const first = this.node.closest(JF.pageRoot)?.querySelector(JF.homeSection);
         if (!section || section !== first) return;
         e.preventDefault();
         e.stopPropagation();
@@ -983,7 +1364,7 @@
     setUserPaused(paused) {
       this.userPaused = paused;
       this.toggle.setAttribute("aria-label", paused ? "Play featured titles" : "Pause featured titles");
-      this.toggle.querySelector(".material-icons").textContent = paused ? "play_arrow" : "pause";
+      this.toggle.querySelector(".hera-icon").textContent = paused ? "play_arrow" : "pause";
       this.hold("user", paused);
     }
 
@@ -1057,15 +1438,15 @@
   const heroTabObserver = { observer: null };
   const watchHomeTab = (tab) => {
     heroTabObserver.observer?.disconnect();
-    const sync = () => root.classList.toggle("hera-home", tab.classList.contains("is-active"));
+    const sync = () => setView({ home: tab.classList.contains("is-active") });
     heroTabObserver.observer = new MutationObserver(sync);
     heroTabObserver.observer.observe(tab, { attributes: true, attributeFilter: ["class"] });
     sync();
   };
 
   const mountHero = async (page) => {
-    const tab = page.querySelector("#homeTab");
-    const sections = tab?.querySelector(".homeSectionsContainer");
+    const tab = page.querySelector(JF.homeTab);
+    const sections = jfFirst("hero", "homeSections", page);
     if (!tab || !sections) return;
     watchHomeTab(tab);
     if (state.hero && state.heroUser !== userId()) {
@@ -1080,7 +1461,7 @@
     const items = await state.heroLoad;
     if (state.hero && tab.contains(state.hero.node)) return;
     if (!items.length || !page.isConnected || page.classList.contains("hide")) {
-      root.classList.remove("hera-home");
+      setView({ home: false });
       return;
     }
     state.hero?.destroy();
@@ -1158,7 +1539,7 @@
       meta: [runtime(episode.RunTimeTicks), episode.PremiereDate ? new Date(episode.PremiereDate).getFullYear() : null].filter(Boolean).join(" · "),
       progress: episode.UserData?.PlayedPercentage,
       played: episode.UserData?.Played,
-      action: { icon: "play_arrow", label: `Play ${episode.Name}`, run: () => play(episode).catch(console.error) },
+      action: { icon: "play_arrow", label: `Play ${episode.Name}`, run: () => track("seasons", play(episode)) },
     });
 
   // Moving between episodes of a show opens a new detail page each time (Jellyfin keeps a few in
@@ -1315,7 +1696,7 @@
     ]);
 
     // Episodes come straight after the hero, before the credits, as tv.apple.com orders a show.
-    const primary = page.querySelector(".detailPagePrimaryContent");
+    const primary = jfFirst("seasons", "detailPrimary", page);
     if (!primary) return;
     primary.insertBefore(section, primary.firstChild);
     page.classList.add("hera-has-seasons");
@@ -1360,7 +1741,7 @@
       meta: [item.ProductionYear, runtime(item.RunTimeTicks), rating ? certificate(item.OfficialRating) : null].filter(Boolean).join(" · "),
       progress: item.UserData?.PlayedPercentage,
       played: item.UserData?.Played,
-      action: { icon: "play_arrow", label: `Play ${item.Name}`, run: () => play(item).catch(console.error) },
+      action: { icon: "play_arrow", label: `Play ${item.Name}`, run: () => track("boxset", play(item)) },
     });
     card.dataset.date = dateOf(item);
     return card;
@@ -1398,8 +1779,8 @@
 
   const fitBoxSetMeta = (page, items, noun, mixedRatings = false) => {
     // Jellyfin's one certificate for the lot would contradict films that carry their own.
-    if (mixedRatings) page.querySelector(".itemMiscInfo .mediaInfoOfficialRating")?.remove();
-    const parts = [...page.querySelectorAll(".itemMiscInfo-primary .mediaInfoItem")];
+    if (mixedRatings) page.querySelector(JF.miscRating)?.remove();
+    const parts = [...page.querySelectorAll(JF.miscItems)];
     const count = parts.find((part) => /^\d+ items?$/.test(part.textContent.trim()));
     if (count) count.textContent = `${items.length} ${noun}${items.length === 1 ? "" : "s"}`;
     const years = items.map((item) => item.ProductionYear).filter(Boolean);
@@ -1416,8 +1797,8 @@
   // The banner's Play names what it starts ("Play Batman Begins", "Resume S1, E5"), as Apple TV's
   // does. `itemId` is the page the label belongs to, so a page Jellyfin reuses never keeps another's.
   const labelPlay = (page, itemId, label) => {
-    const button = page.querySelector(".mainDetailButtons .btnPlay");
-    const content = button?.querySelector(".detailButton-content");
+    const button = page.querySelector(JF.detailPlay);
+    const content = button?.querySelector(JF.detailButtonContent);
     if (!content) return;
     if (label) {
       if (content.dataset.heraTitle === undefined) {
@@ -1447,12 +1828,12 @@
     page.addEventListener(
       "click",
       (event) => {
-        const button = event.target.closest?.(".mainDetailButtons .btnPlay");
+        const button = event.target.closest?.(JF.detailPlay);
         const target = page.heraPlayTarget;
         if (!button || !target || target.id !== itemIdFromHash()) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        play(target.item).catch(console.error);
+        track("core", play(target.item));
       },
       true,
     );
@@ -1492,7 +1873,7 @@
       el("div", { class: "hera-seasons__head" }, el("h2", { class: "hera-seasons__title", text: title })),
       shelf,
     ]);
-    const primary = page.querySelector(".detailPagePrimaryContent");
+    const primary = jfFirst("boxset", "detailPrimary", page);
     if (!primary) return null;
     // Coming back to the page redraws the grid in place (watched films, the next one, Play), so
     // nothing jumps; what hera-seerr.js added (missing films, Request) moves across with it, and
@@ -1542,7 +1923,7 @@
     const entry = { itemId, settled: false, handle: null };
     entry.ready = buildBoxSet(page, itemId, same ? known.handle : null)
       .catch((error) => {
-        console.error("[Hera TV]", error);
+        noteFailure("boxset", error);
         return null;
       })
       .then((handle) => {
@@ -1579,7 +1960,7 @@
   // Paints the banner and the ambient ground from a { banner, ambient } pair of image URLs.
   const paintBanner = (page, banner, itemId, urls) => {
     page.classList.remove("hera-no-backdrop");
-    root.classList.add("hera-art-top");
+    setView({ detailArt: true });
     banner.dataset.heraFilled = itemId;
     banner.style.backgroundImage = `url("${urls.banner}")`;
     banner.dataset.heraAmbient = urls.ambient;
@@ -1587,7 +1968,7 @@
   };
 
   const fillBanner = async (page, itemId) => {
-    const banner = page.querySelector("#itemBackdrop");
+    const banner = jfFirst("banner", "detailBanner", page);
     if (!banner) return;
     if (banner.dataset.heraFilled === itemId) {
       // Back on a page already drawn: the ambient may be showing another title's art.
@@ -1597,7 +1978,7 @@
     // Jellyfin drew its own banner (mobile layout): leave it.
     if (!banner.dataset.heraFilled && /url\(/.test(getComputedStyle(banner).backgroundImage)) {
       page.classList.remove("hera-no-backdrop");
-      root.classList.add("hera-art-top");
+      setView({ detailArt: true });
       return;
     }
     // Known art (this item, or the series of an episode or season the shelf has shown) paints
@@ -1613,7 +1994,7 @@
     if (!art) {
       // No artwork (people, books, bare collections): no banner; the portrait or cover shows.
       page.classList.add("hera-no-backdrop");
-      root.classList.remove("hera-art-top");
+      setView({ detailArt: false });
       banner.dataset.heraFilled = itemId;
       banner.style.backgroundImage = "";
       ambient.hide();
@@ -1640,7 +2021,7 @@
   // is almost always right, instead of from a half-built ribbon (title only, no buttons yet).
   let lastRibbonHeight = 0;
   const fitRibbon = (page) => {
-    const ribbon = page.querySelector(".detailRibbon");
+    const ribbon = jfFirst("ribbon", "detailRibbon", page);
     if (!ribbon || ribbonObservers.has(ribbon)) return;
     if (lastRibbonHeight && !page.style.getPropertyValue("--hera-ribbon-h")) {
       page.style.setProperty("--hera-ribbon-h", `${lastRibbonHeight}px`);
@@ -1648,7 +2029,7 @@
     const measure = () => {
       // Until Jellyfin has drawn the buttons the ribbon is incomplete; measuring it then would
       // pull the content up and drop it again a moment later.
-      const buttons = ribbon.querySelector(".mainDetailButtons");
+      const buttons = ribbon.querySelector(JF.detailButtons);
       if (!buttons || buttons.offsetHeight === 0) return;
       const parts = [...ribbon.children].filter((child) => child.offsetParent !== null && child.offsetHeight > 0);
       if (!parts.length) return;
@@ -1703,7 +2084,7 @@
   // The synopsis belongs with the title and buttons, over the artwork, as on tvOS; the stock
   // copy further down is hidden while ours is in place.
   const mountOverview = async (page, itemId) => {
-    const info = page.querySelector(".detailRibbon .infoWrapper");
+    const info = jfFirst("overview", "detailRibbonInfo", page);
     if (!info) return;
     const existing = info.querySelector(".hera-detail-overview");
     if (existing?.dataset.item === itemId) return;
@@ -1722,7 +2103,7 @@
   // One observer per logo element: Jellyfin reuses the page, and onView runs on every show.
   const logoObservers = new WeakMap();
   const markLogo = (page) => {
-    const logo = page.querySelector(".detailLogo");
+    const logo = jfFirst("logo", "detailLogo", page);
     const update = () => {
       const has = !!logo && !logo.classList.contains("hide") && /url\(/.test(logo.style.backgroundImage || "");
       page.classList.toggle("hera-has-logo", has);
@@ -1753,8 +2134,7 @@
     ["Default", "Default"],
   ];
 
-  const isProfileButton = (target) =>
-    target.closest?.(".MuiAppBar-root > .MuiToolbar-root:first-child > .MuiBox-root:last-child button, .headerUserButton");
+  const isProfileButton = (target) => target.closest?.(JF.profileButton);
 
   const controlCenter = {
     dialog: null,
@@ -1770,7 +2150,7 @@
       this.dialog.showModal();
       // The first control is a setting, not Sign out: a second Enter must never leave the page.
       this.dialog.querySelector(".hera-cc__tile")?.focus();
-      this.refreshSessions().catch(console.error);
+      track("control-center", this.refreshSessions());
     },
 
     close() {
@@ -1849,7 +2229,7 @@
             const [next] = APPEARANCES[(index + 1) % APPEARANCES.length];
             await appearance.set(next);
             value.textContent = appearance.label();
-            button.querySelector(".material-icons").textContent = appearance.scheme() === "light" ? "light_mode" : "dark_mode";
+            button.querySelector(".hera-icon").textContent = appearance.scheme() === "light" ? "light_mode" : "dark_mode";
           },
         }),
         this.tile({
@@ -2032,7 +2412,7 @@
     e.preventDefault();
     e.stopPropagation();
     controlCenter.open(button).catch((error) => {
-      console.error("[Hera TV]", error);
+      noteFailure("control-center", error);
       controlCenter.bypass = true;
       button.click();
       controlCenter.bypass = false;
@@ -2046,7 +2426,7 @@
   // The scroll-edge layer under the bar (body::after in hera-tv.css) is as tall as the bar that
   // is showing: 64px, more with a library page's toolbar, or the TV layout's own header.
   const measureBar = () => {
-    const bar = [...document.querySelectorAll(".MuiAppBar-root, .skinHeader")].find((node) => node.offsetHeight > 0);
+    const bar = [...document.querySelectorAll(`${JF.appBar}, ${JF.legacyHeader}`)].find((node) => node.offsetHeight > 0);
     if (bar) root.style.setProperty("--hera-bar-h", `${Math.round(bar.offsetHeight)}px`);
   };
 
@@ -2062,7 +2442,7 @@
   const waitForHomeSections = (page) => {
     stopHomeWait();
     homeWait.observer = new MutationObserver(() => {
-      if (!page.querySelector("#homeTab .homeSectionsContainer")) return;
+      if (!page.querySelector(JF.homeSections)) return;
       stopHomeWait();
       if (!page.classList.contains("hide")) onView(page);
     });
@@ -2070,70 +2450,106 @@
     homeWait.timer = setTimeout(stopHomeWait, 10000);
   };
 
-  // Hera's own pieces (hero, banner, shelves) run as a module like the others, so a Jellyfin page
-  // they no longer recognise is left to Jellyfin rather than half-rebuilt.
-  const builtIns = {
-    name: "core",
-    onView: async (page) => {
-      const isHome = page.id === "indexPage";
-      if (isHome) await mountHero(page);
-      if (page.id === "itemDetailPage") {
-        markLogo(page);
-        fitRibbon(page);
-        const id = itemIdFromHash();
-        const playContent = page.querySelector(".mainDetailButtons .btnPlay .detailButton-content");
-        if (id && playContent?.dataset.heraLabelItem && playContent.dataset.heraLabelItem !== id) labelPlay(page, id, null);
-        if (id) {
-          fillBanner(page, id).catch(console.error);
-          mountOverview(page, id).catch(console.error);
-          await mountSeasons(page, id);
-          // A page Jellyfin brings back from its cache keeps its shelf, so mountSeasons returns
-          // early; the reader's place is restored here instead.
-          restoreShelfPlace(page);
-          await mountBoxSet(page, id);
-        }
-      }
-    },
-  };
-
-  // Each showing of a page gets a number; a run still waiting for Jellyfin's pieces when a newer
-  // one starts (or the page is hidden) stops, so modules never act on a page the reader has left.
-  let viewGeneration = 0;
-  const onView = async (page) => {
-    if (!api() || !userId() || health.boot === "safe") return;
-    const generation = ++viewGeneration;
-    const stale = () => generation !== viewGeneration || page.classList.contains("hide");
-    root.dataset.heraView = page.id || "";
-    // The page's toolbar renders a moment after the page shows.
-    requestAnimationFrame(measureBar);
-    setTimeout(measureBar, 400);
-    const isHome = page.id === "indexPage";
-    stopHomeWait();
-    if (isHome && !page.querySelector(JF.homeSections)) waitForHomeSections(page);
-    if (!isHome) root.classList.remove("hera-home");
-    if (page.id !== "itemDetailPage") root.classList.remove("hera-art-top");
-    // Modules see every page after the built-ins; one failing never stops the others.
-    const context = { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") };
-    const settled = new Set();
-    for (const module of [builtIns, ...modules]) {
-      if (!(await runModule(module, page, context, settled, stale))) return;
+  // Core is the only place that watches for navigation: modules ask it (kit.onRoute) instead of
+  // each listening for viewshow and hashchange. A route is a page showing under an address, and is
+  // told once however many signals announce it: Jellyfin's viewshow, a `.page` coming into view,
+  // and, for a router push that does neither, the address changing (checked a moment later, when
+  // the new page has had time to appear). A module hears routes only while it is active
+  // (kit.onRoute(module, fn)): never when it is switched off or standing aside, and once, as it
+  // subscribes or becomes active, for the route that is current.
+  const routeListeners = new Set(); // { module (null for core's own), fn }
+  const route = { key: "", at: 0, current: null, late: 0, nav: 0, check: 0 };
+  const visiblePage = () => document.querySelector(JF.page);
+  const fireRoute = (entry, info) => {
+    try {
+      entry.fn(info);
+    } catch (error) {
+      noteFailure(entry.module ?? "core", error);
     }
-    // After a problem was reported (this session or an earlier one), a full pass is the news
-    // that clears it; reportHealth sends only if something actually changed.
-    if (reportedProblem) reportHealth();
   };
-
-  const onViewShow = (event) => {
-    const page = event.target?.closest?.(".page") || event.target;
-    if (page instanceof HTMLElement) onView(page);
+  const onRoute = (module, fn) => {
+    const entry = { module, fn };
+    routeListeners.add(entry);
+    if (route.current && isActive(module)) {
+      queueMicrotask(() => {
+        if (routeListeners.has(entry) && isActive(module) && route.current) fireRoute(entry, route.current);
+      });
+    }
+    return () => routeListeners.delete(entry);
   };
-
-  // Series pages re-render their sections after the first viewshow; a late mount catches that.
-  const onHash = () => {
-    setTimeout(() => {
-      const page = document.querySelector(".page:not(.hide)");
-      if (page) onView(page);
+  function deliverCurrent(name) {
+    for (const entry of routeListeners) {
+      if (entry.module !== name) continue;
+      queueMicrotask(() => {
+        if (routeListeners.has(entry) && isActive(name) && route.current) fireRoute(entry, route.current);
+      });
+    }
+  }
+  // Ends a module: its route subscriptions, then its own stop() and teardown().
+  function stopModule(module) {
+    for (const entry of [...routeListeners]) if (entry.module === module.name) routeListeners.delete(entry);
+    for (const hook of [module.stop, module.teardown]) {
+      try {
+        hook?.call(module);
+      } catch (error) {
+        console.warn("[Hera TV:" + module.name + "] stop failed", error);
+      }
+    }
+  }
+  const emitRoute = (page, { force = false } = {}) => {
+    if (!(page instanceof HTMLElement) || health.boot === "safe") return;
+    const hash = window.location.hash;
+    const key = `${hash}|${page.id}`;
+    const now = Date.now();
+    // A viewshow of the page already showing, long after it was told, is Jellyfin showing it again.
+    if (key === route.key && !(force && now - route.at > 600)) return;
+    route.key = key;
+    route.at = now;
+    const info = { hash, path: hash.slice(1).split("?")[0], params: new URLSearchParams(hash.split("?")[1] || ""), page };
+    route.current = info;
+    for (const entry of [...routeListeners]) {
+      if (entry.module === null || isActive(entry.module)) fireRoute(entry, info);
+    }
+    // Series pages re-render their sections after the first viewshow; a late pass catches that.
+    clearTimeout(route.late);
+    route.late = setTimeout(() => {
+      if (visiblePage() === page) onView(page);
     }, 400);
+  };
+  const queueRouteCheck = () => {
+    if (route.check) return;
+    route.check = requestAnimationFrame(() => {
+      route.check = 0;
+      const page = visiblePage();
+      if (page) emitRoute(page);
+    });
+  };
+  const onViewShow = (event) => {
+    const page = event.target?.closest?.(JF.pageRoot) || event.target;
+    emitRoute(page, { force: true });
+  };
+  const onNavigate = () => {
+    // history.replaceState changes the address without an event, so the same route must be able to be announced again.
+    route.key = "";
+    clearTimeout(route.nav);
+    route.nav = setTimeout(() => {
+      const page = visiblePage();
+      if (page) emitRoute(page);
+    }, 400);
+  };
+  // A page Jellyfin shows by toggling its class, or adds already shown, announces itself here.
+  const pageWatch = new WeakSet();
+  const pageObserver = new MutationObserver(queueRouteCheck);
+  const watchPage = (node) => {
+    if (pageWatch.has(node)) return false;
+    pageWatch.add(node);
+    pageObserver.observe(node, { attributes: true, attributeFilter: ["class"] });
+    return true;
+  };
+  const watchPagesIn = (node) => {
+    let added = node.classList.contains("page") && watchPage(node);
+    for (const inner of node.getElementsByClassName("page")) added = watchPage(inner) || added;
+    if (added) queueRouteCheck();
   };
 
   // ---------- British copy -------------------------------------------------------------
@@ -2148,20 +2564,20 @@
     ["Favorites", "Favourites"],
   ]);
   const localiseCopy = () => {
-    for (const node of document.querySelectorAll(".MuiAppBar-root .MuiTypography-h2, #library-view-menu li, .page:not(.hide) h2.sectionTitle")) {
+    for (const node of document.querySelectorAll(`${JF.appBarTitle}, ${JF.libraryMenu} li, ${JF.page} ${JF.sectionTitle}`)) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const next = BRITISH.get(text.nodeValue.trim());
         if (next) text.nodeValue = next;
       }
     }
-    for (const node of document.querySelectorAll(".mediaInfoOfficialRating")) {
+    for (const node of document.querySelectorAll(JF.homeOfficialRating)) {
       if (node.firstElementChild?.classList.contains("hera-badge")) continue;
       node.replaceChildren(el("span", { class: "hera-badge", text: certificate(node.textContent.trim()) }));
     }
     // Jellyfin's meta line writes runtimes "1h 39m" and ranges "2022 - 2025"; Hera's own surfaces
     // say "1 hr 39 min" and "2022–2025".
-    for (const node of document.querySelectorAll(".itemMiscInfo .mediaInfoItem")) {
+    for (const node of document.querySelectorAll(JF.miscAllItems)) {
       if (node.childElementCount) continue;
       const text = node.textContent.trim();
       const long = /^(\d+)h(?: (\d+)m)?$/.exec(text);
@@ -2179,31 +2595,227 @@
   // Only a change that could carry one of those words queues a pass: new nodes anywhere but the
   // player, or a text edit inside the few places localiseCopy rewrites. The player's clock and
   // position ticks, and removals, cost nothing.
-  const COPY_HOSTS = ".MuiAppBar-root, #library-view-menu, h2.sectionTitle, .mediaInfoOfficialRating, .itemMiscInfo";
+  const COPY_HOSTS = [JF.appBar, JF.libraryMenu, JF.sectionTitle, JF.homeOfficialRating, JF.miscInfo].join(", ");
   const copyRelevant = (record) => {
     const host = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
-    if (!host || host.closest("#videoOsdPage")) return false;
+    if (!host || host.closest(JF.videoOsdPage)) return false;
     if (record.type === "characterData") return !!host.closest(COPY_HOSTS);
     return record.addedNodes.length > 0;
   };
-  const watchCopy = () => {
-    let queued = false;
-    const observer = new MutationObserver((records) => {
-      if (queued || !records.some(copyRelevant)) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
+  let copyQueued = false;
+  const queueCopy = () => {
+    if (copyQueued) return;
+    copyQueued = true;
+    requestAnimationFrame(() => {
+      copyQueued = false;
+      if (!isActive("british")) return;
+      try {
         localiseCopy();
-      });
+      } catch (error) {
+        noteFailure("british", error);
+      }
     });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    localiseCopy();
-    state.cleanups.push(() => observer.disconnect());
+  };
+  // The one observer of the whole document: it finds pages as Jellyfin adds them and queues a
+  // copy pass for changes that could need one.
+  const domObserver = new MutationObserver((records) => {
+    let copy = false;
+    for (const record of records) {
+      for (const node of record.addedNodes) if (node.nodeType === Node.ELEMENT_NODE) watchPagesIn(node);
+      if (!copy && copyRelevant(record)) copy = true;
+    }
+    if (copy) queueCopy();
+  });
+
+  // ---------- Hera's own pieces, each a module -----------------------------------------------
+  // The hero, the detail page's banner, overview, logo, ribbon, seasons and box set, the Control
+  // Center, the paddles and the British copy each run, report and switch off on their own, so one
+  // that breaks on a Jellyfin page it no longer recognises leaves the rest (and Jellyfin's own
+  // page) alone.
+
+  const onDetail = (run) => (page) => (page.id === "itemDetailPage" ? run(page, itemIdFromHash()) : undefined);
+
+  // The banner's Play carries the title Hera started for another page; drop it when the page
+  // moves on to a different one.
+  const clearStaleLabel = (page, id) => {
+    const content = page.querySelector(`${JF.detailPlay} ${JF.detailButtonContent}`);
+    if (id && content?.dataset.heraLabelItem && content.dataset.heraLabelItem !== id) labelPlay(page, id, null);
+  };
+
+  let stopCapture = null;
+  let paddleScope = null;
+  const builtIns = [
+    {
+      name: "hero",
+      requires: { indexPage: ["homeTab"] },
+      onView: async (page) => {
+        if (page.id !== "indexPage") return;
+        stopHomeWait();
+        if (!page.querySelector(JF.homeSections)) waitForHomeSections(page);
+        await mountHero(page);
+      },
+      teardown: () => {
+        state.hero?.destroy();
+        state.hero = null;
+        stopHomeWait();
+        heroTabObserver.observer?.disconnect();
+        setView({ home: false });
+      },
+    },
+    {
+      name: "logo",
+      requires: { itemDetailPage: ["detailLogo"] },
+      onView: onDetail((page) => markLogo(page)),
+      teardown: () => document.querySelectorAll(".hera-has-logo").forEach((node) => node.classList.remove("hera-has-logo")),
+    },
+    {
+      name: "ribbon",
+      requires: { itemDetailPage: ["detailRibbon", "detailButtons"] },
+      onView: onDetail((page) => fitRibbon(page)),
+    },
+    {
+      name: "banner",
+      requires: { itemDetailPage: ["detailBanner"] },
+      // Not awaited: the banner must not hold up the shelves behind it.
+      onView: onDetail((page, id) => {
+        if (id) track("banner", fillBanner(page, id));
+      }),
+      teardown: () => setView({ detailArt: false }),
+    },
+    {
+      name: "overview",
+      requires: { itemDetailPage: ["detailRibbon", "detailRibbonInfo"] },
+      onView: onDetail((page, id) => {
+        if (id) track("overview", mountOverview(page, id));
+      }),
+      teardown: () => {
+        document.querySelectorAll(".hera-detail-overview, .hera-detail-more").forEach((node) => node.remove());
+        document.querySelectorAll(".hera-has-overview").forEach((node) => node.classList.remove("hera-has-overview"));
+      },
+    },
+    {
+      name: "seasons",
+      requires: { itemDetailPage: ["detailPrimary"] },
+      onView: onDetail(async (page, id) => {
+        if (!id) return;
+        clearStaleLabel(page, id);
+        await mountSeasons(page, id);
+        // A page Jellyfin brings back from its cache keeps its shelf, so mountSeasons returns
+        // early; the reader's place is restored here instead.
+        restoreShelfPlace(page);
+      }),
+      teardown: () => {
+        document.querySelectorAll(".hera-seasons").forEach((node) => node.remove());
+        document.querySelectorAll(".hera-has-seasons").forEach((node) => node.classList.remove("hera-has-seasons"));
+      },
+    },
+    {
+      name: "boxset",
+      requires: { itemDetailPage: ["detailPrimary"] },
+      onView: onDetail(async (page, id) => {
+        if (!id) return;
+        clearStaleLabel(page, id);
+        await mountBoxSet(page, id);
+      }),
+      teardown: () => {
+        document.querySelectorAll(".hera-boxset").forEach((node) => node.remove());
+        document.querySelectorAll(".hera-has-boxset").forEach((node) => node.classList.remove("hera-has-boxset"));
+      },
+    },
+    {
+      // Needs the profile button on the pages that have a header; with it gone, the click is left
+      // to Jellyfin's own menu (the interceptor detaches with the module).
+      name: "control-center",
+      requires: { indexPage: ["profileButton"], itemDetailPage: ["profileButton"] },
+      onView: () => {
+        stopCapture ??= intercept("control-center", document, "click", onProfileClick);
+      },
+      teardown: () => {
+        stopCapture?.();
+        stopCapture = null;
+        controlCenter.dialog?.remove();
+      },
+    },
+    {
+      name: "paddles",
+      onView: () => {
+        if (paddleScope) return;
+        paddleScope = scope();
+        paddleScope.listen(document, "pointerover", onPaddleHover, { passive: true });
+      },
+      teardown: () => {
+        paddleScope?.dispose();
+        paddleScope = null;
+        document.querySelectorAll(".hera-row__paddle").forEach((node) => node.remove());
+      },
+    },
+    {
+      name: "british",
+      onView: () => localiseCopy(),
+    },
+  ];
+
+  // Each showing of a page gets a number; a run still waiting for Jellyfin's pieces when a newer
+  // one starts (or the page is hidden) stops, so modules never act on a page the reader has left.
+  let viewGeneration = 0;
+  const onView = async (page) => {
+    if (!api() || !userId() || health.boot === "safe") return;
+    const generation = ++viewGeneration;
+    const stale = () => generation !== viewGeneration || page.classList.contains("hide");
+    root.dataset.heraView = page.id || "";
+    // The page's toolbar renders a moment after the page shows.
+    requestAnimationFrame(measureBar);
+    setTimeout(measureBar, 400);
+    if (page.id !== "indexPage") view.home = false;
+    if (page.id !== "itemDetailPage") view.detailArt = false;
+    applyView();
+    const context = { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") };
+    const settled = new Set();
+    // One module failing never stops the others.
+    for (const module of modules) {
+      if (!(await runModule(module, page, context, settled, stale))) return;
+    }
+    // The first full pass is the browser checking in; reportHealth sends only what changed after.
+    reportHealth();
+  };
+
+  // A module is run once the server's settings say it may be (some can be switched off there).
+  const addModule = (module) => {
+    const m = moduleHealth(module.name);
+    if (state.disabled.has(module.name)) return;
+    m.registered = true;
+    modules.push(module);
+    refresh(module.name);
+    // Load-time wiring and exports (HT.discover, HT.hidden, a stylesheet's helper nodes) belong to
+    // start(), so a module the settings switch off runs nothing at all.
+    try {
+      module.start?.();
+    } catch (error) {
+      noteFailure(module.name, error);
+    }
+    // A module that arrives after the first page still sees it.
+    const page = visiblePage();
+    if (page && api() && userId() && health.boot !== "safe") {
+      runModule(module, page, { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") });
+    }
+  };
+  const enqueue = (module) => (state.ready ? addModule(module) : pending.push(module));
+
+  const loadConfig = async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(new URL("../HeraTV/config", document.baseURI), { signal: controller.signal });
+      if (response.ok) state.config = { ...state.config, ...(await response.json()) };
+    } catch {
+      /* defaults stand */
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   const start = async () => {
     keepStylesheetLast();
-    watchCopy();
     appearance.apply();
     const onDeviceScheme = () => appearance.pref === "auto" && appearance.apply();
     lightQuery?.addEventListener?.("change", onDeviceScheme);
@@ -2223,43 +2835,77 @@
       if (event.target?.id === "indexPage") event.target.classList.remove("backdropPage");
     };
     document.addEventListener("viewbeforeshow", onBeforeShow, true);
-    document.getElementById("indexPage")?.classList.remove("backdropPage");
+    document.querySelector(JF.homePage)?.classList.remove("backdropPage");
     state.cleanups.push(() => {
       document.removeEventListener("viewbeforeshow", onBeforeShow, true);
-      document.getElementById("indexPage")?.classList.add("backdropPage");
+      document.querySelector(JF.homePage)?.classList.add("backdropPage");
     });
-    try {
-      const response = await fetch(new URL("../HeraTV/config", document.baseURI));
-      if (response.ok) state.config = { ...state.config, ...(await response.json()) };
-    } catch {
-      /* defaults stand */
-    }
-    document.addEventListener("viewshow", onViewShow);
-    // Capture phase, so the profile button's own menu never opens underneath.
-    document.addEventListener("click", onProfileClick, true);
-    state.cleanups.push(() => document.removeEventListener("click", onProfileClick, true));
-    document.addEventListener("pointerover", onPaddleHover, { passive: true });
-    state.cleanups.push(() => document.removeEventListener("pointerover", onPaddleHover));
-    state.cleanups.push(() => controlCenter.dialog?.remove());
-    window.addEventListener("hashchange", onHash);
-    state.cleanups.push(() => document.removeEventListener("viewshow", onViewShow));
-    state.cleanups.push(() => window.removeEventListener("hashchange", onHash));
 
-    // The first page may already be showing when we arrive.
+    await loadConfig();
+    if (health.boot === "safe") return;
+    state.disabled = new Set(Array.isArray(state.config.disabledModules) ? state.config.disabledModules : []);
+    state.disabled.forEach((name) => root.classList.remove("hera-m-" + name));
+    state.ready = true;
+    pending.splice(0).forEach(addModule);
+
+    routeListeners.add({ module: null, fn: ({ page }) => onView(page) });
+    document.addEventListener("viewshow", onViewShow);
+    window.addEventListener("hashchange", onNavigate);
+    window.addEventListener("popstate", onNavigate);
+    document.querySelectorAll(JF.pageRoot).forEach(watchPage);
+    domObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    queueRouteCheck();
+    state.cleanups.push(() => {
+      document.removeEventListener("viewshow", onViewShow);
+      window.removeEventListener("hashchange", onNavigate);
+      window.removeEventListener("popstate", onNavigate);
+      domObserver.disconnect();
+      pageObserver.disconnect();
+      cancelAnimationFrame(route.check);
+      clearTimeout(route.late);
+      clearTimeout(route.nav);
+      clearTimeout(reportTimer);
+    });
+
+    // The ApiClient is checked as soon as it exists: the methods Hera calls must all be there, or
+    // Hera steps aside. What needs a signed-in user waits for one (a signed-out tab has the
+    // ApiClient too, so it is not caught by the watchdog below).
+    let checked = false;
     const waitForApi = setInterval(() => {
-      if (!api() || !userId()) return;
-      appearance.load().catch(() => {});
-      getJSON("System/Info/Public")
-        .then((info) => info?.ServerName && root.style.setProperty("--hera-server", JSON.stringify(info.ServerName)))
-        .catch(() => {});
-      clearInterval(waitForApi);
-      clearTimeout(watchdog);
-      if (health.boot === "starting") health.boot = "ok";
-      checkVersion();
-      onHash();
+      try {
+        const client = api();
+        if (!client) return;
+        if (!checked) {
+          checked = true;
+          const missing = API_REQUIRED.filter((name) => typeof client[name] !== "function");
+          if (missing.length) {
+            clearInterval(waitForApi);
+            clearTimeout(watchdog);
+            safeMode(`Jellyfin's ApiClient has no ${missing.join(", ")}`);
+            return;
+          }
+          const lacking = API_OPTIONAL.filter((name) => typeof client[name] !== "function");
+          report("core", lacking.length ? "partial" : "ok", { missing: lacking.map((name) => `ApiClient.${name}`) });
+          if (health.boot === "starting") health.boot = "ok";
+          checkVersion();
+        }
+        if (!userId()) return;
+        clearInterval(waitForApi);
+        clearTimeout(watchdog);
+        appearance.load().catch(() => {});
+        getJSON("System/Info/Public")
+          .then((info) => info?.ServerName && root.style.setProperty("--hera-server", JSON.stringify(info.ServerName)))
+          .catch(() => {});
+        // The first page may already be showing when we arrive.
+        const page = visiblePage();
+        if (page) onView(page);
+      } catch (error) {
+        clearInterval(waitForApi);
+        clearTimeout(watchdog);
+        safeMode(`Jellyfin's ApiClient failed: ${error?.message || error}`);
+      }
     }, 250);
-    // A web client with no ApiClient long after loading is not one Hera knows: step aside. The
-    // sign-in page has one too, so a signed-out tab isn't caught by this.
+    // A web client with no ApiClient long after loading is not one Hera knows: step aside.
     const watchdog = setTimeout(() => {
       if (!api()) safeMode("Jellyfin's web client has no ApiClient");
     }, 20000);
@@ -2277,7 +2923,6 @@
       item: fetchItem,
       imageUrl,
       runtime,
-      shuffle,
       go,
       play,
       playAction,
@@ -2295,36 +2940,73 @@
       prefs,
       appearances: APPEARANCES,
       isTv: () => root.classList.contains("layout-tv"),
+      /** `kit.jf(module, key, root = document)`: the first match of a Jellyfin piece, or null (a null for a required key marks `module` partial). */
+      jf: jfFirst,
+      /** All matches, as an array; an empty one is a miss the same way. */
+      jfAll,
+      /** `kit.report(module, status, detail?)`: ok | partial | degraded | idle, for a module with no onView; detail is a message or { missing, page, error }. */
+      report,
+      /** `kit.track(module, promise)`: counts the promise's failure against the module (partial, never a strike); resolves to its value or undefined. */
+      track,
+      /** `kit.onRoute(module, fn)`: fn({ hash, path, params, page }) once per navigation, while `module` is active (and once when it subscribes or becomes active, for the current route); returns the unsubscribe. */
+      onRoute,
+      scope,
+      ttlCache,
+      text: textTools,
+      keys: keyTools,
+      /** Core alone owns the <html> view classes: take() for a module's full-page view, release() to give it back. */
+      view: { take: takeView, release: releaseView },
+      /** `kit.intercept(module, target, type, handler, options?)`: a capture-phase listener that detaches while the module is standing aside or off; returns the unsubscribe. */
+      intercept,
+      /** Jellyfin's own localStorage key names (JF_STORAGE); jfUserKey prefixes the signed-in user's id. */
+      storage: {
+        jfKey: (name) => storageName(name, false),
+        jfUserKey: (name) => storageName(name, true),
+      },
+      /** How long a page gets to settle before a missing piece counts (ms). */
+      settleMs: SETTLE_MS,
     },
-    /** Jellyfin's pieces Hera leans on, by name (see "compatibility"). */
+    /** Jellyfin's pieces Hera leans on, by name, and what each is (scope, required) (see "compatibility"). */
     jf: JF,
+    jfMeta: JF_META,
     /** How Hera is getting on with this Jellyfin: boot state and each module's status. */
     health: healthSnapshot,
     /**
-     * Adds a module: `{ name, requires, onView(page, { itemId, params }), teardown() }`.
+     * Adds a module: `{ name, requires, start(), stop(), onView(page, { itemId, params }), teardown() }`.
+     * `start()` runs once the module is registered and the plugin's settings leave it on (so load-time
+     * wiring and namespace exports go there); `stop()` (and `teardown()`) run when it is switched off or
+     * torn down.
      * `requires` maps a page id (or "*") to the names in `jf` the module can't work without on
-     * that page; until they are there, the module is not run on it.
+     * that page; until they are there, the module is not run on it. A module switched off in the
+     * plugin's settings is never run.
      */
-    register(module) {
-      modules.push(module);
-      moduleHealth(module.name);
-      // A module that arrives after the first page still sees it.
-      const page = document.querySelector(JF.page);
-      if (page && api() && userId() && health.boot !== "safe") {
-        runModule(module, page, { itemId: itemIdFromHash(), params: new URLSearchParams(window.location.hash.split("?")[1] || "") });
-      }
+    register: enqueue,
+    /** Called by the bundle when a script threw as it loaded: the module shows as degraded, with the error. */
+    loadFailed(file, error) {
+      const name = file === "hera-tv.js" ? "core" : file.replace(/^hera-/, "").replace(/\.js$/, "");
+      moduleHealth(name).errors += 1;
+      report(name, "degraded", { error: "failed to load " + file + ": " + formatError(error) });
     },
     teardown() {
       state.hero?.destroy();
+      state.hero = null;
       stopHomeWait();
       ambient.remove();
       heroTabObserver.observer?.disconnect();
       state.cleanups.splice(0).forEach((fn) => fn());
-      modules.splice(0).forEach((module) => module.teardown?.());
-      document.querySelectorAll(".hera-seasons, .hera-boxset").forEach((n) => n.remove());
-      root.classList.remove("hera-home");
+      for (const entry of intercepts) attach(entry, false);
+      intercepts.clear();
+      routeListeners.clear();
+      for (const module of modules.splice(0)) stopModule(module);
+      pending.length = 0;
+      document.querySelectorAll(".hera-seasons, .hera-boxset").forEach((node) => node.remove());
+      clearRootClasses();
     },
   };
 
-  start();
+  builtIns.forEach(enqueue);
+  start().catch((error) => {
+    noteFailure("core", error);
+    safeMode(`Hera's core failed to start: ${error?.message || error}`);
+  });
 })();
