@@ -262,6 +262,25 @@ jobs:
         if: ${{ steps.build.outcome == 'failure' }}
         run: exit 1
 
+  # The check branch protection requires. The test jobs are named after the Jellyfin release they
+  # run against, which changes with every Jellyfin bump; this one keeps one name and fails unless
+  # every one of them passed.
+  gate:
+    name: Compatibility
+    needs: [plugin, test]
+    if: ${{ !cancelled() && github.event_name != 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Every compatibility run passed
+        env:
+          PLUGIN: ${{ needs.plugin.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "plugin: $PLUGIN, test: $TEST"
+          [ "$PLUGIN" = success ] && [ "$TEST" = success ]
+
   # One issue per newer Jellyfin tag: opened or updated while either run fails, closed when both pass.
   # Only the nightly run reports, and only for the tags that are not the tested release.
   report:
