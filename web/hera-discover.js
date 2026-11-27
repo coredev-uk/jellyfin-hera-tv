@@ -776,7 +776,9 @@
       "Trailer",
     ]);
     const slide = el("div", { class: "hera-discover__feature-slide", "aria-label": item.title, "data-hera-key": keyOf(item) }, [
-      el("img", { class: "hera-discover__feature-art", src: item.backdrop, alt: "", loading: "lazy", decoding: "async" }),
+      // No src yet: show() hands it over when the slide comes up next. Lazy loading can't defer
+      // these, as the slides are stacked in the viewport, so all six would load at once.
+      el("img", { class: "hera-discover__feature-art", "data-src": item.backdrop, alt: "", decoding: "async" }),
       el("div", { class: "hera-discover__feature-body" }, [
         el("h2", { class: "hera-discover__feature-title", text: item.title }),
         el("p", { class: "hera-hero__meta" }, meta.map((text) => el("span", { text }))),
@@ -858,8 +860,10 @@
       if (same && fromUser) for (const animation of dots[index]?.getAnimations?.({ subtree: true }) ?? []) animation.currentTime = 0;
       if (fromUser && document.activeElement?.classList.contains("hera-hero__dot")) dots[index].focus();
       loadTrailer(slides[index]);
-      const next = slides[(index + 1) % slides.length]?.querySelector("img");
-      if (next) next.loading = "eager";
+      for (const slide of [slides[index], slides[(index + 1) % slides.length]]) {
+        const art = slide?.querySelector("img[data-src]:not([src])");
+        if (art) art.src = art.dataset.src;
+      }
     };
     box.style.setProperty("--hera-hero-interval", `${FEATURE_MS}ms`);
     box.addEventListener("animationend", (event) => {
