@@ -131,28 +131,55 @@ public sealed class IntegrationSettings
             && !string.IsNullOrEmpty(Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value),
     };
 
+    // Read on nearly every request, sometimes in a loop, and building it means some forty environment
+    // reads, URL parsing and a regex: so it is kept for a few seconds. A saved change drops it at once
+    // (Invalidate); a replaced configuration object, or the clock, covers anything else.
+    private static readonly long CurrentForMs = 5000;
+    private static volatile Remembered? _remembered;
+
+    private sealed record Remembered(PluginConfiguration Config, long Expires, IntegrationSettings Value);
+
+    /// <summary>Gets the effective settings: the environment over the plugin's saved configuration.</summary>
     public static IntegrationSettings Current
     {
         get
         {
-            var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-            return new IntegrationSettings(
-                ParseUri(Inspect(SeerrUrlVariable, config.SeerrUrl).Value),
-                Inspect(SeerrPublicUrlVariable, config.SeerrPublicUrl).Value?.TrimEnd('/'),
-                Inspect(SeerrApiKeyVariable, config.SeerrApiKey).Value,
-                ParseUsers(Inspect(SeerrUsersVariable, config.SeerrUsers).Value),
-                ParseUri(Inspect(MaintainerrUrlVariable, config.MaintainerrUrl).Value),
-                Inspect(LetterboxdApiKeyVariable, config.LetterboxdApiKey).Value,
-                Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value,
-                config.LetterboxdEnabled,
-                Arr.ToDictionary(
-                    d => d.Service,
-                    d => (ParseUri(Inspect(d.UrlVariable, d.SavedUrl(config)).Value), Inspect(d.KeyVariable, d.SavedKey(config)).Value)),
-                Arr.ToDictionary(
-                    d => d.Service,
-                    d => Inspect(d.PublicUrlVariable, d.SavedPublic(config)).Value?.TrimEnd('/')));
+            var saved = Plugin.Instance?.Configuration;
+            var now = Environment.TickCount64;
+            if (saved is not null && _remembered is { } hit && ReferenceEquals(hit.Config, saved) && hit.Expires > now)
+            {
+                return hit.Value;
+            }
+
+            var value = Build(saved ?? new PluginConfiguration());
+            if (saved is not null)
+            {
+                _remembered = new Remembered(saved, now + CurrentForMs, value);
+            }
+
+            return value;
         }
     }
+
+    /// <summary>Forgets the remembered settings, so the next read sees what was just saved.</summary>
+    public static void Invalidate() => _remembered = null;
+
+    private static IntegrationSettings Build(PluginConfiguration config)
+        => new(
+            ParseUri(Inspect(SeerrUrlVariable, config.SeerrUrl).Value),
+            Inspect(SeerrPublicUrlVariable, config.SeerrPublicUrl).Value?.TrimEnd('/'),
+            Inspect(SeerrApiKeyVariable, config.SeerrApiKey).Value,
+            ParseUsers(Inspect(SeerrUsersVariable, config.SeerrUsers).Value),
+            ParseUri(Inspect(MaintainerrUrlVariable, config.MaintainerrUrl).Value),
+            Inspect(LetterboxdApiKeyVariable, config.LetterboxdApiKey).Value,
+            Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value,
+            config.LetterboxdEnabled,
+            Arr.ToDictionary(
+                d => d.Service,
+                d => (ParseUri(Inspect(d.UrlVariable, d.SavedUrl(config)).Value), Inspect(d.KeyVariable, d.SavedKey(config)).Value)),
+            Arr.ToDictionary(
+                d => d.Service,
+                d => Inspect(d.PublicUrlVariable, d.SavedPublic(config)).Value?.TrimEnd('/')));
 
     /// <summary>
     /// Where a setting's effective value comes from: the server's environment (which always

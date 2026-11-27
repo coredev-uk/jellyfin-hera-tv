@@ -33,18 +33,23 @@ public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore 
     /// <summary>Asks for the queue to be processed once things have gone quiet for a minute.</summary>
     public void Schedule() => Interlocked.Exchange(ref dueAt, (DateTime.UtcNow + Debounce).Ticks);
 
+    /// <summary>Captures a film someone watched as it is now: its title, ids and the server's local date.</summary>
+    internal static WatchDraft Draft(string userId, MediaBrowser.Controller.Entities.BaseItem item, DateTime watchedLocal)
+        => new(
+            userId,
+            item.Id.ToString("N"),
+            item.TryGetProviderId(MetadataProvider.Tmdb, out var tmdb) ? tmdb : null,
+            item.TryGetProviderId(MetadataProvider.Imdb, out var imdb) ? imdb : null,
+            item.Name ?? string.Empty,
+            item.ProductionYear,
+            Clock.DateString(watchedLocal));
+
     /// <summary>Queues a film someone watched. False when it was already queued for that day, or couldn't be saved.</summary>
     internal bool Enqueue(string userId, MediaBrowser.Controller.Entities.BaseItem item, DateTime watchedLocal)
-        => store.Enqueue(
-            new WatchDraft(
-                userId,
-                item.Id.ToString("N"),
-                item.TryGetProviderId(MetadataProvider.Tmdb, out var tmdb) ? tmdb : null,
-                item.TryGetProviderId(MetadataProvider.Imdb, out var imdb) ? imdb : null,
-                item.Name ?? string.Empty,
-                item.ProductionYear,
-                Clock.DateString(watchedLocal)),
-            DateTime.UtcNow);
+        => store.Enqueue(Draft(userId, item, watchedLocal), DateTime.UtcNow);
+
+    /// <summary>Queues many watches in one step; returns how many were new.</summary>
+    internal int EnqueueMany(IReadOnlyList<WatchDraft> drafts) => store.EnqueueMany(drafts, DateTime.UtcNow);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

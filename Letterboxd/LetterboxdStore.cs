@@ -59,6 +59,9 @@ public sealed class LetterboxdStore
 
     private const int KeepDays = 365;
 
+    // Far more than a run ever settles (see LetterboxdSync.RunCap), so the queue is never read whole.
+    private const int DueLimit = 500;
+
     private const string Schema = """
         CREATE TABLE IF NOT EXISTS links (
             userId TEXT PRIMARY KEY,
@@ -96,6 +99,7 @@ public sealed class LetterboxdStore
     private readonly Lock gate = new();
     private string? path;
     private int faulted;
+    private bool ready;
 
     public LetterboxdStore(ILogger<LetterboxdStore> logger) => this.logger = logger;
 
@@ -214,19 +218,66 @@ public sealed class LetterboxdStore
         false);
 
     /// <summary>
+    /// Queues many watches in one step. Returns how many were new: the rest were already known (the
+    /// same film on the same day). Nothing is queued when the database can't be written.
+    /// </summary>
+    public int EnqueueMany(IReadOnlyList<WatchDraft> drafts, DateTime nowUtc) => drafts.Count == 0 ? 0 : Run(
+        connection =>
+        {
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "INSERT INTO watches (userId, itemId, tmdb, imdb, name, year, watchedOn, state, detail, attempts, updatedAt) " +
+                "VALUES ($user, $item, $tmdb, $imdb, $name, $year, $on, 'pending', NULL, 0, $at) " +
+                "ON CONFLICT (userId, itemId, watchedOn) DO NOTHING";
+            var user = command.Parameters.Add("$user", SqliteType.Text);
+            var item = command.Parameters.Add("$item", SqliteType.Text);
+            var tmdb = command.Parameters.Add("$tmdb", SqliteType.Text);
+            var imdb = command.Parameters.Add("$imdb", SqliteType.Text);
+            var name = command.Parameters.Add("$name", SqliteType.Text);
+            var year = command.Parameters.Add("$year", SqliteType.Integer);
+            var on = command.Parameters.Add("$on", SqliteType.Text);
+            var at = command.Parameters.Add("$at", SqliteType.Text);
+            at.Value = Clock.UtcString(nowUtc);
+            var added = 0;
+            foreach (var draft in drafts)
+            {
+                user.Value = draft.UserId;
+                item.Value = draft.ItemId;
+                tmdb.Value = Db(draft.Tmdb);
+                imdb.Value = Db(draft.Imdb);
+                name.Value = draft.Name;
+                year.Value = draft.Year is { } y ? y : DBNull.Value;
+                on.Value = draft.WatchedOn;
+                if (command.ExecuteNonQuery() > 0)
+                {
+                    added++;
+                }
+            }
+
+            transaction.Commit();
+            return added;
+        },
+        0);
+
+    /// <summary>
     /// Gets what is waiting, oldest watch first so a first watch is logged before its rewatch. Failed
     /// watches are included on request, until they have been tried <see cref="MaxAttempts"/> times.
+    /// At most <paramref name="limit"/> rows per person come back, so one person's long queue never
+    /// keeps everyone else's from the run; a run settles a few dozen, and the rest wait for the next.
     /// </summary>
-    public IReadOnlyList<WatchRow> Due(string? userId, bool includeFailed) => Run(
+    public IReadOnlyList<WatchRow> Due(string? userId, bool includeFailed, int limit = DueLimit) => Run(
         connection =>
         {
             var rows = new List<WatchRow>();
             using var command = connection.CreateCommand();
             command.CommandText =
-                $"SELECT {WatchColumns} FROM watches WHERE (state = 'pending'" +
+                $"SELECT {WatchColumns} FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY userId ORDER BY watchedOn, id) AS place FROM watches WHERE (state = 'pending'" +
                 (includeFailed ? $" OR (state = 'failed' AND attempts < {MaxAttempts.ToString(CultureInfo.InvariantCulture)})" : string.Empty) +
-                ") AND ($user IS NULL OR userId = $user) ORDER BY userId, watchedOn, id";
+                ") AND ($user IS NULL OR userId = $user)) WHERE place <= $limit ORDER BY userId, watchedOn, id";
             command.Parameters.AddWithValue("$user", Db(userId));
+            command.Parameters.AddWithValue("$limit", limit);
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -250,6 +301,31 @@ public sealed class LetterboxdStore
             command.Parameters.AddWithValue("$detail", Db(detail));
             command.Parameters.AddWithValue("$at", Clock.UtcString(nowUtc));
             return command.ExecuteNonQuery() > 0;
+        },
+        false);
+
+    /// <summary>Settles many watches to one state in one step. A failure counts as an attempt.</summary>
+    public bool SettleMany(IReadOnlyList<long> ids, string state, string? detail, DateTime nowUtc) => ids.Count == 0 || Run(
+        connection =>
+        {
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText =
+                "UPDATE watches SET state = $state, detail = $detail, updatedAt = $at, " +
+                "attempts = attempts + CASE WHEN $state = 'failed' THEN 1 ELSE 0 END WHERE id = $id";
+            var id = command.Parameters.Add("$id", SqliteType.Integer);
+            command.Parameters.AddWithValue("$state", state);
+            command.Parameters.AddWithValue("$detail", Db(detail));
+            command.Parameters.AddWithValue("$at", Clock.UtcString(nowUtc));
+            foreach (var one in ids)
+            {
+                id.Value = one;
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+            return true;
         },
         false);
 
@@ -353,10 +429,13 @@ public sealed class LetterboxdStore
                 };
                 using var connection = new SqliteConnection(builder.ConnectionString);
                 connection.Open();
-                using (var schema = connection.CreateCommand())
+                // The tables are made once per process, not on every call.
+                if (!ready)
                 {
+                    using var schema = connection.CreateCommand();
                     schema.CommandText = Schema;
                     schema.ExecuteNonQuery();
+                    ready = true;
                 }
 
                 result = work(connection);
@@ -367,6 +446,8 @@ public sealed class LetterboxdStore
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            // A database that went wrong may be gone or replaced: make the tables again next time.
+            ready = false;
             if (Interlocked.Exchange(ref faulted, 1) == 0)
             {
                 logger.LogWarning(ex, "Hera TV couldn't use its Letterboxd database; films aren't being queued or logged until it can. Further failures are logged at debug level");

@@ -20,7 +20,7 @@
   const FADE_OUT = 200;
   const NAV_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"];
 
-  const osd = { timer: 0 };
+  const osd = { timer: 0, stop: null };
 
   // What the server says is playing in this browser: the item, its position and the session id
   // that remote commands (restart) are addressed to. The page has no public handle on any of it.
@@ -60,16 +60,43 @@
     controls.prepend(node);
   };
 
-  const followPlayer = (page) => {
+  // Autoplay moves on to the next episode by loading it into the same <video>, so the title is
+  // looked up again when a new one loads (a moment later, once playback registers with the server).
+  // A slow poll is the net under it, and nothing runs while the tab is hidden.
+  const stopFollow = () => {
     clearInterval(osd.timer);
-    const tick = () => renderOsdTitle(page).catch(() => {});
-    tick();
+    osd.stop?.();
+    osd.stop = null;
+  };
+
+  const followPlayer = (page) => {
+    stopFollow();
+    const tick = () => {
+      if (!document.hidden) renderOsdTitle(page).catch(() => {});
+    };
+    renderOsdTitle(page).catch(() => {});
     // Playback registers with the server a moment after the page shows.
     setTimeout(tick, 2500);
     osd.timer = setInterval(() => {
-      if (page.classList.contains("hide") || !page.isConnected) clearInterval(osd.timer);
+      if (page.classList.contains("hide") || !page.isConnected) stopFollow();
       else tick();
-    }, 10000);
+    }, 60000);
+    let settle = 0;
+    // Media events do not bubble; the capture phase sees them whichever <video> the player uses.
+    const onMedia = (event) => {
+      if (!(event.target instanceof HTMLVideoElement)) return;
+      clearTimeout(settle);
+      settle = setTimeout(tick, 2500);
+    };
+    document.addEventListener("loadedmetadata", onMedia, true);
+    document.addEventListener("emptied", onMedia, true);
+    document.addEventListener("visibilitychange", tick);
+    osd.stop = () => {
+      clearTimeout(settle);
+      document.removeEventListener("loadedmetadata", onMedia, true);
+      document.removeEventListener("emptied", onMedia, true);
+      document.removeEventListener("visibilitychange", tick);
+    };
   };
 
   // ---------- always dark ------------------------------------------------------------------
@@ -176,9 +203,14 @@
     return !!v && v.paused && !v.ended && !v.seeking && v.readyState > 0;
   };
 
+  // The few titles the pause screen has shown; the oldest goes when a new one comes in.
+  const DETAILS_KEPT = 12;
   const loadDetails = async (id) => {
     const cache = pauseScreen.details;
-    if (!cache.has(id)) cache.set(id, getJSON(`Users/${userId()}/Items/${id}`).catch(() => null));
+    if (!cache.has(id)) {
+      if (cache.size >= DETAILS_KEPT) cache.delete(cache.keys().next().value);
+      cache.set(id, getJSON(`Users/${userId()}/Items/${id}`).catch(() => null));
+    }
     return cache.get(id);
   };
 
@@ -578,8 +610,19 @@
   // it is playing, so one that fails anyway gives way to the next unseen.
   const START_MS = 12000;
 
+  // A title page mounts twice (its viewshow, then the late remount for redrawn sections): ask the
+  // server once per title for the session, forgetting a failed ask; the server keeps its own answer.
+  const trailerChecks = new Map(); // itemId -> promise of the server's answer
   const trailerIds = async (item) => {
-    const checked = await hera(`trailers/${item.Id}`).catch(() => null);
+    if (!trailerChecks.has(item.Id)) {
+      if (trailerChecks.size >= 50) trailerChecks.delete(trailerChecks.keys().next().value);
+      const ask = hera(`trailers/${item.Id}`).catch(() => {
+        trailerChecks.delete(item.Id);
+        return null;
+      });
+      trailerChecks.set(item.Id, ask);
+    }
+    const checked = await trailerChecks.get(item.Id);
     if (Array.isArray(checked?.youtube)) return checked.youtube;
     return [...new Set((item.RemoteTrailers || []).map((trailer) => youTubeId(trailer.Url)).filter(Boolean))];
   };
@@ -1185,7 +1228,7 @@
       detail.bound.add(page);
       page.addEventListener("click", onTrailerButton, true);
     }
-    const item = await api().getItem(userId(), itemId).catch(() => null);
+    const item = await heraTv.kit.item(itemId).catch(() => null);
     // A trailer file, or no trailer at all: Jellyfin's button as it is.
     if (!item || run !== detail.run || item.LocalTrailerCount > 0 || !item.RemoteTrailers?.length) return;
     detail.item = item;
@@ -1212,7 +1255,7 @@
     name: "player",
     onView(page) {
       if (page?.id !== "videoOsdPage") {
-        clearInterval(osd.timer);
+        stopFollow();
         stopDark();
         stopSkip();
         return;
@@ -1222,7 +1265,7 @@
       followSkip(page);
     },
     teardown() {
-      clearInterval(osd.timer);
+      stopFollow();
       stopDark();
       stopSkip();
     },

@@ -645,9 +645,11 @@ html.hera-osd-up .skip-button-container {
   font-size: 24px;
 }
 /* The cursor shows while it moves over the pause screen (Jellyfin hid it with the OSD and
- * doesn't hear the movement; hera-player.js sets has-pointer and clears it once it rests). */
-body.mouseIdle:has(.hera-pause.has-pointer),
-body.mouseIdle:has(.hera-pause.has-pointer) * {
+ * doesn't hear the movement; hera-player.js sets has-pointer and clears it once it rests). The
+ * screen covers the viewport, so its own subtree is enough: a body:has() here made every DOM
+ * insertion anywhere restyle the whole document, a second of work per scroll down the home page. */
+body.mouseIdle .hera-pause.has-pointer,
+body.mouseIdle .hera-pause.has-pointer * {
   cursor: default !important;
 }
 body.mouseIdle .hera-pause.has-pointer .hera-pause__button {

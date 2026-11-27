@@ -41,13 +41,16 @@
 
   const cache = new Map();
   const cached = (key, load, ttl = 3 * 60 * 1000) => {
+    const now = Date.now();
     const hit = cache.get(key);
-    if (hit && Date.now() - hit.at < ttl) return hit.promise;
+    if (hit && now - hit.at < hit.ttl) return hit.promise;
     const promise = Promise.resolve(load()).catch((error) => {
       cache.delete(key);
       throw error;
     });
-    cache.set(key, { at: Date.now(), promise });
+    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
+    for (const [k, v] of cache) if (now - v.at >= v.ttl) cache.delete(k);
+    cache.set(key, { at: now, ttl, promise });
     return promise;
   };
 
@@ -106,6 +109,8 @@
         .then((reply) => {
           const found = reply?.activity ? activity.describe(reply.activity) : null;
           if (!found || found.final) return;
+          // Only the latest few hundred are kept; the oldest label goes first.
+          if (liveLabels.size >= 300) liveLabels.delete(liveLabels.keys().next().value);
           liveLabels.set(keyOf(item), found.label);
           refreshCards(keyOf(item));
         })
@@ -813,12 +818,19 @@
     ]);
 
     let index = 0;
-    let elapsed = 0;
-    let last = 0;
     let paused = false;
     const holds = new Set();
+    // The carousel's timer is the selected dot's fill, a CSS animation (hera-tv.css .hera-hero__dot):
+    // its animationend moves on, and a hold (hover, focus, off screen, hidden, paused) stops it where
+    // it is. Nothing runs per frame, so a carousel nobody sees costs nothing.
+    const hold = (reason, on) => {
+      if (on) holds.add(reason);
+      else holds.delete(reason);
+      box.classList.toggle("is-held", holds.size > 0);
+    };
     const setPaused = (value) => {
       paused = value;
+      hold("user", value);
       toggle.setAttribute("aria-label", value ? "Play featured titles" : "Pause featured titles");
       toggle.querySelector(".material-icons").textContent = value ? "play_arrow" : "pause";
     };
@@ -835,37 +847,29 @@
         .catch(() => {});
     };
     const show = (target, fromUser = false) => {
+      const same = target === index;
       index = (target + slides.length) % slides.length;
-      elapsed = 0;
       slides.forEach((slide, i) => {
         slide.classList.toggle("is-active", i === index);
         slide.toggleAttribute("inert", i !== index);
       });
-      dots.forEach((dot, i) => {
-        dot.setAttribute("aria-selected", String(i === index));
-        dot.style.removeProperty("--hera-progress");
-      });
+      dots.forEach((dot, i) => dot.setAttribute("aria-selected", String(i === index)));
+      // Choosing the title already showing starts its timer again.
+      if (same && fromUser) for (const animation of dots[index]?.getAnimations?.({ subtree: true }) ?? []) animation.currentTime = 0;
       if (fromUser && document.activeElement?.classList.contains("hera-hero__dot")) dots[index].focus();
       loadTrailer(slides[index]);
       const next = slides[(index + 1) % slides.length]?.querySelector("img");
       if (next) next.loading = "eager";
     };
-    const tick = (now) => {
-      if (signal.aborted || (last && !box.isConnected)) return;
-      const dt = last ? Math.min(now - last, 100) : 0;
-      last = now;
-      if (slides.length > 1 && !paused && holds.size === 0 && !document.hidden) {
-        elapsed += dt;
-        if (elapsed >= FEATURE_MS) show(index + 1);
-        else dots[index]?.style.setProperty("--hera-progress", (elapsed / FEATURE_MS).toFixed(4));
-      }
-      requestAnimationFrame(tick);
-    };
-    box.addEventListener("pointerenter", () => holds.add("hover"));
-    box.addEventListener("pointerleave", () => holds.delete("hover"));
-    box.addEventListener("focusin", () => holds.add("focus"));
+    box.style.setProperty("--hera-hero-interval", `${FEATURE_MS}ms`);
+    box.addEventListener("animationend", (event) => {
+      if (event.animationName === "hera-hero-progress" && event.target === dots[index]) show(index + 1);
+    });
+    box.addEventListener("pointerenter", () => hold("hover", true));
+    box.addEventListener("pointerleave", () => hold("hover", false));
+    box.addEventListener("focusin", () => hold("focus", true));
     box.addEventListener("focusout", (event) => {
-      if (!box.contains(event.relatedTarget)) holds.delete("focus");
+      if (!box.contains(event.relatedTarget)) hold("focus", false);
     });
     box.addEventListener("keydown", (event) => {
       if ((event.key === "ArrowRight" || event.key === "ArrowLeft") && event.target.closest(".hera-hero__pager")) {
@@ -876,7 +880,19 @@
     });
     show(0);
     if (kit.reduceMotion.matches) setPaused(true);
-    requestAnimationFrame(tick);
+    if (slides.length > 1) {
+      const seen = new IntersectionObserver(([entry]) => hold("offscreen", !(entry.isIntersecting && entry.intersectionRatio > 0.4)), { threshold: [0, 0.4, 1] });
+      const onVisibility = () => hold("hidden", document.hidden);
+      seen.observe(box);
+      document.addEventListener("visibilitychange", onVisibility);
+      onVisibility();
+      signal.addEventListener("abort", () => {
+        seen.disconnect();
+        document.removeEventListener("visibilitychange", onVisibility);
+      }, { once: true });
+    } else {
+      hold("single", true);
+    }
     return box;
   };
 
@@ -909,7 +925,20 @@
       }
       loading = false;
     };
-    track.addEventListener("scroll", more, { passive: true });
+    // The layout reads in `more` run once a frame however fast the row scrolls.
+    let queued = false;
+    track.addEventListener(
+      "scroll",
+      () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          more();
+        });
+      },
+      { passive: true },
+    );
     return row;
   };
 
@@ -1135,6 +1164,7 @@
   };
 
   const updateTabs = () => {
+    attachChrome?.();
     const active = Boolean(view.root);
     const { stack, slider } = tabsFor();
 
@@ -1184,6 +1214,9 @@
     }
   };
 
+  // Only the header and tab strip matter here, so only they are watched: the whole page changes far
+  // more often. A header that is drawn again is picked up at the next view or hash change.
+  let attachChrome = null;
   const observeChrome = () => {
     let queued = false;
     const observer = new MutationObserver(() => {
@@ -1194,20 +1227,33 @@
         if (seerrOn) updateTabs();
       });
     });
-    observer.observe(document.body, { childList: true, subtree: true });
-    cleanups.push(() => observer.disconnect());
+    const watched = new WeakSet();
+    attachChrome = () => {
+      for (const node of document.querySelectorAll(`.MuiAppBar-root, ${HT.jf.legacyHeader}`)) {
+        if (watched.has(node)) continue;
+        watched.add(node);
+        observer.observe(node, { childList: true, subtree: true });
+      }
+    };
+    attachChrome();
+    cleanups.push(() => {
+      observer.disconnect();
+      attachChrome = null;
+    });
   };
 
   // ---------- series pages --------------------------------------------------------------
 
   const missing = new Map(); // series id -> Promise<{ tmdbId, seasons[] } | null>
+  const MISSING_KEPT = 30;
 
   const loadMissing = (itemId) => {
     if (!missing.has(itemId)) {
+      if (missing.size >= MISSING_KEPT) missing.delete(missing.keys().next().value);
       missing.set(
         itemId,
         (async () => {
-          const item = await kit.api().getItem(kit.userId(), itemId);
+          const item = await kit.item(itemId);
           const tmdbId = item?.Type === "Series" ? item.ProviderIds?.Tmdb : null;
           if (!tmdbId) return null;
           const [details, have] = await Promise.all([

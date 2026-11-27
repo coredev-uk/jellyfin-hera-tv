@@ -35,6 +35,7 @@ public partial class ExtrasController(
 
     private static readonly TimeSpan BadgeTtl = TimeSpan.FromMinutes(30);
     private static readonly ConcurrentDictionary<Guid, (DateTime Expires, string[] Badges)> BadgeCache = new();
+    private const int MaxBadgeEntries = 4000;
 
     // A provider offered again as an ad tier or as a channel inside another service adds nothing.
     [GeneratedRegex(@"\s+(Standard )?with Ads$|\s+(Amazon|Apple TV|Roku Premium|Prime Video) Channel$", RegexOptions.IgnoreCase)]
@@ -95,17 +96,18 @@ public partial class ExtrasController(
             return Ok(result);
         }
 
-        foreach (var raw in (ids ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(MaxBadgeIds))
+        var wanted = (ids ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(MaxBadgeIds)
+            .Select(raw => Guid.TryParse(raw, out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (wanted.Length > 0)
         {
-            if (!Guid.TryParse(raw, out var id))
+            // One query settles which of them this person may see, however many are asked for.
+            foreach (var item in libraryManager.GetItemList(new InternalItemsQuery(user) { ItemIds = wanted }))
             {
-                continue;
-            }
-
-            var item = libraryManager.GetItemById(id);
-            if (item is not null && item.IsVisible(user))
-            {
-                result[id.ToString("N", CultureInfo.InvariantCulture)] = BadgesOf(item, user);
+                result[item.Id.ToString("N", CultureInfo.InvariantCulture)] = BadgesOf(item, user);
             }
         }
 
@@ -294,12 +296,8 @@ public partial class ExtrasController(
         }
 
         var badges = new[] { "4k", "dv", "hdr", "atmos", "7.1", "5.1" }.Where(found.Contains).ToArray();
-        if (BadgeCache.Count > 4000)
-        {
-            BadgeCache.Clear();
-        }
-
         BadgeCache[item.Id] = (now + BadgeTtl, badges);
+        CachePruning.Prune(BadgeCache, MaxBadgeEntries, e => e.Expires, item.Id);
         return badges;
     }
 

@@ -21,10 +21,11 @@ public class ActivityController(UpstreamClient upstream, UserRequests requests, 
 
     /// <summary>
     /// The signed-in user's own Seerr requests, one per title, each with its state in the download
-    /// stack. An administrator may read another user's with <c>?user=name</c>.
+    /// stack. An administrator may read another user's with <c>?user=name</c>. <c>take</c> is at most
+    /// 60 a call; <c>skip</c> pages past that.
     /// </summary>
     [HttpGet("requests")]
-    public async Task<IActionResult> GetRequests([FromQuery] int take = 20, [FromQuery] string? user = null)
+    public async Task<IActionResult> GetRequests([FromQuery] int take = 20, [FromQuery] string? user = null, [FromQuery] int skip = 0)
     {
         var viewer = CurrentUser();
         if (viewer is null)
@@ -53,13 +54,13 @@ public class ActivityController(UpstreamClient upstream, UserRequests requests, 
             return Ok(Array.Empty<object>());
         }
 
-        var loaded = await requests.LoadAsync(seerrUser.Value, Math.Clamp(take, 1, MaxRequests)).ConfigureAwait(false);
+        var loaded = await requests.LoadAsync(seerrUser.Value, Math.Clamp(take, 1, MaxRequests), Math.Max(skip, 0)).ConfigureAwait(false);
         var settings = IntegrationSettings.Current;
         var admin = IsAdmin();
 
         var rows = (loaded?.Entries ?? []).Select(e => new
         {
-            item = SeerrMapper.Item(e.Title, target, library),
+            item = SeerrMapper.Item(e.Title, e.Type, target, library),
             requestStatus = e.Status,
             requestedAt = e.RequestedAt,
             seasons = e.Seasons.Order().ToArray(),

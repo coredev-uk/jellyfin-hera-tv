@@ -190,12 +190,7 @@ public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync
     }
 
     private void Settle(List<WatchRow> rows, string state, string detail)
-    {
-        foreach (var row in rows)
-        {
-            store.Settle(row.Id, state, detail, DateTime.UtcNow);
-        }
-    }
+        => store.SettleMany([.. rows.Select(r => r.Id)], state, detail, DateTime.UtcNow);
 
     /// <summary>Logs a failure the first time, then at debug level until a run goes clean again.</summary>
     private void Fault(string what, Exception ex)

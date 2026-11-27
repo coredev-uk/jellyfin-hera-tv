@@ -15,8 +15,15 @@ public static class SeerrMapper
 
     /// <summary>Maps a movie or TV record (<c>mediaType</c> set) to the client's title shape.</summary>
     public static object Item(JsonNode node, User user, LibraryLookup library)
+        => Item(node, (string?)node["mediaType"], user, library);
+
+    /// <summary>
+    /// Maps a movie or TV record to the client's title shape, given its media type. For a record
+    /// that comes straight from the shared cache and so has no <c>mediaType</c>, which it mustn't be given.
+    /// </summary>
+    public static object Item(JsonNode node, string? mediaType, User user, LibraryLookup library)
     {
-        var type = (string?)node["mediaType"] == "tv" ? "tv" : "movie";
+        var type = mediaType == "tv" ? "tv" : "movie";
         var tmdbId = node["id"]?.ToString();
         var inLibrary = library.Find(user, type, tmdbId);
         var date = (string?)node["releaseDate"] ?? (string?)node["firstAirDate"];

@@ -39,10 +39,11 @@
 
   // ---------- data ------------------------------------------------------------------------
 
-  /** One fetch per key, remembered for `ttl` ms; a failure is forgotten at once. */
+  /** One fetch per key, remembered for `ttl` ms; a failure is forgotten at once, and so is whatever has expired. */
   const load = (key, ttl, fetcher) => {
+    const now = Date.now();
     const entry = state.cache.get(key);
-    if (entry && Date.now() - entry.at < ttl) return entry.promise;
+    if (entry && now - entry.at < entry.ttl) return entry.promise;
     const promise = Promise.resolve()
       .then(fetcher)
       .catch((error) => {
@@ -50,7 +51,8 @@
         console.warn(`[Hera TV:home] ${key}`, error);
         return null;
       });
-    state.cache.set(key, { at: Date.now(), promise });
+    for (const [k, v] of state.cache) if (now - v.at >= v.ttl) state.cache.delete(k);
+    state.cache.set(key, { at: now, ttl, promise });
     return promise;
   };
 
@@ -351,7 +353,7 @@
 
   // The row's cards show where each request really stands (hera-activity.js): the download
   // stack's state, and a progress bar while it downloads. They update in place while the page shows.
-  let requestsBusy = false;
+  let requestTags = []; // "key:state" per request in the row, for the poll's pacing
 
   const requestsRow = async () => {
     const { seerrLinked, features } = await kit.integrations();
@@ -364,7 +366,7 @@
       // What is moving comes first, then what waits, then what has arrived; newest first within each.
       .sort((a, b) => activity.rankOf(a.d) - activity.rankOf(b.d) || String(b.request.requestedAt).localeCompare(String(a.request.requestedAt)))
       .slice(0, SHELF_LIMIT);
-    requestsBusy = entries.some((entry) => !entry.d.final);
+    requestTags = entries.map((entry) => `${activity.keyOf(entry.request)}:${entry.d.state}`);
     if (!entries.length) return null;
     return {
       title: "Your Requests",
@@ -382,29 +384,67 @@
     };
   };
 
-  // While the home page shows, a request in motion refreshes every few seconds, a quiet list every half minute.
+  // While the home page shows, a request in motion refreshes every few seconds, one that only waits
+  // backs off, and a quiet list takes half a minute. Nothing runs while the row is off screen or the
+  // tab is hidden; it picks up again, at once, when the row scrolls back into view.
   let requestsTimer = 0;
+  const watching = { io: null, row: null, seen: false, wake: null };
   const stopRequestsPoll = () => {
     clearTimeout(requestsTimer);
     requestsTimer = 0;
+    watching.wake = null;
+    document.removeEventListener("visibilitychange", onRequestsVisible);
+  };
+  function onRequestsVisible() {
+    if (!document.hidden) watching.wake?.();
+  }
+  /** Follows the Your Requests row, which is rebuilt when its titles change. */
+  const watchRequestsRow = () => {
+    const row = state.shown.get("requests")?.row ?? null;
+    if (row === watching.row) return;
+    watching.io?.disconnect();
+    watching.io = null;
+    watching.row = row;
+    watching.seen = false;
+    if (!row) return;
+    watching.io = new IntersectionObserver((entries) => {
+      watching.seen = entries[entries.length - 1].isIntersecting;
+      if (watching.seen) watching.wake?.();
+    });
+    watching.io.observe(row);
   };
   const pollRequests = (page) => {
     stopRequestsPoll();
     const run = state.run;
-    const tick = async () => {
-      if (run !== state.run || !page.isConnected || page.classList.contains("hide")) return;
-      const onDiscover = new URLSearchParams(window.location.hash.split("?")[1] || "").get("hera");
-      if (!document.hidden && !onDiscover && state.shown.has("requests")) {
-        try {
-          const spec = await requestsRow();
-          if (run === state.run && page.isConnected) show("requests", spec);
-        } catch (error) {
-          console.warn("[Hera TV:home] requests", error);
-        }
-      }
-      requestsTimer = setTimeout(tick, requestsBusy ? 8000 : 30000);
+    const pace = heraTv.activity?.pacer?.();
+    let running = false;
+    const live = () => run === state.run && page.isConnected && !page.classList.contains("hide");
+    const schedule = (ms) => {
+      clearTimeout(requestsTimer);
+      requestsTimer = setTimeout(tick, ms);
     };
-    requestsTimer = setTimeout(tick, 8000);
+    async function tick() {
+      requestsTimer = 0;
+      if (!live()) return;
+      const onDiscover = new URLSearchParams(window.location.hash.split("?")[1] || "").get("hera");
+      if (document.hidden || onDiscover || !watching.seen || !state.shown.has("requests")) return;
+      let wait = 30000;
+      running = true;
+      try {
+        const spec = await requestsRow();
+        if (run === state.run && page.isConnected) show("requests", spec);
+        if (pace) wait = pace(requestTags);
+      } catch (error) {
+        console.warn("[Hera TV:home] requests", error);
+      }
+      running = false;
+      if (live() && !requestsTimer) schedule(wait);
+    }
+    watching.wake = () => {
+      if (!running && !requestsTimer && live()) schedule(0);
+    };
+    document.addEventListener("visibilitychange", onRequestsVisible);
+    schedule(8000);
   };
 
   const trendingRow = async () => {
@@ -458,6 +498,7 @@
   const removeRow = (id) => {
     state.shown.get(id)?.row.remove();
     state.shown.delete(id);
+    if (id === "requests") watchRequestsRow();
   };
 
   const setHidden = (hidden) => {
@@ -511,6 +552,7 @@
       }
     });
     state.shown.set(id, { sig, row });
+    if (id === "requests") watchRequestsRow();
     kit.mountRow(row, place);
   };
 
@@ -772,6 +814,9 @@
       state.kept = null;
       clearChips();
       stopRequestsPoll();
+      watching.io?.disconnect();
+      watching.io = null;
+      watching.row = null;
     },
   });
 })();

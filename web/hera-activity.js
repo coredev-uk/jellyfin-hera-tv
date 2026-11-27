@@ -27,8 +27,13 @@
   };
 
   const REQUESTS_HASH = "#/home?hera=requests";
+  // How often to look again. A title that moves (downloading, importing, queued, searching) is
+  // worth 8 s; one that only waits on a person or a release (awaiting approval, approved) backs
+  // off 8, 15, 30 then 60 s for as long as the answer stays the same; a settled list takes 30 s.
   const BUSY_MS = 8000;
   const IDLE_MS = 30000;
+  const BACKOFF_MS = [8000, 15000, 30000, 60000];
+  const SHOW_FIRST = 12; // rows of Available and Declined shown before "Show more"
 
   // ---------- wording ----------------------------------------------------------------------
 
@@ -156,14 +161,40 @@
   // What to list first: what moves, then what waits, then what is done.
   const RANK = { downloading: 0, importing: 1, queued: 2, attention: 3, failed: 4, searching: 5, partial: 6, waiting: 7, pending: 8, processing: 9, approved: 9, unmonitored: 10, available: 20, declined: 21 };
   const rankOf = (d) => RANK[d.state] ?? 12;
-  const BUSY = new Set(["downloading", "importing", "queued", "attention", "searching", "partial", "pending", "processing", "approved"]);
+  const LIVE = new Set(["downloading", "importing", "queued", "searching"]);
+  const WAITING = new Set(["attention", "partial", "pending", "processing", "approved"]);
+  const stateOf = (tag) => tag.slice(tag.lastIndexOf(":") + 1);
+
+  /**
+   * Decides how long to wait before asking again. `tags` is a list of `"key:state"` strings, one
+   * per title. Anything live is 8 s; otherwise titles that wait back off while the same set waits.
+   */
+  const pacer = () => {
+    let last = null;
+    let stage = 0;
+    return (tags) => {
+      if (tags.some((tag) => LIVE.has(stateOf(tag)))) {
+        last = null;
+        return BUSY_MS;
+      }
+      const waiting = tags.filter((tag) => WAITING.has(stateOf(tag))).sort().join("|");
+      if (!waiting) {
+        last = null;
+        return IDLE_MS;
+      }
+      stage = waiting === last ? Math.min(stage + 1, BACKOFF_MS.length - 1) : 0;
+      last = waiting;
+      return BACKOFF_MS[stage];
+    };
+  };
 
   // ---------- data ----------------------------------------------------------------------------
 
   const memo = new Map();
   const cached = (key, ttl, load) => {
+    const now = Date.now();
     const hit = memo.get(key);
-    if (hit && Date.now() - hit.at < ttl) return hit.promise;
+    if (hit && now - hit.at < hit.ttl) return hit.promise;
     const promise = Promise.resolve()
       .then(load)
       .catch((error) => {
@@ -171,7 +202,9 @@
         console.warn(`[Hera TV:activity] ${key}`, error);
         return null;
       });
-    memo.set(key, { at: Date.now(), promise });
+    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
+    for (const [k, v] of memo) if (now - v.at >= v.ttl) memo.delete(k);
+    memo.set(key, { at: now, ttl, promise });
     return promise;
   };
 
@@ -195,29 +228,33 @@
   // A title's state and "open in" links are worth a call when Seerr or the download stack is there.
   const titleInfoOn = (ints) => Boolean(ints?.seerr) || activityOn(ints);
 
-  /** Runs `step` every few seconds while `alive()`; a step that returns true is busy and runs sooner. */
+  /**
+   * Runs `step` while `alive()`; `step` returns the wait in ms before the next run. Nothing runs
+   * while the tab is hidden, and the poll picks up again when it shows.
+   */
   const poll = (step, alive) => {
     let timer = 0;
     let stopped = false;
-    const next = (ms) => {
-      if (!stopped) timer = setTimeout(tick, ms);
-    };
     const tick = async () => {
-      if (stopped || !alive()) return;
-      let busy = true;
-      if (!document.hidden) {
-        try {
-          busy = await step();
-        } catch (error) {
-          console.warn("[Hera TV:activity]", error);
-        }
+      timer = 0;
+      if (stopped || !alive() || document.hidden) return;
+      let wait = IDLE_MS;
+      try {
+        wait = await step();
+      } catch (error) {
+        console.warn("[Hera TV:activity]", error);
       }
-      next(busy ? BUSY_MS : IDLE_MS);
+      if (!stopped && !timer && !document.hidden) timer = setTimeout(tick, wait);
     };
-    next(BUSY_MS);
+    const onVisible = () => {
+      if (!document.hidden && !stopped && !timer) timer = setTimeout(tick, 0);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    timer = setTimeout(tick, BUSY_MS);
     return () => {
       stopped = true;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   };
 
@@ -302,9 +339,10 @@
     const ext = separate ?? linksHost();
     host.replaceChildren(...(separate ? [line] : [line, ext]));
     let stopped = false;
+    const pace = pacer();
     const refresh = async () => {
       const reply = await fetchTitle(mediaType, tmdbId, tvdb);
-      if (stopped || !host.isConnected) return false;
+      if (stopped || !host.isConnected) return IDLE_MS;
       const a = reply?.activity ?? null;
       const show = Boolean(a && SHOWN.has(a.state));
       if (show) fillLine(line, describe(a));
@@ -312,7 +350,7 @@
       paintLinks(ext, reply?.links);
       host.hidden = line.hidden && (separate ? true : ext.hidden);
       onChange?.(show ? a : null);
-      return show && BUSY.has(a.state);
+      return pace(show ? [`title:${a.state}`] : []);
     };
     const stopPoll = poll(refresh, () => !stopped && host.isConnected);
     refresh();
@@ -405,7 +443,7 @@
     const run = detail.run;
     const ints = await kit.integrations();
     if (run !== detail.run || !titleInfoOn(ints)) return;
-    const item = await kit.api().getItem(kit.userId(), itemId);
+    const item = await kit.item(itemId);
     if (run !== detail.run) return;
     const tmdbId = item?.ProviderIds?.Tmdb;
     if (!tmdbId || (item.Type !== "Movie" && item.Type !== "Series")) return;
@@ -559,30 +597,44 @@
     const heading = el("h1", { class: "hera-av__title", text: "Requests" });
     const head = el("header", { class: "hera-av__head" }, [ints.seerr ? back : null, heading]);
 
-    const section = (id, title, aside) => {
+    const section = (id, title, { aside = false, collapsible = false } = {}) => {
       const list = el("div", { class: "hera-av__list", role: "group", "aria-labelledby": `hera-av-${id}` });
       const summary = aside ? el("p", { class: "hera-av__summary" }) : null;
       const links = aside ? linksHost() : null;
+      const more = collapsible ? el("button", { class: "hera-btn hera-btn--glass hera-btn--text hera-av__more", type: "button", hidden: true }) : null;
       const node = el("section", { class: "hera-av__section", hidden: true }, [
         el("div", { class: "hera-av__section-head" }, [
           el("h2", { class: "hera-av__heading", id: `hera-av-${id}`, text: title }),
           aside ? el("div", { class: "hera-av__aside" }, [summary, links]) : null,
         ]),
         list,
+        more,
       ]);
-      return { node, list, summary, links };
+      return { node, list, summary, links, more, expanded: false };
     };
 
     const progress = section("progress", "In Progress");
-    const done = section("done", "Available");
-    const declined = section("declined", "Declined");
-    const downloads = section("downloads", "Downloads", true);
+    const done = section("done", "Available", { collapsible: true });
+    const declined = section("declined", "Declined", { collapsible: true });
+    const downloads = section("downloads", "Downloads", { aside: true });
+
+    for (const box of [done, declined]) {
+      box.more.addEventListener("click", () => {
+        box.expanded = true;
+        const first = box.list.children.length;
+        render(last.requests, last.queue);
+        box.list.children[first]?.querySelector("a, button")?.focus();
+      });
+    }
+
     const empty = el("p", { class: "hera-av__empty", role: "status", hidden: true });
     const rootEl = el("div", { class: "hera-av", "data-hera-requests": "" }, [head, empty, progress.node, done.node, declined.node, downloads.node]);
 
+    // Only the first rows of a long section are built; "Show more" brings in the rest.
     const rows = new Map();
     const place = (box, entries, build, update, keyFn) => {
-      const nodes = entries.map((entry) => {
+      const shown = box.more && !box.expanded ? entries.slice(0, SHOW_FIRST) : entries;
+      const nodes = shown.map((entry) => {
         const key = keyFn(entry);
         let node = rows.get(key);
         if (!node) {
@@ -593,10 +645,19 @@
         return node;
       });
       arrange(box.list, nodes);
+      if (box.more) {
+        box.more.hidden = shown.length >= entries.length;
+        box.more.textContent = `Show ${entries.length - shown.length} more`;
+      }
       box.node.hidden = !nodes.length;
     };
 
+    const pace = pacer();
+    let last = { requests: [], queue: null };
+
+    /** Paints both lists; returns a `"key:state"` tag per title for the pacer. */
     const render = (requests, queue) => {
+      last = { requests, queue };
       const described = requests
         .filter((r) => r.item?.title)
         .map((request) => ({ request, d: describeRequest(request) }))
@@ -629,7 +690,9 @@
           ? "You haven't requested anything yet. Find something in Discover and it will show up here."
           : "Your Jellyfin account isn't linked to Seerr, so there are no requests to show.";
       }
-      return described.some((entry) => BUSY.has(entry.d.state)) || Boolean(queue?.items?.length);
+      const tags = described.map((entry) => `${keyOf(entry.request)}:${entry.d.state}`);
+      if (queue?.items?.length) tags.push("queue:downloading");
+      return tags;
     };
 
     const load = async () => {
@@ -638,8 +701,8 @@
         ints.seerrLinked ? fetchRequests(60) : Promise.resolve([]),
         wantQueue ? fetchDownloads() : Promise.resolve(null),
       ]);
-      if (signal.aborted) return false;
-      return render(requests ?? [], queue);
+      if (signal.aborted) return IDLE_MS;
+      return pace(render(requests ?? [], queue));
     };
 
     // The first paint shows what is there; a failed load says so.
@@ -732,6 +795,7 @@
     fetchRequests,
     fetchTitle,
     keyOf,
+    pacer,
     rankOf,
     hash: REQUESTS_HASH,
   };

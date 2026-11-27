@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
@@ -52,6 +51,7 @@ internal sealed class CollectionsView(
 {
     private static readonly TimeSpan GroupsFor = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan RowsFor = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan SetsFor = TimeSpan.FromSeconds(60);
 
     private const int RowSize = 12;
     private const int RowMinimum = 3;
@@ -65,26 +65,37 @@ internal sealed class CollectionsView(
     private const int AwardsMinimum = 4;
     private const int HomegrownMinimum = 6;
 
-    private readonly ConcurrentDictionary<Guid, (DateTime Expires, object Value)> _groups = new();
-    private readonly ConcurrentDictionary<Guid, (DateTime Expires, object Value)> _rows = new();
-    private readonly Lock _popularGate = new();
-    private (DateTime Expires, IReadOnlyList<Guid> Ids)? _popular;
+    // Each is built once per person however many calls arrive while it is cold, then kept.
+    private readonly UserCache<object> _groups = new(GroupsFor);
+    private readonly UserCache<object> _rows = new(RowsFor);
+
+    // Groups, rows and next-in-collection all start from the same BoxSets, so they share one read of
+    // them for a minute: the library's sets (one key), and the part of that each person can open.
+    private readonly UserCache<IReadOnlyList<BoxSet>> _allSets = new(SetsFor);
+    private readonly UserCache<List<BoxSet>> _visibleSets = new(SetsFor);
+    private readonly UserCache<Dictionary<Guid, Franchise>> _franchises = new(SetsFor);
+    private readonly UserCache<IReadOnlyList<Guid>> _popular = new(RowsFor);
+
+    /// <summary>A franchise BoxSet with its films in release order; the unit "next in collection" walks.</summary>
+    private sealed record Franchise(BoxSet Set, List<Movie> Films);
 
     public void Clear()
     {
         _groups.Clear();
         _rows.Clear();
+        _allSets.Clear();
+        _visibleSets.Clear();
+        _franchises.Clear();
     }
 
     // ---------- groups ----------------------------------------------------------------------
 
-    public object Groups(User user)
-    {
-        if (_groups.TryGetValue(user.Id, out var hit) && hit.Expires > DateTime.UtcNow)
-        {
-            return hit.Value;
-        }
+    public object Groups(User user) => _groups.Get(user.Id, () => BuildGroups(user));
 
+    private object BuildGroups(User user)
+    {
+        // A set's members are read one set at a time: BoxSet.GetChildren applies the person's access
+        // and expands nested sets, which LinkedChildren alone would not, so it isn't replaced.
         var found = new List<(BoxSet Set, CollectionGroup Group, List<BaseItem> Members)>();
         foreach (var set in VisibleBoxSets(user))
         {
@@ -165,53 +176,65 @@ internal sealed class CollectionsView(
                 })
                 .ToArray(),
         };
-        _groups[user.Id] = (DateTime.UtcNow + GroupsFor, value);
         return value;
     }
 
     /// <summary>Every BoxSet this person can open, read without a user filter and then checked against their access.</summary>
     private List<BoxSet> VisibleBoxSets(User user)
-        => [.. libraryManager.GetItemList(new InternalItemsQuery { IncludeItemTypes = [BaseItemKind.BoxSet], Recursive = true })
-            .OfType<BoxSet>()
-            .Where(b => b.IsVisible(user))];
+        => _visibleSets.Get(user.Id, () =>
+        [
+            .. _allSets.Get(Guid.Empty, () => [.. libraryManager.GetItemList(new InternalItemsQuery { IncludeItemTypes = [BaseItemKind.BoxSet], Recursive = true }).OfType<BoxSet>()])
+                .Where(b => b.IsVisible(user)),
+        ]);
 
     // ---------- next in a collection ---------------------------------------------------------
 
     public object? NextInCollection(User user, Guid itemId)
     {
         // Only the TMDb Box Sets plugin's franchises run in an order; Hera's own sets are groupings.
-        foreach (var set in VisibleBoxSets(user).Where(s => !CollectionBuilder.IsHera(s)))
+        if (!Franchises(user).TryGetValue(itemId, out var franchise))
         {
-            var films = set.GetChildren(user, true, null)
-                .OfType<Movie>()
-                .OrderBy(f => f.PremiereDate ?? (f.ProductionYear is int year ? new DateTime(year, 1, 1) : DateTime.MaxValue))
-                .ToList();
-            var index = films.FindIndex(f => f.Id == itemId);
-            if (index < 0)
-            {
-                continue;
-            }
-
-            var next = films.Skip(index + 1).FirstOrDefault(f => !IsPlayed(user, f));
-            return next is null ? null : new { id = Plain(next.Id), collection = set.Name };
+            return null;
         }
 
-        return null;
+        var after = franchise.Films.Skip(franchise.Films.FindIndex(f => f.Id == itemId) + 1).ToList();
+        if (after.Count == 0)
+        {
+            return null;
+        }
+
+        var data = userDataManager.GetUserDataBatch(after, user);
+        var next = after.FirstOrDefault(f => !(data.TryGetValue(f.Id, out var d) && d is not null && f.IsPlayed(user, d)));
+        return next is null ? null : new { id = Plain(next.Id), collection = franchise.Set.Name };
     }
+
+    /// <summary>
+    /// Each film this person can see in a franchise, mapped to that franchise, read once a minute
+    /// rather than a BoxSet at a time on every call. A film in two franchises belongs to the first.
+    /// </summary>
+    private Dictionary<Guid, Franchise> Franchises(User user)
+        => _franchises.Get(user.Id, () =>
+        {
+            var byFilm = new Dictionary<Guid, Franchise>();
+            foreach (var set in VisibleBoxSets(user).Where(s => !CollectionBuilder.IsHera(s)))
+            {
+                var films = set.GetChildren(user, true, null)
+                    .OfType<Movie>()
+                    .OrderBy(f => f.PremiereDate ?? (f.ProductionYear is int year ? new DateTime(year, 1, 1) : DateTime.MaxValue))
+                    .ToList();
+                var franchise = new Franchise(set, films);
+                foreach (var film in films)
+                {
+                    byFilm.TryAdd(film.Id, franchise);
+                }
+            }
+
+            return byFilm;
+        });
 
     // ---------- rows ------------------------------------------------------------------------
 
-    public object Rows(User user)
-    {
-        if (_rows.TryGetValue(user.Id, out var hit) && hit.Expires > DateTime.UtcNow)
-        {
-            return hit.Value;
-        }
-
-        var value = new { rows = Plugin.Instance?.Configuration.HomeRowsEnabled == false ? Array.Empty<object>() : BuildRows(user) };
-        _rows[user.Id] = (DateTime.UtcNow + RowsFor, value);
-        return value;
-    }
+    public object Rows(User user) => _rows.Get(user.Id, () => new { rows = Plugin.Instance?.Configuration.HomeRowsEnabled == false ? Array.Empty<object>() : BuildRows(user) });
 
     private object[] BuildRows(User user)
     {
@@ -221,7 +244,9 @@ internal sealed class CollectionsView(
             Recursive = true,
             IsVirtualItem = false,
         }));
-        var played = pool.Where(t => IsPlayed(user, t.Item)).Select(t => t.Id).ToHashSet();
+        // One read of this person's watch state for the whole pool, not one per title.
+        var data = userDataManager.GetUserDataBatch([.. pool.Select(t => t.Item)], user);
+        var played = pool.Where(t => data.TryGetValue(t.Id, out var d) && d is not null && t.Item.IsPlayed(user, d)).Select(t => t.Id).ToHashSet();
         var today = DateOnly.FromDateTime(Clock.Today);
         var day = today.DayNumber;
 
@@ -379,12 +404,6 @@ internal sealed class CollectionsView(
         };
     }
 
-    private bool IsPlayed(User user, BaseItem item)
-    {
-        var data = userDataManager.GetUserData(user, item);
-        return data is not null && item.IsPlayed(user, data);
-    }
-
     private static List<Title> Shuffle(IEnumerable<Title> items, int seed)
     {
         var list = items.ToList();
@@ -399,37 +418,33 @@ internal sealed class CollectionsView(
     }
 
     /// <summary>The most-played titles of the last 30 days across everyone, most played first; episodes count towards their series.</summary>
-    private IReadOnlyList<Guid> PopularIds()
+    private IReadOnlyList<Guid> PopularIds() => _popular.Get(Guid.Empty, () =>
     {
-        lock (_popularGate)
+        if (playbackReporting.Read(Clock.Today.AddDays(-PopularDays), null) is not { } plays)
         {
-            if (_popular is { } hit && hit.Expires > DateTime.UtcNow)
-            {
-                return hit.Ids;
-            }
-
-            var ids = new List<Guid>();
-            if (playbackReporting.Read(Clock.Today.AddDays(-PopularDays), null) is { } plays)
-            {
-                var tally = new Dictionary<Guid, (int Plays, long Seconds)>();
-                foreach (var play in plays)
-                {
-                    if (!Guid.TryParse(play.ItemId, out var item) || itemCatalogue.Find(item) is not { } facts)
-                    {
-                        continue;
-                    }
-
-                    var title = facts.SeriesId ?? item;
-                    tally[title] = tally.TryGetValue(title, out var so) ? (so.Plays + 1, so.Seconds + play.Seconds) : (1, play.Seconds);
-                }
-
-                ids = [.. tally.OrderByDescending(t => t.Value.Plays).ThenByDescending(t => t.Value.Seconds).Select(t => t.Key)];
-            }
-
-            _popular = (DateTime.UtcNow + RowsFor, ids);
-            return ids;
+            return [];
         }
-    }
+
+        // Thousands of plays are of a few hundred items: each item is looked up once, not once per play.
+        var tally = new Dictionary<Guid, (int Plays, long Seconds)>();
+        var byItem = plays
+            .Select(p => (Id: Guid.TryParse(p.ItemId, out var id) ? id : Guid.Empty, p.Seconds))
+            .Where(p => p.Id != Guid.Empty)
+            .GroupBy(p => p.Id);
+        foreach (var item in byItem)
+        {
+            if (itemCatalogue.Find(item.Key) is not { } facts)
+            {
+                continue;
+            }
+
+            var title = facts.SeriesId ?? item.Key;
+            var (count, seconds) = (item.Count(), item.Sum(p => p.Seconds));
+            tally[title] = tally.TryGetValue(title, out var so) ? (so.Plays + count, so.Seconds + seconds) : (count, seconds);
+        }
+
+        return [.. tally.OrderByDescending(t => t.Value.Plays).ThenByDescending(t => t.Value.Seconds).Select(t => t.Key)];
+    });
 
     private static string Plain(Guid id) => id.ToString("N", CultureInfo.InvariantCulture);
 }

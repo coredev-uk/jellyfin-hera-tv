@@ -78,6 +78,7 @@ public sealed class NotificationStore
     private readonly Lock gate = new();
     private string? path;
     private int faulted;
+    private bool ready;
 
     public NotificationStore(ILogger<NotificationStore> logger) => this.logger = logger;
 
@@ -364,10 +365,13 @@ public sealed class NotificationStore
                 };
                 using var connection = new SqliteConnection(builder.ConnectionString);
                 connection.Open();
-                using (var schema = connection.CreateCommand())
+                // The tables are made once per process, not on every call: the bell polls this constantly.
+                if (!ready)
                 {
+                    using var schema = connection.CreateCommand();
                     schema.CommandText = Schema;
                     schema.ExecuteNonQuery();
+                    ready = true;
                 }
 
                 result = work(connection);
@@ -378,6 +382,8 @@ public sealed class NotificationStore
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
         {
+            // A database that went wrong may be gone or replaced: make the tables again next time.
+            ready = false;
             if (Interlocked.Exchange(ref faulted, 1) == 0)
             {
                 logger.LogWarning(ex, "Hera TV couldn't use its notifications database; notices aren't being kept until it can. Further failures are logged at debug level");

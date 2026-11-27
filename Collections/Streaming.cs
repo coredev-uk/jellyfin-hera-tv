@@ -82,12 +82,18 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
 {
     /// <summary>Older than this and a read starts a refresh in the background; the nightly task normally gets there first.</summary>
     private static readonly TimeSpan Stale = TimeSpan.FromHours(30);
+
+    /// <summary>The least time between one read-triggered refresh starting and the next, however the first went.</summary>
+    private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(15);
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly Lock _gate = new();
     private StreamingSnapshot? _current;
     private bool _loaded;
     private int _refreshing;
+    private long _nextAttempt;
+    private volatile string? _attemptRegion;
 
     /// <summary>Gets the latest snapshot, or null when none has ever been fetched.</summary>
     public StreamingSnapshot? Current
@@ -121,12 +127,18 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
     {
         var current = Current;
         if (!IntegrationSettings.Current.SeerrEnabled
-            || (current is not null && current.Region == Region && DateTimeOffset.UtcNow - current.Fetched < Stale && current.Logos.Count > 0)
+            || (current is not null && current.Region == Region && DateTimeOffset.UtcNow - current.Fetched < Stale)
+            || (_attemptRegion == Region && Environment.TickCount64 < Interlocked.Read(ref _nextAttempt))
             || Interlocked.Exchange(ref _refreshing, 1) == 1)
         {
             return;
         }
 
+        // However it ends, the next read leaves it alone for a while: a Seerr that is down (or has nothing to
+        // say) would otherwise start a whole library's worth of calls from every home-row build. A new
+        // region is not kept waiting.
+        _attemptRegion = Region;
+        Interlocked.Exchange(ref _nextAttempt, Environment.TickCount64 + (long)RetryAfter.TotalMilliseconds);
         _ = Task.Run(async () =>
         {
             try
@@ -185,7 +197,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
         var answered = 0;
         await Parallel.ForEachAsync(library, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (title, token) =>
         {
-            var node = await upstream.SeerrGetAsync($"api/v1/{(title.IsSeries ? "tv" : "movie")}/{title.Tmdb}?language=en", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            var node = await upstream.SeerrGetAsync($"api/v1/{(title.IsSeries ? "tv" : "movie")}/{title.Tmdb}?language=en", TimeSpan.Zero).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
             if (node is null)
             {
@@ -210,7 +222,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
         var trending = new List<string>();
         for (var page = 1; page <= 5; page++)
         {
-            var node = await upstream.SeerrGetAsync($"api/v1/discover/trending?page={page}&language=en", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            var node = await upstream.SeerrGetAsync($"api/v1/discover/trending?page={page}&language=en", TimeSpan.Zero).ConfigureAwait(false);
             if (node?["results"] is not JsonArray results)
             {
                 break;
@@ -257,7 +269,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
         var icons = new Dictionary<int, string>();
         foreach (var kind in new[] { "movies", "tv" })
         {
-            var list = await upstream.SeerrGetAsync($"api/v1/watchproviders/{kind}?watchRegion={region}", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            var list = await upstream.SeerrGetAsync($"api/v1/watchproviders/{kind}?watchRegion={region}", TimeSpan.Zero).ConfigureAwait(false);
             foreach (var provider in list?.AsArray() ?? [])
             {
                 if (provider?["id"]?.GetValue<int>() is int id && (string?)provider["logoPath"] is { Length: > 0 } path)
@@ -273,7 +285,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             string? wordmark = null;
             if (service.Network is int network)
             {
-                var node = await upstream.SeerrGetAsync($"api/v1/network/{network}", TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                var node = await upstream.SeerrGetAsync($"api/v1/network/{network}", TimeSpan.Zero).ConfigureAwait(false);
                 wordmark = (string?)node?["logoPath"];
             }
 

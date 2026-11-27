@@ -13,7 +13,14 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
         Timeout = TimeSpan.FromSeconds(15),
     };
 
-    private readonly ConcurrentDictionary<string, (DateTime Expires, Task<JsonNode?> Value)> _cache = new();
+    // The most reads kept: searches make keys without bound, and a small household never needs more than this.
+    private const int MaxCached = 500;
+
+    // How long a read that came back empty (an error, a timeout, a 404) is remembered: long enough that a
+    // page of cards asking for the same thing doesn't ask again for each, short enough that a blip heals.
+    private static readonly TimeSpan EmptyFor = TimeSpan.FromSeconds(10);
+
+    private readonly ConcurrentDictionary<string, Entry> _cache = new();
 
     /// <summary>Reads JSON from Seerr. <paramref name="asUser"/> sets <c>X-Api-User</c> for per-user reads.</summary>
     public Task<JsonNode?> SeerrGetAsync(string pathAndQuery, TimeSpan cacheFor, int? asUser = null)
@@ -74,11 +81,10 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
             return Task.FromResult<JsonNode?>(null);
         }
 
-        var cacheKey = $"{service}|{pathAndQuery}";
-        return Cached(cacheKey, cacheFor, () => SendArrAsync(service, url, key, pathAndQuery, cacheKey));
+        return Cached($"{service}|{pathAndQuery}", cacheFor, () => SendArrAsync(service, url, key, pathAndQuery));
     }
 
-    private async Task<JsonNode?> SendArrAsync(ArrService service, Uri baseUri, string key, string pathAndQuery, string cacheKey)
+    private async Task<JsonNode?> SendArrAsync(ArrService service, Uri baseUri, string key, string pathAndQuery)
     {
         // SABnzbd takes its key and the JSON switch in the query; Sonarr and Radarr in a header.
         var target = service == ArrService.Sabnzbd
@@ -113,29 +119,82 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
         {
             _arrDownUntil[service] = DateTime.UtcNow + ArrBackoff;
-            _cache.TryRemove(cacheKey, out _);
             logger.LogWarning("Hera TV: {Service} {Path} failed: {Reason}", service, pathAndQuery.Split('?')[0], ex.GetType().Name);
             return null;
         }
     }
 
+    /// <summary>
+    /// Serves a read from the cache, or runs <paramref name="load"/> once for however many callers ask
+    /// while it is out. A <paramref name="cacheFor"/> of zero or less reads through the cache without
+    /// adding to it, for a sweep (the nightly streaming refresh) that would otherwise push out what pages use.
+    /// </summary>
     private Task<JsonNode?> Cached(string key, TimeSpan cacheFor, Func<Task<JsonNode?>> load)
     {
         var now = DateTime.UtcNow;
-        if (_cache.TryGetValue(key, out var hit) && hit.Expires > now && !hit.Value.IsFaulted)
+        if (_cache.TryGetValue(key, out var hit) && hit.Expires > now && !hit.Read.IsFaulted)
         {
-            return hit.Value;
+            return hit.Read;
         }
 
-        var task = load();
-        // Searches make keys without bound; a small household never needs more than this.
-        if (_cache.Count > 500)
+        if (cacheFor <= TimeSpan.Zero)
         {
-            _cache.Clear();
+            return load();
         }
 
-        _cache[key] = (now + cacheFor, task);
+        var created = new Entry(now + cacheFor, load);
+        var entry = _cache.AddOrUpdate(key, created, (_, old) => old.Expires > now && !old.Read.IsFaulted ? old : created);
+        if (!ReferenceEquals(entry, created))
+        {
+            return entry.Read;
+        }
+
+        // Only the call that started the load decides how long its answer is kept: an empty one only briefly.
+        var task = created.Read;
+        var emptyFor = cacheFor < EmptyFor ? cacheFor : EmptyFor;
+        _ = task.ContinueWith(
+            t =>
+            {
+                if (t.Status != TaskStatus.RanToCompletion || t.Result is null)
+                {
+                    created.ExpireIn(emptyFor);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        CachePruning.Prune(_cache, MaxCached, e => e.Expires, key);
         return task;
+    }
+
+    private sealed class Entry
+    {
+        private readonly Lazy<Task<JsonNode?>> _load;
+        private long _expires;
+
+        public Entry(DateTime expires, Func<Task<JsonNode?>> load)
+        {
+            _expires = expires.Ticks;
+            // A load that throws before it returns a task is a failed read like any other.
+            _load = new Lazy<Task<JsonNode?>>(() =>
+            {
+                try
+                {
+                    return load();
+                }
+                catch (Exception ex)
+                {
+                    return Task.FromException<JsonNode?>(ex);
+                }
+            });
+        }
+
+        /// <summary>Gets the read: started by whoever asks first, shared by everyone after.</summary>
+        public Task<JsonNode?> Read => _load.Value;
+
+        public DateTime Expires => new(Volatile.Read(ref _expires), DateTimeKind.Utc);
+
+        public void ExpireIn(TimeSpan span) => Volatile.Write(ref _expires, (DateTime.UtcNow + span).Ticks);
     }
 
     private async Task<JsonNode?> SendAsync(HttpMethod method, Uri uri, IntegrationSettings settings, int? asUser, JsonNode? body)

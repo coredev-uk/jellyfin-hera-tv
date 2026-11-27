@@ -12,11 +12,13 @@ public sealed class UserRequests(UpstreamClient upstream)
     // Seerr's own request rank: what still needs looking at comes first when several requests share a title.
     private static readonly string[] StatusRank = ["pending", "approved", "failed", "available", "declined"];
 
+    private const int MaxParallel = 6;
+
     /// <summary>A title one user has requested.</summary>
     /// <param name="Type">"movie" or "tv".</param>
     /// <param name="Status">Seerr's request state, most urgent first when a title was requested more than once: pending, approved, failed, available or declined.</param>
     /// <param name="RequestedAt">When the title was last requested, as Seerr wrote it.</param>
-    /// <param name="Title">Seerr's own record of the title, with <c>mediaType</c> set; what the client's title shape is built from.</param>
+    /// <param name="Title">Seerr's own record of the title: what the client's title shape is built from. It is the cached record itself, shared with every other reader, so it is never changed; <paramref name="Type"/> is its media type.</param>
     /// <param name="Activity">Where the download stack has it, or null when it isn't there or isn't set up.</param>
     public sealed record Entry(
         string Type,
@@ -37,12 +39,20 @@ public sealed class UserRequests(UpstreamClient upstream)
     /// Reads a Seerr user's newest requests. Null when Seerr didn't answer, so a caller can tell
     /// "no requests" from "couldn't ask". A title whose own record can't be had is left out.
     /// </summary>
-    public async Task<Result?> LoadAsync(int seerrUser, int take)
+    /// <param name="seerrUser">The Seerr user.</param>
+    /// <param name="take">How many of their newest requests.</param>
+    /// <param name="skip">How many of their newest requests to pass over first.</param>
+    /// <param name="background">
+    /// A timer reading for the notification centre, not a person looking at a page: a request Seerr
+    /// already calls available isn't looked up in the download stack (nothing about it can change
+    /// what is announced), and what is looked up may be a minute old.
+    /// </param>
+    public async Task<Result?> LoadAsync(int seerrUser, int take, int skip = 0, bool background = false)
     {
         var live = ActivityOn();
         var queueTask = live ? ArrActivity.QueueAsync(upstream) : Task.FromResult<IReadOnlyList<ArrActivity.QueueItem>>([]);
         var sabTask = live ? ArrActivity.SabAsync(upstream) : Task.FromResult<ArrActivity.SabQueue?>(null);
-        var node = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}/requests?take={take}&skip=0", TimeSpan.FromSeconds(20), seerrUser).ConfigureAwait(false);
+        var node = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}/requests?take={take}&skip={skip}", TimeSpan.FromSeconds(20), seerrUser).ConfigureAwait(false);
         var queue = await queueTask.ConfigureAwait(false);
         var sab = await sabTask.ConfigureAwait(false);
         if (node is null)
@@ -83,24 +93,34 @@ public sealed class UserRequests(UpstreamClient upstream)
             }
         }
 
+        // A cold read of 60 titles is 60 Seerr calls and then a few *arr calls each: a handful at a time.
+        using var gate = new SemaphoreSlim(MaxParallel);
+        // The *arr reads keep their own short cache: they share keys with the pages that show a download's state.
         var entries = await Task.WhenAll(merged.Select(async m =>
         {
-            // Request records carry ids only; the title's own record (cached) supplies the rest.
-            var title = await upstream.SeerrGetAsync($"api/v1/{m.Type}/{m.TmdbId}?language=en", TimeSpan.FromHours(6)).ConfigureAwait(false);
-            if (title is null)
+            await gate.WaitAsync().ConfigureAwait(false);
+            try
             {
-                return null;
-            }
+                // Request records carry ids only; the title's own record (cached) supplies the rest.
+                var title = await upstream.SeerrGetAsync($"api/v1/{m.Type}/{m.TmdbId}?language=en", TimeSpan.FromHours(6)).ConfigureAwait(false);
+                if (title is null)
+                {
+                    return null;
+                }
 
-            title["mediaType"] = m.Type;
-            ArrActivity.Activity? activity = null;
-            // Only an approved request can be in the download stack.
-            if (live && m.Status is "approved" or "available")
+                ArrActivity.Activity? activity = null;
+                // Only an approved request can be in the download stack; an available one is there too, but only a page shows how.
+                if (live && (m.Status == "approved" || (m.Status == "available" && !background)))
+                {
+                    activity = await LookUp(m.Type, m.TmdbId, m.ArrId, m.TvdbId ?? title["externalIds"]?["tvdbId"]?.GetValue<int?>(), m.Seasons, queue).ConfigureAwait(false);
+                }
+
+                return new Entry(m.Type, m.TmdbId, m.Status, m.RequestedAt, m.Seasons, title, activity);
+            }
+            finally
             {
-                activity = await LookUp(m.Type, m.TmdbId, m.ArrId, m.TvdbId ?? title["externalIds"]?["tvdbId"]?.GetValue<int?>(), m.Seasons, queue).ConfigureAwait(false);
+                gate.Release();
             }
-
-            return new Entry(m.Type, m.TmdbId, m.Status, m.RequestedAt, m.Seasons, title, activity);
         })).ConfigureAwait(false);
 
         return new Result([.. entries.OfType<Entry>()], sab);

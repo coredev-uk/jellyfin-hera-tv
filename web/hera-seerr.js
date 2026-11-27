@@ -33,13 +33,16 @@
 
   const memo = new Map();
   const cached = (key, load, ttl) => {
+    const now = Date.now();
     const hit = memo.get(key);
-    if (hit && Date.now() - hit.at < ttl) return hit.promise;
+    if (hit && now - hit.at < hit.ttl) return hit.promise;
     const promise = Promise.resolve(load()).catch((error) => {
       memo.delete(key);
       throw error;
     });
-    memo.set(key, { at: Date.now(), promise });
+    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
+    for (const [k, v] of memo) if (now - v.at >= v.ttl) memo.delete(k);
+    memo.set(key, { at: now, ttl, promise });
     return promise;
   };
 
@@ -126,6 +129,7 @@
     composed: ["composed", "acting"],
   };
   const MAX_CARDS = 80;
+  const SHELF_FIRST = 40; // cards a shelf draws before "Show all"
 
   const SORTS = {
     popular: (a, b) => (b.popularity ?? 0) - (a.popularity ?? 0),
@@ -207,6 +211,7 @@
 
     const node = el("div", { class: "hera-films hera-seerr" });
     let sort = "popular";
+    const shelves = [];
 
     const sortBar = el(
       "div",
@@ -221,7 +226,9 @@
           onclick: () => {
             if (sort === key) return;
             sort = key;
-            render();
+            for (const button of sortBar.children) button.setAttribute("aria-pressed", String(button.dataset.sort === key));
+            // The cards stay; the shelves put them in the new order.
+            for (const shelf of shelves) shelf.paint();
             sortBar.querySelector(`[data-sort="${key}"]`).focus({ preventScroll: true });
           },
         }),
@@ -235,39 +242,76 @@
       return [label || kindText(credit), credit.year, crewRow && credit.mediaType === "tv" ? "TV Show" : null].filter(Boolean).join(" · ");
     };
 
-    const render = () => {
-      const sorter = SORTS[sort];
-      const shelves = [];
-      const ranked = [...library.values()].sort(sorter);
-      if (ranked.length) {
-        shelves.push(
-          kit.shelf({
-            id: "seerr-person-library",
-            title: "In Your Library",
-            cards: ranked.map((entry) =>
-              libraryCard({ id: entry.id, title: entry.title, subtitle: [entry.role || kindText(entry), entry.year].filter(Boolean).join(" · "), series: entry.mediaType === "tv" }),
-            ),
+    /**
+     * One shelf: the first `SHELF_FIRST` entries in the current order, all of them (up to `limit`)
+     * after "Show all". A card is built once, the first time its entry is drawn, and only moved after.
+     */
+    const filmShelf = ({ id, title, entries, limit, card }) => {
+      const cards = new Map();
+      const row = kit.shelf({ id, title, cards: [] });
+      const track = row.querySelector(".hera-shelf");
+      const count = Math.min(entries.length, limit);
+      let expanded = false;
+      const all =
+        count > SHELF_FIRST
+          ? el("button", {
+              type: "button",
+              class: "hera-films__all",
+              text: `Show all ${count}`,
+              onclick: () => {
+                expanded = true;
+                all.remove();
+                paint();
+                const first = track.children[SHELF_FIRST];
+                (first?.querySelector("a, button") ?? first)?.focus();
+              },
+            })
+          : null;
+      if (all) row.querySelector(".hera-row__head").append(all);
+      const paint = () => {
+        const ordered = [...entries].sort(SORTS[sort]).slice(0, expanded ? count : Math.min(count, SHELF_FIRST));
+        track.replaceChildren(
+          ...ordered.map((entry) => {
+            let node = cards.get(entry);
+            if (!node) {
+              node = card(entry);
+              cards.set(entry, node);
+            }
+            return node;
           }),
         );
-      }
-      for (const section of order) {
-        shelves.push(
-          kit.shelf({
-            id: `seerr-person-${section}`,
-            title: SECTION_TITLE[section],
-            cards: [...rows[section]]
-              .map((credit) => ({ ...credit, date: credit.releaseDate }))
-              .sort(sorter)
-              .slice(0, MAX_CARDS)
-              .map((credit) => discover().itemCard(credit, { subtitle: creditSubtitle(credit, section) })),
-          }),
-        );
-      }
-      node.replaceChildren(...shelves);
-      const total = ranked.length + order.reduce((sum, section) => sum + rows[section].length, 0);
-      if (shelves.length && total > 6) shelves[0].querySelector(".hera-row__head").append(sortBar);
+      };
+      paint();
+      return { row, paint };
     };
-    render();
+
+    const ranked = [...library.values()];
+    if (ranked.length) {
+      shelves.push(
+        filmShelf({
+          id: "seerr-person-library",
+          title: "In Your Library",
+          entries: ranked,
+          limit: Infinity,
+          card: (entry) =>
+            libraryCard({ id: entry.id, title: entry.title, subtitle: [entry.role || kindText(entry), entry.year].filter(Boolean).join(" · "), series: entry.mediaType === "tv" }),
+        }),
+      );
+    }
+    for (const section of order) {
+      shelves.push(
+        filmShelf({
+          id: `seerr-person-${section}`,
+          title: SECTION_TITLE[section],
+          entries: rows[section].map((credit) => ({ ...credit, date: credit.releaseDate })),
+          limit: MAX_CARDS,
+          card: (credit) => discover().itemCard(credit, { subtitle: creditSubtitle(credit, section) }),
+        }),
+      );
+    }
+    node.replaceChildren(...shelves.map((shelf) => shelf.row));
+    const total = ranked.length + order.reduce((sum, section) => sum + rows[section].length, 0);
+    if (shelves.length && total > 6) shelves[0].row.querySelector(".hera-row__head").append(sortBar);
     return { node, covers: new Set([...library.values()].map((entry) => entry.id)), empty: !node.children.length };
   };
 
@@ -648,7 +692,7 @@
     clean(page, itemId);
     const ints = await kit.integrations();
     if (!ints.seerr || !discover()) return;
-    const item = await kit.api().getItem(kit.userId(), itemId);
+    const item = await kit.item(itemId);
     if (!item || !isCurrent(page, itemId)) return;
     const tmdbId = item.ProviderIds?.Tmdb;
     const key = `${item.Type}:${itemId}`;

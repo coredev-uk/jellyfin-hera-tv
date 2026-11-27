@@ -64,6 +64,36 @@
   padding: 10px 20px;
   font-size: 18px;
 }
+.hera-films__all {
+  flex: none;
+  margin: 0 0 0 12px;
+  min-height: 36px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hera-glass);
+  box-shadow: inset 0 1px 0 var(--hera-glass-edge);
+  color: var(--hera-label-2);
+  font: 600 14px/1 var(--hera-font);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--hera-fast) var(--hera-ease), color var(--hera-fast) var(--hera-ease), transform var(--hera-fast) var(--hera-ease);
+}
+.hera-films__all:hover {
+  color: var(--hera-label);
+  background: var(--hera-hover);
+}
+.hera-films__all:active {
+  transform: scale(0.95);
+}
+.hera-films__all:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 2px;
+}
+.layout-tv .hera-films__all {
+  padding: 10px 20px;
+  font-size: 18px;
+}
 
 /* "Request Missing", beside the row's title. */
 .hera-seerr__action {
@@ -281,11 +311,13 @@ html.hera-person-on #slides-container {
 
 @media (prefers-reduced-motion: reduce) {
   .hera-films__sort-button,
+  .hera-films__all,
   .hera-sheet__person-link img,
   .hera-sheet__person-link .hera-sheet__person-fallback {
     transition: none;
   }
   .hera-films__sort-button:active,
+  .hera-films__all:active,
   .hera-sheet__person-link:active img,
   .hera-sheet__person-link:active .hera-sheet__person-fallback {
     transform: none;
