@@ -123,10 +123,10 @@ public class NotificationsController(NotificationStore store, ILibraryManager li
     /// a scan. Run it again and the same three notices come back unread.
     /// </summary>
     [HttpPost("test")]
-    [Authorize(Policy = "RequiresElevation")]
+    [Authorize(Policy = HeraUser.Elevated)]
     public IActionResult Seed()
     {
-        var user = Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var id) ? userManager.GetUserById(id) : null;
+        var user = this.Current(userManager);
         if (user is null)
         {
             return Unauthorized();
@@ -203,8 +203,7 @@ public class NotificationsController(NotificationStore store, ILibraryManager li
 
     private ContentResult Reply(object value) => Content(JsonSerializer.Serialize(value, Json), "application/json");
 
-    private string? CurrentUserId()
-        => Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var id) ? id.ToString("N") : null;
+    private string? CurrentUserId() => this.IdOf()?.ToString("N");
 
     public sealed class ReadBody
     {

@@ -13,8 +13,9 @@
   prHourlyLimit: 4,
   prConcurrentLimit: 10,
   dependencyDashboardTitle: "📦 Renovate Dashboard",
-  // The project file's NuGet packages and the workflow actions
-  enabledManagers: ["nuget", "github-actions"],
+  // The project file's NuGet packages, the workflow actions, and the npm packages of the compat run
+  // (tests/compat: Playwright) and of the lint (package.json: ESLint)
+  enabledManagers: ["nuget", "github-actions", "npm"],
   packageRules: [
     {
       description: "Let minor and patch releases settle before proposing them",
@@ -25,12 +26,31 @@
       minimumReleaseAgeBehaviour: "timestamp-optional",
     },
     {
-      // The plugin builds against the Jellyfin server it runs in. These move together, and only
-      // when home-ops moves the server: bump meta.json's targetAbi in the same pull request.
-      description: "Jellyfin packages, in step with the server",
+      // The plugin builds against the Jellyfin server it runs in, and runs on that server's own
+      // Microsoft.Data.Sqlite: the server supplies the assembly, and one built against a newer
+      // version fails to load it (a FileNotFoundException that stopped Jellyfin itself when it
+      // happened on a pull request here). So these move together, and only when home-ops moves the
+      // server: bump meta.json's targetAbi and Compatibility.Tested in the same pull request, and
+      // set the Sqlite packages to what Jellyfin's Directory.Packages.props pins for that release,
+      // not to the newest (Renovate offers the newest). CI fails until all of that agrees
+      // (tests/compat/versions.mjs).
+      description: "Jellyfin packages and the Sqlite packages the server supplies, in step with the server",
       groupName: "jellyfin",
-      matchPackageNames: ["Jellyfin.Controller", "Jellyfin.Model"],
+      matchPackageNames: ["Jellyfin.Controller", "Jellyfin.Model", "Microsoft.Data.Sqlite.Core", "/^SQLitePCLRaw\\./"],
       dependencyDashboardApproval: true,
+    },
+    {
+      // A new Playwright brings a new Chromium, which can change what the pages under test do.
+      description: "Playwright, on its own so a failing run points at it",
+      matchManagers: ["npm"],
+      matchPackageNames: ["playwright"],
+      groupName: "playwright",
+    },
+    {
+      description: "The lint's packages",
+      matchManagers: ["npm"],
+      matchPackageNames: ["eslint", "globals"],
+      groupName: "lint",
     },
     {
       matchUpdateTypes: ["major"],

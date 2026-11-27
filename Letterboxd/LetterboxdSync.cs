@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using Jellyfin.Plugin.HeraTv.Integrations;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Letterboxd;
 
@@ -18,7 +16,7 @@ public sealed record SyncResult(int Logged, int Skipped, int Failed, int Pending
 /// A refused sign-in stops that person's run and asks them to link again; any other error stops it
 /// too, leaving the rest for the next run rather than hammering a failing API.
 /// </remarks>
-public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync> logger)
+public sealed class LetterboxdSync(LetterboxdStore store, ServerHealth health)
 {
     /// <summary>What a link's error says when Letterboxd no longer accepts its refresh token.</summary>
     public const string SignInAgain = "Sign in to Letterboxd again";
@@ -27,7 +25,6 @@ public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync
     public const int RunCap = 50;
 
     private readonly SemaphoreSlim running = new(1, 1);
-    private readonly ConcurrentDictionary<string, bool> failing = new();
 
     /// <summary>
     /// Processes the queue: one person's, or everyone's when <paramref name="userId"/> is null. Failed
@@ -37,6 +34,12 @@ public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync
     {
         var settings = IntegrationSettings.Current;
         if (!settings.LetterboxdEnabled)
+        {
+            return Tally(userId, 0, 0, 0);
+        }
+
+        // Nothing a run settles would be kept, so every run would write the same diary entries again. The store has already said why.
+        if (store.IsReadOnly)
         {
             return Tally(userId, 0, 0, 0);
         }
@@ -61,8 +64,8 @@ public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync
 
             if (logged + skipped > 0)
             {
-                failing.TryRemove("reach Letterboxd", out _);
-                failing.TryRemove("write the diary", out _);
+                health.Recovered(FeatureOf("reach Letterboxd"));
+                health.Recovered(FeatureOf("write the diary"));
             }
 
             return Tally(userId, logged, skipped, failed);
@@ -192,16 +195,8 @@ public sealed class LetterboxdSync(LetterboxdStore store, ILogger<LetterboxdSync
     private void Settle(List<WatchRow> rows, string state, string detail)
         => store.SettleMany([.. rows.Select(r => r.Id)], state, detail, DateTime.UtcNow);
 
-    /// <summary>Logs a failure the first time, then at debug level until a run goes clean again.</summary>
-    private void Fault(string what, Exception ex)
-    {
-        if (failing.TryAdd(what, true))
-        {
-            logger.LogWarning("Hera TV couldn't {What}: {Reason}. It will try again. Further failures are logged at debug level", what, ex.Message);
-        }
-        else
-        {
-            logger.LogDebug("Hera TV couldn't {What}: {Reason}", what, ex.Message);
-        }
-    }
+    /// <summary>Notes a failure: a warning the first time, then debug level until a run goes clean again.</summary>
+    private void Fault(string what, Exception ex) => health.Fault(FeatureOf(what), what, ex);
+
+    private static string FeatureOf(string what) => "Letterboxd: " + what;
 }

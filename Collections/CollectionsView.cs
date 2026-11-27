@@ -420,7 +420,7 @@ internal sealed class CollectionsView(
     /// <summary>The most-played titles of the last 30 days across everyone, most played first; episodes count towards their series.</summary>
     private IReadOnlyList<Guid> PopularIds() => _popular.Get(Guid.Empty, () =>
     {
-        if (playbackReporting.Read(Clock.Today.AddDays(-PopularDays), null) is not { } plays)
+        if (playbackReporting.Read(Clock.Today.AddDays(-PopularDays), null).Plays is not { } plays)
         {
             return [];
         }

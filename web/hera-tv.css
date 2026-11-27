@@ -18,7 +18,7 @@
  * restyles everything:
  *  - dark is the default (:root);
  *  - light applies when the user picks it (html[data-hera-scheme="light"], set by hera-tv.js
- *    from the Appearance setting), or before the script runs when the device prefers light;
+ *    from the Appearance setting; WebInjection's head script sets it before first paint);
  *  - .hera-dark forces the dark set inside a region whose text sits on artwork (the home hero,
  *    detail banners, the player, sheet headers), as the Apple TV app keeps those dark in light mode.
  * Selection is the inverse of the ground: white with black text on dark, near-black with white
@@ -42,8 +42,8 @@
 .hera-episode__play,
 .hera-card__play,
 .listItemImageButton,
-html.hera-home:not(.hera-discover-on):not(.hera-scrolled) .MuiAppBar-root,
-html.hera-home:not(.hera-discover-on):not(.hera-scrolled) .skinHeader,
+html.hera-home:not(.hera-scrolled) .MuiAppBar-root,
+html.hera-home:not(.hera-scrolled) .skinHeader,
 html.hera-art-top:not(.hera-scrolled) .MuiAppBar-root,
 html.hera-art-top:not(.hera-scrolled) .skinHeader {
   --hera-bg: #000;
@@ -96,33 +96,6 @@ html.hera-art-top:not(.hera-scrolled) .skinHeader {
   --hera-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.28);
   --hera-shadow-lift: 0 22px 40px -16px rgba(0, 0, 0, 0.36);
   color-scheme: light;
-}
-/* Before the script has read the user's choice, follow the device. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-hera-scheme]) {
-    --hera-bg: #fff;
-    --hera-surface: #f5f5f7;
-    --hera-surface-2: #ebebf0;
-    --hera-fill: rgba(120, 120, 128, 0.12);
-    --hera-fill-strong: rgba(120, 120, 128, 0.2);
-    --hera-hover: rgba(0, 0, 0, 0.06);
-    --hera-glass: rgba(238, 238, 243, 0.86);
-    --hera-glass-hover: rgba(222, 222, 228, 0.92);
-    --hera-glass-light: rgba(0, 0, 0, 0.06);
-    --hera-glass-edge: rgba(255, 255, 255, 0.85);
-    --hera-label: #1d1d1f;
-    --hera-label-2: rgba(60, 60, 67, 0.85);
-    --hera-label-3: rgba(60, 60, 67, 0.78);
-    --hera-separator: rgba(60, 60, 67, 0.18);
-    --hera-select: #1d1d1f;
-    --hera-select-hover: #3a3a3c;
-    --hera-on-select: #fff;
-    --hera-focus: #1d1d1f;
-    --hera-track: rgba(0, 0, 0, 0.14);
-    --hera-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.28);
-    --hera-shadow-lift: 0 22px 40px -16px rgba(0, 0, 0, 0.36);
-    color-scheme: light;
-  }
 }
 
 :root {
@@ -293,7 +266,7 @@ a,
   border: 0 !important;
 }
 /* Over artwork (home hero, detail banner) the bar keeps its black scrim in both schemes. */
-html.hera-home:not(.hera-discover-on) .MuiAppBar-root,
+html.hera-home .MuiAppBar-root,
 html.hera-art-top .MuiAppBar-root {
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.35) 60%, transparent 100%) !important;
 }
@@ -328,11 +301,11 @@ html.hera-scrolled body::after {
 }
 /* The player and the login page have no page to scroll under a bar. */
 html[data-hera-view="videoOsdPage"] body::after,
-body:has(#loginPage:not(.hide))::after {
+html.hera-signed-out body::after {
   display: none;
 }
 html.hera-scrolled .MuiAppBar-root,
-html.hera-scrolled.hera-home:not(.hera-discover-on) .MuiAppBar-root,
+html.hera-scrolled.hera-home .MuiAppBar-root,
 html.hera-scrolled.hera-art-top .MuiAppBar-root {
   background: transparent !important;
 }
@@ -498,7 +471,7 @@ html[data-hera-view="indexPage"] .MuiAppBar-root > .MuiToolbar-root:first-child 
   backdrop-filter: none !important;
   box-shadow: none !important;
 }
-html.hera-home:not(.hera-discover-on) .skinHeader,
+html.hera-home .skinHeader,
 html.hera-art-top .skinHeader {
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.75), transparent) !important;
 }
@@ -674,7 +647,7 @@ h3 {
   box-shadow: none !important;
 }
 /* Keyboard focus on desktop lands on the artwork link inside the clipped frame: ring the frame. */
-.layout-desktop .card:has(:focus-visible) .cardScalable {
+.layout-desktop .cardScalable:has(:focus-visible) {
   box-shadow: 0 0 0 3px var(--hera-focus), var(--hera-shadow-lift);
 }
 .cardImageContainer:focus-visible,
@@ -1310,6 +1283,39 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
 }
 .layout-tv .hera-detail-overview {
   font-size: 19px;
+}
+/* The "More" toggle under a clamped overview. Core draws it on detail pages (hera-detail-more);
+ * hera-seerr.js reuses the same classes under a Seerr-only person's biography. */
+.hera-readmore {
+  display: inline-block;
+  margin: 6px 0 0;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--hera-label);
+  font: 600 15px/1.3 var(--hera-font);
+  cursor: pointer;
+}
+.hera-readmore[hidden] {
+  display: none;
+}
+.hera-readmore:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.hera-readmore:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 3px;
+}
+.layout-tv .hera-readmore {
+  font-size: 19px;
+}
+.hera-detail-overview.is-open {
+  display: block;
+  overflow: visible;
+  white-space: pre-line;
+  -webkit-line-clamp: unset;
 }
 .layout-tv .button-link:focus,
 .layout-tv .button-link.show-focus:focus {
@@ -2083,6 +2089,23 @@ html.hera-home .backdropContainer,
 html.hera-home #slides-container {
   display: none !important;
 }
+/*
+ * A Hera view that takes the home tab's place (Discover, Requests, Your Watching, a Seerr-only
+ * person page) asks core for it with kit.view.take(); core then sets html.hera-view-taken and
+ * clears hera-home, so the hero, the stock rows and the backdrop layers step aside and Home
+ * stops reading as the selected tab. This is the one copy of those rules; modules add none.
+ */
+html.hera-view-taken[data-hera-view] .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root:not(:has(> a.MuiButton-colorPrimary)) > a:first-child:not(.hera-discover-tab),
+html.hera-view-taken .headerTabs .emby-tab-button.emby-tab-button-active:not(.hera-discover-tab):not(:focus) {
+  background: transparent !important;
+  color: var(--hera-label-2) !important;
+}
+html.hera-view-taken #homeTab > .hera-hero,
+html.hera-view-taken #indexPage .homeSectionsContainer,
+html.hera-view-taken .backdropContainer,
+html.hera-view-taken #slides-container {
+  display: none !important;
+}
 /* The ambient ground (hera-tv.js, `ambient`): under the home rows, the current hero title's art;
  * under a detail page's banner, the banner's own art. Heavily blurred and dimmed into the ground,
  * crossfading when the title changes. It is fixed and filtered once, not a backdrop-filter, so
@@ -2095,7 +2118,7 @@ html.hera-home #slides-container {
   overflow: hidden;
   display: none;
 }
-html.hera-home:not(.hera-discover-on) .hera-ambient,
+html.hera-home .hera-ambient,
 html.hera-art-top[data-hera-view="itemDetailPage"] .hera-ambient {
   display: block;
 }
@@ -2141,6 +2164,14 @@ html.hera-home #indexPage .homeSectionsContainer {
 }
 html.hera-home #homeTab {
   padding-top: 0 !important;
+}
+/* Each home row is its own compositor layer. Without this, a focused or hovered card's lift (a
+ * transform animating for a moment) makes Chromium redo the layer layout of the whole page, every
+ * row below it included, on every frame: 30-70 ms a frame on the first pass down the home page, 60
+ * long tasks for 18 presses of a remote in the TV layout. With a layer per row that work stays
+ * inside the row (1 long task). Nothing inside a row is position: fixed, which a layer would trap. */
+.homeSectionsContainer > .verticalSection {
+  will-change: transform;
 }
 
 /* ---------- Hera seasons (series pages) ------------------------------------------- */
@@ -3042,8 +3073,7 @@ html.layout-tv.hera-home .hera-hero {
 .layout-tv .itemMiscInfo .mediaInfoItem:not(.mediaInfoCriticRating) {
   font-size: 17px;
 }
-.layout-tv .hera-badge,
-.layout-tv .hera-chip {
+.layout-tv .hera-badge {
   height: 22px;
   font-size: 13px;
   line-height: 22px;
@@ -3380,6 +3410,8 @@ progress[aria-valuenow]:before,
 .itemDetailPage:not(.hera-has-logo):not(.hera-no-backdrop) {
   --hera-detail-overlay: calc(var(--hera-ribbon-h, 222px) + var(--hera-detail-gap) + var(--hera-detail-foot));
 }
+/* Jellyfin hides the logo node when the item has none; the ribbon's title relies on the node's
+ * box (above), so it stays displayed, empty. */
 .itemDetailPage:not(.hera-has-logo) .detailLogo.hide {
   display: block !important;
 }

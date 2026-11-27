@@ -11,6 +11,17 @@
  *    in release order, dimmed, opening the title sheet, with "Request Missing" by its title.
  * Everything goes through the plugin's server: the Seerr key never reaches the browser, and
  * requests are made as the viewer's own Seerr account. With Seerr off, Jellyfin's stock sections stay.
+ *
+ * Contracts with the other modules:
+ *  - Needs HeraTV.discover (hera-discover.js: itemCard, openTitle, kindOf, errorStatus, errorMessage); with
+ *    it absent every stock section stays.
+ *  - Builds on what hera-tv.js drew: a person's biography is `.hera-detail-overview`, whose "More" toggle
+ *    (`.hera-readmore`) is hera-tv.css's, and a box set's shelf comes from kit.collectionShelf.
+ *  - Marks what it adds with data-hera-seerr (one clean pass removes them) and what it replaces with
+ *    `hera-seerr-covered` (hidden by hera-seerr.css); missing-film cards carry data-hera-tmdb.
+ *  - Reads Jellyfin's stock person and detail sections (`.card[data-id]`/data-type, `#childrenContent`, the
+ *    similar and list collapsibles) through the JF keys in hera-tv.js, and html.hera-view-taken (kit.view)
+ *    carries a Seerr-only person's page over the home tab.
  */
 (() => {
   "use strict";
@@ -20,51 +31,31 @@
   const { kit } = HT;
   const { el, icon } = kit;
 
-  const root = document.documentElement;
-  const cleanups = [];
-  const listen = (target, type, handler, options) => {
-    target.addEventListener(type, handler, options);
-    cleanups.push(() => target.removeEventListener(type, handler, options));
-  };
+  const scope = kit.scope();
+
+  // Jellyfin's page ids, the keys `requires` is written in.
+  const INDEX_PAGE = "indexPage";
+  const DETAIL_PAGE = "itemDetailPage";
 
   const discover = () => HT.discover;
 
   // ---------- data ----------------------------------------------------------------------
 
-  const memo = new Map();
-  const cached = (key, load, ttl) => {
-    const now = Date.now();
-    const hit = memo.get(key);
-    if (hit && now - hit.at < hit.ttl) return hit.promise;
-    const promise = Promise.resolve(load()).catch((error) => {
-      memo.delete(key);
-      throw error;
-    });
-    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
-    for (const [k, v] of memo) if (now - v.at >= v.ttl) memo.delete(k);
-    memo.set(key, { at: now, ttl, promise });
-    return promise;
+  const persons = kit.ttlCache({ ttl: 2 * 60 * 1000, max: 40 });
+  const relatedTitles = kit.ttlCache({ ttl: 5 * 60 * 1000, max: 40 });
+  const collections = kit.ttlCache({ ttl: 60 * 1000, max: 10 });
+
+  // Tracked on a side branch, so a failure still rejects and the cache never keeps it.
+  const fetchPerson = (tmdbId) => {
+    const request = persons.get(`${tmdbId}`, () => kit.hera(`discover/person/${tmdbId}`));
+    kit.track("seerr", request);
+    return request;
   };
+  const fetchPersonShelf = (tmdbId, shelf) => persons.get(`${tmdbId}:${shelf}`, () => kit.hera(`discover/person/${tmdbId}/shelf/${shelf}`));
+  const fetchRelated = (type, tmdbId) => relatedTitles.get(`${type}:${tmdbId}`, () => kit.hera(`discover/titles/${type}/${tmdbId}/related`));
+  const fetchCollection = (id) => collections.get(`${id}`, () => kit.hera(`discover/collections/${id}`));
 
-  const fetchPerson = (tmdbId) => cached(`person:${tmdbId}`, () => kit.hera(`discover/person/${tmdbId}`), 2 * 60 * 1000);
-  const fetchPersonShelf = (tmdbId, shelf) =>
-    cached(`person:${tmdbId}:${shelf}`, () => kit.hera(`discover/person/${tmdbId}/shelf/${shelf}`), 2 * 60 * 1000);
-  const fetchRelated = (type, tmdbId) =>
-    cached(`related:${type}:${tmdbId}`, () => kit.hera(`discover/titles/${type}/${tmdbId}/related`), 5 * 60 * 1000);
-  const fetchCollection = (id) => cached(`collection:${id}`, () => kit.hera(`discover/collections/${id}`), 60 * 1000);
-
-  const errorStatus = (error) => error?.status ?? error?.response?.status ?? null;
-  const errorMessage = async (error) => {
-    try {
-      const body = await (error?.json ? error.json() : null);
-      return body?.message || null;
-    } catch {
-      return null;
-    }
-  };
-
-  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  const kindText = (item) => (item.mediaType === "tv" ? "TV Show" : "Film");
+  const { plural } = kit.text;
   const detailsHref = (id) => `#/details?id=${id}`;
   const poster = (id) => kit.imageUrl(id, "Primary", { maxWidth: 400 });
 
@@ -127,7 +118,7 @@
         year,
         releaseDate: item.PremiereDate?.slice(0, 10),
         popularity: 0,
-        subtitle: [kindText({ mediaType }), year].filter(Boolean).join(" · "),
+        subtitle: [discover().kindOf({ mediaType }), year].filter(Boolean).join(" · "),
       });
     }
 
@@ -277,14 +268,14 @@
   const coverStock = (page, held) => {
     stopStockWatch();
     const cover = () => {
-      for (const section of page.querySelectorAll("#childrenContent > .verticalSection")) {
-        const cards = [...section.querySelectorAll(".card[data-id]")];
+      for (const section of kit.jfAll("seerr", "seerrChildrenSections", page)) {
+        const cards = kit.jfAll("seerr", "seerrStockCard", section);
         const covered = cards.length > 0 && cards.every((card) => /^(Movie|Series)$/.test(card.dataset.type) && held.has(card.dataset.id));
         section.classList.toggle("hera-seerr-covered", covered);
       }
     };
     cover();
-    const children = page.querySelector("#childrenContent");
+    const children = kit.jf("seerr", "seerrChildrenContent", page);
     if (!children) return;
     stockWatch.observer = new MutationObserver(cover);
     stockWatch.observer.observe(children, { childList: true, subtree: true });
@@ -295,17 +286,17 @@
     const [data, extras] = await Promise.all([fetchPerson(tmdbId), personItems(item.Id)]);
     if (!isCurrent(page, item.Id) || page.querySelector('[data-hera-seerr="films"]')) return;
 
-    const info = page.querySelector(`${HT.jf.detailRibbon} .infoWrapper`);
+    const info = kit.jf("seerr", "detailRibbonInfo", page);
     info?.querySelector(".hera-person-role")?.remove();
-    if (data.role) info?.querySelector(".nameContainer")?.after(el("p", { class: "hera-person-role", text: data.role }));
+    if (data.role) kit.jf("seerr", "personNameContainer", info)?.after(el("p", { class: "hera-person-role", text: data.role }));
     watchBio(info);
 
     const films = buildFilms(data, extras);
     if (films.empty) return;
     films.node.dataset.heraSeerr = "films";
-    const host = page.querySelector(HT.jf.detailSection);
+    const host = kit.jf("seerr", "detailSection", page);
     if (!host) return;
-    insertBefore(host, films.node, host.querySelector("#listChildrenCollapsible"));
+    insertBefore(host, films.node, kit.jf("seerr", "seerrListChildren", host));
     coverStock(page, films.covers);
   };
 
@@ -329,22 +320,20 @@
 
   // ---------- a person only Seerr knows -------------------------------------------------
 
-  const view = { root: null, abort: null, tmdb: null, classWatch: null };
+  const view = { root: null, abort: null, tmdb: null };
 
+  // The route showing, from kit.onRoute and from onView, which both carry its query.
+  let params = new URLSearchParams();
   const wantedPerson = () => {
-    const [path, query = ""] = window.location.hash.split("?");
-    if (!path.startsWith("#/home")) return null;
-    const params = new URLSearchParams(query);
-    return params.get("hera") === "person" && /^\d+$/.test(params.get("tmdb") || "") ? params.get("tmdb") : null;
+    const tmdb = params.get("tmdb") || "";
+    return params.get("hera") === "person" && /^\d+$/.test(tmdb) ? tmdb : null;
   };
-
-  const longDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 
   const buildHeader = (data) => {
     const meta = [
       data.role,
-      data.birthday ? `Born ${longDate(data.birthday)}` : null,
-      data.deathday ? `Died ${longDate(data.deathday)}` : null,
+      data.birthday ? `Born ${kit.text.longDate(data.birthday)}` : null,
+      data.deathday ? `Died ${kit.text.longDate(data.deathday)}` : null,
       data.placeOfBirth,
     ].filter(Boolean);
     const bio = data.biography?.trim() ? el("p", { class: "hera-pv__bio", text: data.biography.trim() }) : null;
@@ -361,27 +350,17 @@
     return { head, bio };
   };
 
-  const stripHomeClass = () => {
-    view.classWatch?.disconnect();
-    // The home page marks the root for its hero; there is none here, and its header tokens would be wrong on the page's ground.
-    root.classList.remove("hera-home");
-    view.classWatch = new MutationObserver(() => root.classList.contains("hera-home") && root.classList.remove("hera-home"));
-    view.classWatch.observe(root, { attributes: true, attributeFilter: ["class"] });
-  };
-
   const unmountView = () => {
     view.abort?.abort();
     view.abort = null;
+    if (view.root) kit.view.release("person");
     view.root?.remove();
     view.root = null;
     view.tmdb = null;
-    view.classWatch?.disconnect();
-    view.classWatch = null;
-    root.classList.remove("hera-person-on");
   };
 
   const mountView = async (page, tmdb) => {
-    const host = page.querySelector(HT.jf.homeTab);
+    const host = kit.jf("seerr", "homeTab", page);
     if (!host) return;
     unmountView();
     const abort = (view.abort = new AbortController());
@@ -390,8 +369,7 @@
       el("p", { class: "hera-pv__status", role: "status", text: "Loading…" }),
     ]);
     host.append(view.root);
-    root.classList.add("hera-person-on");
-    stripHomeClass();
+    kit.view.take("person", { art: false });
     window.scrollTo(0, 0);
     const mine = view.root;
 
@@ -424,7 +402,7 @@
 
   const syncView = async (page) => {
     const tmdb = wantedPerson();
-    if (!tmdb || page?.id !== "indexPage" || !kit.userId()) {
+    if (!tmdb || page?.id !== INDEX_PAGE || !kit.userId()) {
       if (view.root) unmountView();
       return;
     }
@@ -464,20 +442,20 @@
       cards.push(libraryCard({ id, title, subtitle: [year, kind].filter(Boolean).join(" · "), badge: "In Library", series: kind === "TV Show" }));
     };
     for (const other of related.results) {
-      if (other.jellyfinId) addLibrary(other.jellyfinId, other.title, other.year, kindText(other));
+      if (other.jellyfinId) addLibrary(other.jellyfinId, other.title, other.year, discover().kindOf(other));
       else cards.push(discover().itemCard(other));
     }
     for (const other of similar) addLibrary(other.Id, other.Name, other.ProductionYear, other.Type === "Series" ? "TV Show" : "Film");
 
     // Jellyfin keeps earlier detail pages in the document, hidden: look only inside this one.
-    const host = page.querySelector(HT.jf.detailSecondary);
+    const host = kit.jf("seerr", "detailSecondary", page);
     if (!host) return;
     const row = kit.shelf({ id: "seerr-related", title: "More Like This", cards });
     row.classList.add("hera-seerr");
     row.dataset.heraSeerr = "related";
     page.querySelector('[data-hera-seerr="related"]')?.remove();
-    insertBefore(host, row, host.querySelector("#similarCollapsible"));
-    page.querySelector("#similarCollapsible")?.classList.add("hera-seerr-covered");
+    insertBefore(host, row, kit.jf("seerr", "seerrSimilar", host));
+    kit.jf("seerr", "seerrSimilar", page)?.classList.add("hera-seerr-covered");
   };
 
   // ---------- collections ---------------------------------------------------------------
@@ -569,7 +547,7 @@
     // After the title sheet closes: fetch the collection again and repaint, keeping focus on the
     // film that was open.
     const refresh = async (film) => {
-      memo.delete(`collection:${data.id}`);
+      collections.delete(`${data.id}`);
       try {
         current = await fetchCollection(data.id);
       } catch {
@@ -592,9 +570,9 @@
           ? { tone: "error", text: `Requested ${plural(result.requested, "film")}; ${plural(result.failed, "film")} couldn't be sent.` }
           : { tone: "ok", text: `Requested ${plural(result.requested, "film")}.` };
       } catch (error) {
-        notice = { tone: "error", text: errorStatus(error) === 403 ? "Your Jellyfin account isn't linked to Seerr." : (await errorMessage(error)) || "Couldn't send the request. Try again in a moment." };
+        notice = { tone: "error", text: discover().errorStatus(error) === 403 ? "Your Jellyfin account isn't linked to Seerr." : (await discover().errorMessage(error)) || "Couldn't send the request. Try again in a moment." };
       }
-      memo.delete(`collection:${data.id}`);
+      collections.delete(`${data.id}`);
       try {
         current = await fetchCollection(data.id);
       } catch {
@@ -611,7 +589,7 @@
 
   // ---------- detail pages --------------------------------------------------------------
 
-  const isCurrent = (page, itemId) => kit.itemIdFromHash() === itemId && !page.classList.contains("hide");
+  const isCurrent = (page, itemId) => kit.itemIdFromHash() === itemId && kit.jf("seerr", "page") === page;
 
   // Jellyfin reuses one page element for every item; what was added for the last one goes first.
   const clean = (page, itemId) => {
@@ -644,10 +622,9 @@
     }
   };
 
-  const onHash = () => requestAnimationFrame(() => syncView(document.querySelector(".page:not(.hide)")));
-
-  const start = () => {
-    listen(window, "hashchange", onHash);
+  const onRoute = (route) => {
+    params = route.params;
+    syncView(route.page ?? kit.jf("seerr", "page"));
   };
 
   HT.register({
@@ -655,10 +632,14 @@
     // A person only Seerr knows is drawn in the home tab; titles and people in the library get
     // their rows in the detail page's main and secondary sections.
     requires: { indexPage: ["homeTab"], itemDetailPage: ["detailSection", "detailSecondary"] },
-    async onView(page, { itemId }) {
+    async onView(page, { itemId, params: viewParams }) {
+      params = viewParams;
       if (!kit.userId()) return;
       await syncView(page);
-      if (page.id === "itemDetailPage" && itemId) await onDetails(page, itemId);
+      if (page.id === DETAIL_PAGE && itemId) await onDetails(page, itemId);
+    },
+    start() {
+      scope.add(kit.onRoute("seerr", onRoute));
     },
     teardown() {
       unmountView();
@@ -667,9 +648,7 @@
       clearTimeout(bioWatch.timer);
       document.querySelectorAll("[data-hera-seerr], .hera-person-role, .hera-readmore:not(.hera-detail-more)").forEach((node) => node.remove());
       document.querySelectorAll(".hera-seerr-covered").forEach((node) => node.classList.remove("hera-seerr-covered"));
-      cleanups.splice(0).forEach((fn) => fn());
+      scope.dispose();
     },
   });
-
-  start();
 })();

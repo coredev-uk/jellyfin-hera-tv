@@ -15,7 +15,7 @@ public static class SeerrMapper
 
     /// <summary>Maps a movie or TV record (<c>mediaType</c> set) to the client's title shape.</summary>
     public static object Item(JsonNode node, User user, LibraryLookup library)
-        => Item(node, (string?)node["mediaType"], user, library);
+        => Item(node, node.At("mediaType").Str(), user, library);
 
     /// <summary>
     /// Maps a movie or TV record to the client's title shape, given its media type. For a record
@@ -24,20 +24,20 @@ public static class SeerrMapper
     public static object Item(JsonNode node, string? mediaType, User user, LibraryLookup library)
     {
         var type = mediaType == "tv" ? "tv" : "movie";
-        var tmdbId = node["id"]?.ToString();
+        var tmdbId = node.At("id")?.ToString();
         var inLibrary = library.Find(user, type, tmdbId);
-        var date = (string?)node["releaseDate"] ?? (string?)node["firstAirDate"];
+        var date = node.At("releaseDate").Str() ?? node.At("firstAirDate").Str();
         return new
         {
-            tmdbId = node["id"]?.GetValue<int>(),
+            tmdbId = node.At("id").Int(),
             mediaType = type,
-            title = (string?)node["title"] ?? (string?)node["name"],
+            title = node.At("title").Str() ?? node.At("name").Str(),
             year = Year(date),
             releaseDate = date,
-            overview = (string?)node["overview"],
-            poster = Image((string?)node["posterPath"], "w342"),
-            backdrop = Image((string?)node["backdropPath"], "w1280"),
-            rating = node["voteAverage"]?.GetValue<double?>(),
+            overview = node.At("overview").Str(),
+            poster = Image(node.At("posterPath").Str(), "w342"),
+            backdrop = Image(node.At("backdropPath").Str(), "w1280"),
+            rating = node.At("voteAverage").Num(),
             status = Status(node, inLibrary),
             jellyfinId = JellyfinId(inLibrary),
         };
@@ -51,7 +51,7 @@ public static class SeerrMapper
 
     /// <summary>Gets "available" for what the viewer's library holds, else Seerr's own state for the title.</summary>
     public static string Status(JsonNode node, BaseItem? inLibrary)
-        => inLibrary is not null ? "available" : MediaStatus(node["mediaInfo"]?["status"]?.GetValue<int>() ?? 0);
+        => inLibrary is not null ? "available" : MediaStatus(node.At("mediaInfo", "status").Int() ?? 0);
 
     public static string? Image(string? path, string size) => string.IsNullOrEmpty(path) ? null : TmdbImage + size + path;
 
@@ -78,17 +78,17 @@ public static class SeerrMapper
 
     public static string SeasonStatus(JsonNode title, int seasonNumber)
     {
-        var season = title["mediaInfo"]?["seasons"]?.AsArray()
-            .FirstOrDefault(s => s?["seasonNumber"]?.GetValue<int>() == seasonNumber);
+        var mediaInfo = title.At("mediaInfo");
+        var season = mediaInfo.At("seasons").Items().FirstOrDefault(s => s.At("seasonNumber").Int() == seasonNumber);
         if (season is not null)
         {
-            return MediaStatus(season["status"]?.GetValue<int>() ?? 0);
+            return MediaStatus(season.At("status").Int() ?? 0);
         }
 
-        var requested = title["mediaInfo"]?["requests"]?.AsArray()
-            .Where(r => r?["status"]?.GetValue<int>() is 1 or 2)
-            .SelectMany(r => r?["seasons"]?.AsArray() ?? [])
-            .Any(s => s?["seasonNumber"]?.GetValue<int>() == seasonNumber) ?? false;
+        var requested = mediaInfo.At("requests").Items()
+            .Where(r => r.At("status").Int() is 1 or 2)
+            .SelectMany(r => r.At("seasons").Items())
+            .Any(s => s.At("seasonNumber").Int() == seasonNumber);
         return requested ? "pending" : "none";
     }
 }

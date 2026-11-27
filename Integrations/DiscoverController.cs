@@ -42,9 +42,9 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
             sonarr = settings.Enabled(ArrService.Sonarr),
             radarr = settings.Enabled(ArrService.Radarr),
             sabnzbd = settings.Enabled(ArrService.Sabnzbd),
-            activity = settings.ActivityEnabled,
-            admin = User.IsInRole("Administrator"),
-            features = IntegrationSettings.Features(config),
+            activity = settings.ArrConnected,
+            admin = this.IsAdmin(userManager),
+            features = FeatureSwitches.Describe(config),
         });
     }
 
@@ -92,36 +92,39 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
 
         // The record is the cache's own, shared with every other reader: its media type is passed, not written into it.
         var item = SeerrMapper.Item(node, type, user, library);
-        var seasons = node["seasons"]?.AsArray()
-            .Where(s => (s?["seasonNumber"]?.GetValue<int>() ?? 0) > 0)
-            .Select(s => new
+        var seasons = upstream.MapEach(
+            "Seerr",
+            node.At("seasons").Items().Where(s => (s.At("seasonNumber").Int() ?? 0) > 0),
+            s => new
             {
-                seasonNumber = s!["seasonNumber"]!.GetValue<int>(),
-                name = (string?)s["name"],
-                episodeCount = s["episodeCount"]?.GetValue<int>() ?? 0,
-                status = SeerrMapper.SeasonStatus(node, s["seasonNumber"]!.GetValue<int>()),
-            })
-            .ToArray();
-        var trailer = node["relatedVideos"]?.AsArray()
-            .FirstOrDefault(v => (string?)v?["type"] == "Trailer" && (string?)v?["site"] == "YouTube");
-        var cast = node["credits"]?["cast"]?.AsArray().Take(10).Select(c => new
-        {
-            name = (string?)c?["name"],
-            character = (string?)c?["character"],
-            id = c?["id"]?.GetValue<int?>(),
-            photo = SeerrMapper.Image((string?)c?["profilePath"], "w185"),
-        }).ToArray();
+                seasonNumber = s.At("seasonNumber").Int() ?? 0,
+                name = s.At("name").Str(),
+                episodeCount = s.At("episodeCount").Int() ?? 0,
+                status = SeerrMapper.SeasonStatus(node, s.At("seasonNumber").Int() ?? 0),
+            }).ToArray();
+        var trailer = node.At("relatedVideos").Items()
+            .FirstOrDefault(v => v.At("type").Str() == "Trailer" && v.At("site").Str() == "YouTube");
+        var cast = upstream.MapEach(
+            "Seerr",
+            node.At("credits", "cast").Items().Take(10),
+            c => new
+            {
+                name = c.At("name").Str(),
+                character = c.At("character").Str(),
+                id = c.At("id").Int(),
+                photo = SeerrMapper.Image(c.At("profilePath").Str(), "w185"),
+            }).ToArray();
 
         return Ok(new
         {
             item,
-            tagline = (string?)node["tagline"],
-            runtime = node["runtime"]?.GetValue<int?>() ?? node["episodeRunTime"]?.AsArray().FirstOrDefault()?.GetValue<int?>(),
-            genres = node["genres"]?.AsArray().Select(g => (string?)g?["name"]).Where(g => g is not null).ToArray() ?? [],
+            tagline = node.At("tagline").Str(),
+            runtime = node.At("runtime").Int() ?? node.At("episodeRunTime").Items().FirstOrDefault().Int(),
+            genres = node.At("genres").Items().Select(g => g.At("name").Str()).Where(g => g is not null).ToArray(),
             certification = Certification(node, type),
-            seasons = seasons ?? [],
-            trailer = (string?)trailer?["url"],
-            cast = cast ?? [],
+            seasons,
+            trailer = trailer.At("url").Str(),
+            cast,
         });
     }
 
@@ -185,12 +188,12 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         var (status, response) = await upstream.SeerrPostAsync("api/v1/request", payload, seerrUser.Value).ConfigureAwait(false);
         if (status is >= 200 and < 300)
         {
-            return Ok(new { requestStatus = SeerrMapper.RequestStatus(response?["status"]?.GetValue<int>() ?? 1) });
+            return Ok(new { requestStatus = SeerrMapper.RequestStatus(response.At("status").Int() ?? 1) });
         }
 
         return StatusCode(status >= 400 && status < 500 ? status : StatusCodes.Status502BadGateway, new
         {
-            message = (string?)response?["message"] ?? "Seerr did not accept the request.",
+            message = response.At("message").Str() ?? "Seerr did not accept the request.",
         });
     }
 
@@ -213,13 +216,13 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
     private async Task<List<Quality>> QualitiesAsync(string type, int seerrUser)
     {
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        if (config.RequestQualityPicker == "off" || (config.RequestQualityPicker == "admins" && !User.IsInRole("Administrator")))
+        if (config.RequestQualityPicker == "off" || (config.RequestQualityPicker == "admins" && !this.IsAdmin(userManager)))
         {
             return [];
         }
 
         var account = await upstream.SeerrGetAsync($"api/v1/user/{seerrUser}", TimeSpan.FromMinutes(5)).ConfigureAwait(false);
-        var permissions = account?["permissions"]?.GetValue<long>() ?? 0;
+        var permissions = account.At("permissions").Long() ?? 0;
         if ((permissions & (AdminPermission | ManageRequestsPermission | AdvancedRequestPermission)) == 0)
         {
             return [];
@@ -227,12 +230,12 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
 
         var may4k = (permissions & (AdminPermission | Request4kPermission | (type == "tv" ? Request4kTvPermission : Request4kMoviePermission))) != 0;
         var service = type == "tv" ? "sonarr" : "radarr";
-        var servers = (await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(10)).ConfigureAwait(false))?.AsArray();
+        var servers = await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
         var byLabel = new Dictionary<string, Quality>(StringComparer.Ordinal);
-        var standard = servers?.FirstOrDefault(s => s?["isDefault"]?.GetValue<bool>() == true && s?["is4k"]?.GetValue<bool>() != true);
-        if (standard?["id"]?.GetValue<int>() is int serverId)
+        var standard = servers.Items().FirstOrDefault(s => s.At("isDefault").Bool() == true && s.At("is4k").Bool() != true);
+        if (standard.At("id").Int() is int serverId)
         {
-            var activeProfile = standard["activeProfileId"]?.GetValue<int>();
+            var activeProfile = standard.At("activeProfileId").Int();
             foreach (var (id, name) in await ProfilesAsync(service, serverId).ConfigureAwait(false))
             {
                 if (Resolution(name) is not { } label)
@@ -274,7 +277,7 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
     }
 
     /// <summary>The profile a setting names ("serverId:profileId"), if it is still on that server.</summary>
-    private async Task<Quality?> NamedAsync(string service, JsonArray? servers, string? setting, string label)
+    private async Task<Quality?> NamedAsync(string service, JsonNode? servers, string? setting, string label)
     {
         var parts = setting?.Split(':');
         if (parts is not { Length: 2 }
@@ -284,21 +287,22 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
             return null;
         }
 
-        var server = servers?.FirstOrDefault(s => s?["id"]?.GetValue<int>() == serverId);
+        var server = servers.Items().FirstOrDefault(s => s.At("id").Int() == serverId);
         if (server is null || !(await ProfilesAsync(service, serverId).ConfigureAwait(false)).Exists(p => p.Id == profileId))
         {
             return null;
         }
 
-        return new Quality(serverId, profileId, label, false, server["is4k"]?.GetValue<bool>() == true);
+        return new Quality(serverId, profileId, label, false, server.At("is4k").Bool() == true);
     }
 
     private async Task<List<(int Id, string? Name)>> ProfilesAsync(string service, int serverId)
     {
         var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{serverId}", TimeSpan.FromMinutes(10)).ConfigureAwait(false);
-        return [.. (detail?["profiles"]?.AsArray() ?? [])
-            .Where(p => p?["id"]?.GetValue<int>() is not null)
-            .Select(p => (p!["id"]!.GetValue<int>(), (string?)p["name"]))];
+        return [.. detail.At("profiles").Items()
+            .Select(p => (Id: p.At("id").Int(), Name: p.At("name").Str()))
+            .Where(p => p.Id is not null)
+            .Select(p => (p.Id!.Value, p.Name))];
     }
 
     private static readonly string[] Resolutions = ["720p", "1080p", "4K"];
@@ -321,6 +325,8 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
 
     private sealed record Quality(int ServerId, int ProfileId, string Label, bool IsDefault, bool Is4k);
 
+    private sealed record LeavingEntry(string LeavesOn, object Entry);
+
     [HttpGet("leaving")]
     public async Task<IActionResult> GetLeaving()
     {
@@ -339,36 +345,38 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         // Settings: Leaving Soon looks this many days ahead; 0 lists everything Maintainerr has queued.
         var window = Math.Max(0, Plugin.Instance?.Configuration.LeavingSoonDays ?? 0);
         var horizon = DateTime.UtcNow.Date.AddDays(window);
-        var leaving = new List<(string LeavesOn, object Entry)>();
-        foreach (var collection in collections?.AsArray() ?? [])
+        var leaving = new List<LeavingEntry>();
+        foreach (var collection in collections.Items())
         {
-            if (collection?["isActive"]?.GetValue<bool>() != true)
+            if (collection.At("isActive").Bool() != true)
             {
                 continue;
             }
 
-            var days = collection["deleteAfterDays"]?.GetValue<int?>() ?? 0;
-            var type = (string?)collection["type"] == "show" ? "tv" : "movie";
-            foreach (var media in collection["media"]?.AsArray() ?? [])
-            {
-                var tmdbId = media?["tmdbId"]?.ToString();
-                var item = library.Find(user, type, tmdbId);
-                if (item is null
-                    || !DateTime.TryParse((string?)media!["addDate"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var added)
-                    || (window > 0 && added.AddDays(days).Date > horizon))
+            var days = collection.At("deleteAfterDays").Int() ?? 0;
+            var type = collection.At("type").Str() == "show" ? "tv" : "movie";
+            leaving.AddRange(upstream.MapEach<LeavingEntry?>(
+                "Maintainerr",
+                collection.At("media").Items(),
+                media =>
                 {
-                    continue;
-                }
+                    var item = library.Find(user, type, media.At("tmdbId")?.ToString());
+                    if (item is null
+                        || !DateTime.TryParse(media.At("addDate").Str(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var added)
+                        || (window > 0 && added.AddDays(days).Date > horizon))
+                    {
+                        return null;
+                    }
 
-                var leavesOn = added.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                leaving.Add((leavesOn, new
-                {
-                    jellyfinId = item.Id.ToString("N", CultureInfo.InvariantCulture),
-                    name = item.Name,
-                    type,
-                    leavesOn,
-                }));
-            }
+                    var leavesOn = added.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    return new LeavingEntry(leavesOn, new
+                    {
+                        jellyfinId = item.Id.ToString("N", CultureInfo.InvariantCulture),
+                        name = item.Name,
+                        type,
+                        leavesOn,
+                    });
+                }).OfType<LeavingEntry>());
         }
 
         // Soonest first. Never capped: a title page finds its own "Leaving" date in this list.
@@ -389,14 +397,14 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         }
 
         var node = await upstream.SeerrGetAsync(pathAndQuery, TimeSpan.FromMinutes(10)).ConfigureAwait(false);
-        var results = node?["results"]?.AsArray()
-            .Where(r => (string?)r?["mediaType"] is "movie" or "tv")
-            .Select(r => SeerrMapper.Item(r!, user, library))
-            .ToArray() ?? [];
+        var results = upstream.MapEach(
+            "Seerr",
+            node.At("results").Items().Where(r => r.At("mediaType").Str() is "movie" or "tv"),
+            r => SeerrMapper.Item(r, user, library)).ToArray();
         return Ok(new
         {
-            page = node?["page"]?.GetValue<int>() ?? 1,
-            totalPages = node?["totalPages"]?.GetValue<int>() ?? 0,
+            page = node.At("page").Int() ?? 1,
+            totalPages = node.At("totalPages").Int() ?? 0,
             results,
         });
     }
@@ -407,19 +415,15 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         var region = Plugin.Instance?.Configuration.WatchRegion is { Length: 2 } set ? set.ToUpperInvariant() : "GB";
         if (type == "movie")
         {
-            var release = title["releases"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == region);
-            return release?["release_dates"]?.AsArray().Select(d => (string?)d?["certification"]).FirstOrDefault(c => !string.IsNullOrEmpty(c));
+            var release = title.At("releases", "results").Items().FirstOrDefault(r => r.At("iso_3166_1").Str() == region);
+            return release.At("release_dates").Items().Select(d => d.At("certification").Str()).FirstOrDefault(c => !string.IsNullOrEmpty(c));
         }
 
-        var rating = title["contentRatings"]?["results"]?.AsArray().FirstOrDefault(r => (string?)r?["iso_3166_1"] == region);
-        return (string?)rating?["rating"];
+        var rating = title.At("contentRatings", "results").Items().FirstOrDefault(r => r.At("iso_3166_1").Str() == region);
+        return rating.At("rating").Str();
     }
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 
     public sealed class RequestBody
     {

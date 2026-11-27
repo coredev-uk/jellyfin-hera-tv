@@ -1,6 +1,5 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Stats;
 
@@ -35,7 +34,7 @@ internal sealed record Recorded(
 /// Like the Playback Reporting source, it fails soft: a database that can't be opened is logged once
 /// and reads as "no samples".
 /// </remarks>
-internal sealed class StatsStore(ILogger<StatsStore> logger)
+internal sealed class StatsStore : SqliteStore
 {
     /// <summary>How often the recorder samples, and so how many seconds each sample stands for.</summary>
     public const int SampleSeconds = 60;
@@ -80,16 +79,19 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
     /// <summary>The one-day-per-row query behind <see cref="Read"/>; see <see cref="BuildDayQuery"/>.</summary>
     private static readonly string DayQuery = BuildDayQuery();
 
-    private readonly Lock gate = new();
+    // Version 1 is the schema as it stood before versions were kept.
+    private static readonly Migration[] Migrations = [new(1, Schema)];
 
-    /// <summary>Totals of local days that have ended and settled, by date. Only touched under <see cref="gate"/>.</summary>
+    public StatsStore(ServerHealth health)
+        : base(health, "Stream statistics", "use its stats database, so streams aren't being recorded", "stats.db", Migrations)
+    {
+    }
+
+    /// <summary>Totals of local days that have ended and settled, by date. Only touched under <see cref="SqliteStore.Gate"/>.</summary>
     private readonly Dictionary<string, DayTotals> settled = new(StringComparer.Ordinal);
 
     /// <summary>The oldest sample time seen when <see cref="settled"/> was last used.</summary>
     private string? firstSeen;
-    private string? path;
-    private int faulted;
-    private bool ready;
 
     /// <summary>Formats a sample time. One value per tick, so rows that share it were concurrent.</summary>
     public static string Stamp(DateTime utc) => utc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
@@ -132,8 +134,7 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
     }
 
     /// <summary>Gets <see cref="FileSignature"/> of this store's database; empty before the plugin has loaded.</summary>
-    internal string Signature()
-        => (path ?? (Plugin.Instance?.DataFolderPath is { } folder ? Path.Combine(folder, "stats.db") : null)) is { } file ? FileSignature(file) : string.Empty;
+    internal string Signature() => FilePath is { } file ? FileSignature(file) : string.Empty;
 
     /// <summary>Adds one tick's samples; returns false when they couldn't be saved.</summary>
     public bool Add(DateTime utc, IReadOnlyList<Sample> samples)
@@ -143,7 +144,7 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
             return true;
         }
 
-        return Run(connection =>
+        return Writing(connection =>
         {
             using var transaction = connection.BeginTransaction();
             using var command = connection.CreateCommand();
@@ -187,7 +188,7 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
     }
 
     /// <summary>Deletes samples older than <see cref="KeepDays"/>.</summary>
-    public bool Prune(DateTime utc) => Run(connection =>
+    public bool Prune(DateTime utc) => Writing(connection =>
     {
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM samples WHERE time < $cutoff";
@@ -209,7 +210,7 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
     internal Recorded? Read(DateTime from, DateTime today)
     {
         Recorded? result = null;
-        var ok = Run(connection =>
+        var ok = Reading(connection =>
         {
             DateTime since;
             string? first;
@@ -407,64 +408,6 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
         public static readonly DayTotals Empty = new(0, 0, 0, new long[ResolutionLabels.Length], new long[BitrateLabels.Length]);
     }
 
-    /// <summary>Runs one unit of work on a fresh connection, creating the database first if need be.</summary>
-    private bool Run(Action<SqliteConnection> work)
-    {
-        try
-        {
-            lock (gate)
-            {
-                var file = path ??= Locate();
-                var builder = new SqliteConnectionStringBuilder
-                {
-                    DataSource = file,
-                    Mode = SqliteOpenMode.ReadWriteCreate,
-                    DefaultTimeout = 5,
-                    Pooling = false,
-                };
-                using var connection = new SqliteConnection(builder.ConnectionString);
-                connection.Open();
-                // The tables are made once per process, not on every call.
-                if (!ready)
-                {
-                    using var schema = connection.CreateCommand();
-                    schema.CommandText = Schema;
-                    schema.ExecuteNonQuery();
-                    ready = true;
-                }
-
-                work(connection);
-            }
-
-            Interlocked.Exchange(ref faulted, 0);
-            return true;
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            // A database that went wrong may be gone or replaced: make the tables again next time, and forget what was kept of it.
-            lock (gate)
-            {
-                ready = false;
-                settled.Clear();
-            }
-
-            if (Interlocked.Exchange(ref faulted, 1) == 0)
-            {
-                logger.LogWarning(ex, "Hera TV couldn't use its stats database; streams aren't being recorded until it can. Further failures are logged at debug level");
-            }
-            else
-            {
-                logger.LogDebug(ex, "Hera TV couldn't use its stats database");
-            }
-
-            return false;
-        }
-    }
-
-    private static string Locate()
-    {
-        var folder = Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin hasn't loaded yet.");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, "stats.db");
-    }
+    /// <summary>A failure may mean the file was replaced, and what was kept of the old one is of another database.</summary>
+    protected override void Forget() => settled.Clear();
 }

@@ -110,26 +110,8 @@ public sealed class IntegrationSettings
     /// <summary>Gets a value indicating whether a service has both its address and its key.</summary>
     public bool Enabled(ArrService service) => Endpoint(service) is { Url: not null, Key: { Length: > 0 } };
 
-    /// <summary>Gets a value indicating whether Sonarr or Radarr is connected: what request state is read from.</summary>
-    public bool ActivityEnabled => Enabled(ArrService.Sonarr) || Enabled(ArrService.Radarr);
-
-    /// <summary>The server-wide switches the web client and the dashboard read.</summary>
-    public static object Features(PluginConfiguration config) => new
-    {
-        discover = config.DiscoverEnabled,
-        leavingSoon = config.LeavingSoonEnabled,
-        requests = config.RequestsRowEnabled,
-        trending = config.TrendingRowEnabled,
-        elsewhere = config.ElsewhereEnabled,
-        ratings = config.RatingsEnabled,
-        qualityBadges = config.QualityBadgesEnabled,
-        activity = config.ActivityEnabled,
-        notifications = config.NotificationsEnabled,
-        homeRows = config.HomeRowsEnabled,
-        letterboxd = config.LetterboxdEnabled
-            && !string.IsNullOrEmpty(Inspect(LetterboxdApiKeyVariable, config.LetterboxdApiKey).Value)
-            && !string.IsNullOrEmpty(Inspect(LetterboxdApiSecretVariable, config.LetterboxdApiSecret).Value),
-    };
+    /// <summary>Gets a value indicating whether Sonarr or Radarr is connected (has its address and key): what request progress is read from. Not the "Request progress" switch, which is <see cref="PluginConfiguration.ActivityEnabled"/>.</summary>
+    public bool ArrConnected => Enabled(ArrService.Sonarr) || Enabled(ArrService.Radarr);
 
     // Read on nearly every request, sometimes in a loop, and building it means some forty environment
     // reads, URL parsing and a regex: so it is kept for a few seconds. A saved change drops it at once

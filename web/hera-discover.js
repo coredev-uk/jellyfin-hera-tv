@@ -5,6 +5,20 @@
  *  - "Request seasons" beside a series' Episodes. Seerr results on the search page live in hera-search.js.
  * Requests are made by the plugin as the viewer's own Seerr account; a viewer who isn't linked
  * can browse but is pointed at Seerr instead.
+ *
+ * Contracts with the other modules:
+ *  - HeraTV.discover { openTitle, itemCard, badgeOf, seriesText, kindOf, errorStatus, errorMessage } is
+ *    leaned on by hera-search.js, hera-seerr.js, hera-activity.js and hera-home.js, each guarding for it
+ *    being absent. This file in turn reads HeraTV.activity (hera-activity.js) for live download wording.
+ *  - DOM expandos: card.heraItem and slide.heraItem are the Seerr title a card or feature slide shows
+ *    (slide.heraTrailer/heraTrailerLoaded its trailer button); data-hera-key finds them again when a
+ *    request changes a status.
+ *  - Borrows Jellyfin's classes on elements it makes: emby-tab-button, emby-button, show-focus,
+ *    emby-button-foreground and emby-tab-button-active (the TV tab strip's tab), sectionTitle
+ *    sectionTitle-cards (a results heading).
+ *  - Expects hera-tv.css for cards, shelves, buttons and the home hero's pager (the feature reuses it and
+ *    its hera-hero-progress animation), hera-activity.css for .hera-ext*, and html.hera-view-taken for
+ *    the takeover of the home tab while the view shows (kit.view).
  */
 (() => {
   "use strict";
@@ -14,12 +28,13 @@
   const { kit } = HT;
   const { el, icon } = kit;
 
-  const root = document.documentElement;
-  const cleanups = [];
-  const listen = (target, type, handler, options) => {
-    target.addEventListener(type, handler, options);
-    cleanups.push(() => target.removeEventListener(type, handler, options));
-  };
+  const scope = kit.scope();
+
+  // Jellyfin's page ids (the keys `requires` is written in) and its numbering of the tab strip, Home
+  // first: Jellyfin gives them no other mark.
+  const INDEX_PAGE = "indexPage";
+  const DETAIL_PAGE = "itemDetailPage";
+  const HOME_TAB_INDEX = "0";
 
   const DISCOVER_HASH = "#/home?hera=discover";
 
@@ -39,28 +54,27 @@
     { id: "upcoming-tv", name: "upcoming-tv", title: "Upcoming TV", dates: true },
   ];
 
-  const cache = new Map();
-  const cached = (key, load, ttl = 3 * 60 * 1000) => {
-    const now = Date.now();
-    const hit = cache.get(key);
-    if (hit && now - hit.at < hit.ttl) return hit.promise;
-    const promise = Promise.resolve(load()).catch((error) => {
-      cache.delete(key);
-      throw error;
-    });
-    // Expired answers go as new ones arrive, so a long session keeps only what it just asked for.
-    for (const [k, v] of cache) if (now - v.at >= v.ttl) cache.delete(k);
-    cache.set(key, { at: now, ttl, promise });
-    return promise;
-  };
+  const lists = kit.ttlCache({ ttl: 3 * 60 * 1000, max: 60 });
+  const titles = kit.ttlCache({ ttl: 60 * 1000, max: 60 });
+  const qualities = kit.ttlCache({ ttl: 10 * 60 * 1000, max: 2 });
 
-  const fetchList = (name, page = 1) =>
-    cached(`list:${name}:${page}`, () => kit.hera(`discover/lists/${name}`, { query: { page } }));
-  const fetchTitle = (mediaType, tmdbId) =>
-    cached(`title:${mediaType}:${tmdbId}`, () => kit.hera(`discover/titles/${mediaType}/${tmdbId}`), 60 * 1000);
-  const searchTitles = (query, page = 1) => kit.hera("discover/search", { query: { query, page } });
-  const qualitiesFor = (mediaType) =>
-    cached(`qualities:${mediaType === "tv" ? "tv" : "movie"}`, () => kit.hera(`discover/qualities/${mediaType === "tv" ? "tv" : "movie"}`), 10 * 60 * 1000);
+  // kit.track runs on a side branch: it never rejects, so wrapping a request in it would hide the
+  // failure from the caller's error path and let the cache keep an empty answer.
+  const fetchList = (name, page = 1) => {
+    const request = lists.get(`${name}:${page}`, () => kit.hera(`discover/lists/${name}`, { query: { page } }));
+    kit.track("discover", request);
+    return request;
+  };
+  const fetchTitle = (mediaType, tmdbId) => titles.get(`${mediaType}:${tmdbId}`, () => kit.hera(`discover/titles/${mediaType}/${tmdbId}`));
+  const searchTitles = (query, page = 1) => {
+    const request = kit.hera("discover/search", { query: { query, page } });
+    kit.track("discover", request);
+    return request;
+  };
+  const qualitiesFor = (mediaType) => {
+    const kind = mediaType === "tv" ? "tv" : "movie";
+    return qualities.get(kind, () => kit.hera(`discover/qualities/${kind}`));
+  };
   const qualityKey = (quality) => `${quality.serverId}:${quality.profileId}`;
 
   const errorStatus = (error) => error?.status ?? error?.response?.status ?? null;
@@ -193,8 +207,6 @@
   };
   const STATUS_ICON = { available: "check_circle", partial: "timelapse", processing: "check_circle_outline", pending: "schedule" };
 
-  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
   // Jellyfin here says "Series 1" for seasons. Contiguous numbers read as a range: "Series 6–8".
   const seriesText = (numbers) => {
     const sorted = [...numbers].sort((a, b) => a - b);
@@ -292,9 +304,9 @@
       const box = dialog.getBoundingClientRect();
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) close();
     });
-    // Escape, and the remote's Back key: webOS 461, Tizen 10009. Jellyfin would otherwise navigate back.
+    // Escape, and the remote's Back key. Jellyfin would otherwise navigate back.
     dialog.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" || event.keyCode === 461 || event.keyCode === 10009 || event.key === "GoBack") {
+      if (kit.keys.isBack(event)) {
         event.preventDefault();
         event.stopPropagation();
         close();
@@ -410,7 +422,7 @@
           [
             icon(checked ? "check_box" : "check_box_outline_blank"),
             el("span", { class: "hera-season__name", text: seasonName(season) }),
-            el("span", { class: "hera-season__count", text: season.episodeCount ? plural(season.episodeCount, "episode") : "" }),
+            el("span", { class: "hera-season__count", text: season.episodeCount ? kit.text.plural(season.episodeCount, "episode") : "" }),
             el("span", { class: "hera-season__status", text: season.status === "none" ? "" : (STATUS_TEXT[season.status] ?? "") }),
           ],
         );
@@ -645,7 +657,7 @@
             setStatus(current, next);
             ctx.notice = { tone: "ok", text: state === "available" ? "Already available." : "Requested." };
           }
-          cache.delete(`title:${item.mediaType}:${item.tmdbId}`);
+          titles.delete(`${item.mediaType}:${item.tmdbId}`);
           refresh(picked, next).catch(() => {});
         }
       } catch (error) {
@@ -766,10 +778,8 @@
   const FEATURED = 6;
   const FEATURE_MS = 8000;
 
-  const longDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-
   const featureSlide = (item) => {
-    const when = unreleased(item) ? `Out ${longDate(item.releaseDate)}` : item.year;
+    const when = unreleased(item) ? `Out ${kit.text.longDate(item.releaseDate)}` : item.year;
     const meta = ["Trending Now", kindOf(item), when, item.rating ? `${item.rating.toFixed(1)} rating` : null].filter(Boolean);
     const trailer = el("a", { class: "hera-btn hera-btn--glass hera-btn--text", target: "_blank", rel: "noopener noreferrer", hidden: true }, [
       icon("smart_display"),
@@ -834,7 +844,7 @@
       paused = value;
       hold("user", value);
       toggle.setAttribute("aria-label", value ? "Play featured titles" : "Pause featured titles");
-      toggle.querySelector(".material-icons").textContent = value ? "play_arrow" : "pause";
+      toggle.querySelector(".hera-icon").textContent = value ? "play_arrow" : "pause";
     };
     // The trailer button appears once the title's details say it has one.
     const loadTrailer = (slide) => {
@@ -1112,39 +1122,37 @@
 
   const mountView = (page) => {
     if (view.root?.isConnected) return;
-    const host = page.querySelector(HT.jf.homeTab);
+    const host = kit.jf("discover", "homeTab", page);
     if (!host) return;
     unmountView();
     view.abort = new AbortController();
     view.root = buildView(view.abort.signal);
     host.append(view.root);
-    root.classList.add("hera-discover-on");
+    kit.view.take("discover", { art: false });
     window.scrollTo(0, 0);
   };
 
   const unmountView = () => {
     view.abort?.abort();
     view.abort = null;
+    if (view.root) kit.view.release("discover");
     view.root?.remove();
     view.root = null;
-    root.classList.remove("hera-discover-on");
   };
 
   // ---------- tab and routing -----------------------------------------------------------
 
-  const wantsDiscover = () => {
-    const [path, query = ""] = window.location.hash.split("?");
-    return path.startsWith("#/home") && new URLSearchParams(query).get("hera") === "discover";
-  };
+  // The `hera` query of the route showing, from kit.onRoute and from onView, which both carry it.
+  let params = new URLSearchParams();
+  const wantsDiscover = () => params.get("hera") === "discover";
 
   // The tab needs Seerr and the admin's Discover switch (Hera TV settings in the Dashboard).
   const discoverOn = (ints) => Boolean(ints.seerr) && ints.features?.discover !== false;
 
-  const currentPage = () => document.querySelector(".page:not(.hide)");
-
   // `page` is the page that is, or is about to be, showing.
-  const sync = (page = currentPage()) => {
-    if (wantsDiscover() && page?.id === "indexPage" && kit.userId()) {
+  const sync = (page) => {
+    page ??= kit.jf("discover", "page");
+    if (wantsDiscover() && page?.id === INDEX_PAGE && kit.userId()) {
       kit.integrations().then((ints) => {
         if (discoverOn(ints) && wantsDiscover()) mountView(page);
         updateTabs();
@@ -1161,9 +1169,9 @@
   let tvTab = null;
 
   const tabsFor = () => {
-    const onHome = currentPage()?.id === "indexPage";
-    const stack = document.querySelector(HT.jf.appBarTabs);
-    const slider = onHome ? document.querySelector(".headerTabs .emby-tabs-slider") : null;
+    const onHome = kit.jf("discover", "page")?.id === INDEX_PAGE;
+    const stack = kit.jf("discover", "appBarTabs");
+    const slider = onHome ? kit.jf("discover", "headerTabsSlider") : null;
     return { stack, slider };
   };
 
@@ -1197,7 +1205,7 @@
   // Jellyfin's own tab strip knows nothing of ours: Discover is routed here, and a click on its
   // other tabs first leaves Discover so the strip's own state is right again.
   const onTabClick = (event) => {
-    const button = event.target.closest?.(".headerTabs .emby-tab-button");
+    const button = event.target.closest?.(HT.jf.headerTabButton);
     if (!button) return;
     if (button === tvTab) {
       event.preventDefault();
@@ -1207,13 +1215,15 @@
     }
     if (view.root) {
       unmountView();
-      window.history.replaceState(null, "", "#/home");
       updateTabs();
-      // Home is the tab the strip still thinks is selected, so it won't fire; show it ourselves.
-      if (button.dataset.index === "0") {
+      if (button.dataset.index === HOME_TAB_INDEX) {
+        // Home is the tab the strip still thinks is selected, so it won't fire; route there ourselves.
         event.stopImmediatePropagation();
         event.preventDefault();
-        window.dispatchEvent(new HashChangeEvent("hashchange"));
+        window.location.replace("#/home");
+      } else {
+        window.history.replaceState(null, "", "#/home");
+        params = new URLSearchParams();
       }
     }
   };
@@ -1233,14 +1243,14 @@
     });
     const watched = new WeakSet();
     attachChrome = () => {
-      for (const node of document.querySelectorAll(`.MuiAppBar-root, ${HT.jf.legacyHeader}`)) {
+      for (const node of [...kit.jfAll("discover", "appBar"), ...kit.jfAll("discover", "legacyHeader")]) {
         if (watched.has(node)) continue;
         watched.add(node);
         observer.observe(node, { childList: true, subtree: true });
       }
     };
     attachChrome();
-    cleanups.push(() => {
+    scope.add(() => {
       observer.disconnect();
       attachChrome = null;
     });
@@ -1337,42 +1347,35 @@
 
   // ---------- module --------------------------------------------------------------------
 
-  const onViewShow = (event) => {
-    const page = event.target?.closest?.(".page") || event.target;
-    if (page instanceof HTMLElement) sync(page);
-  };
-
-  const start = () => {
-    const wait = setInterval(async () => {
-      if (!kit.api() || !kit.userId()) return;
-      clearInterval(wait);
-      const ints = await kit.integrations();
-      seerrOn = discoverOn(ints);
-      updateTabs();
-      sync();
-    }, 250);
-    cleanups.push(() => clearInterval(wait));
-    listen(document, "viewshow", onViewShow, true);
-    listen(window, "hashchange", () => requestAnimationFrame(() => sync()));
-    listen(document, "click", onTabClick, true);
-    observeChrome();
+  const onRoute = (route) => {
+    params = route.params;
+    sync(route.page);
   };
 
   HT.register({
     name: "discover",
     // The view mounts into the home tab; Discover has nowhere to appear without it.
     requires: { indexPage: ["homeTab"] },
-    async onView(page, { itemId }) {
+    async onView(page, { itemId, params: viewParams }) {
+      params = viewParams;
       if (!kit.userId()) return;
       const ints = await kit.integrations();
       seerrOn = discoverOn(ints);
       sync(page);
       if (!ints.seerr) return;
-      if (page.id !== "itemDetailPage") {
+      if (page.id !== DETAIL_PAGE) {
         stopSeriesWatch();
         removeMissingControls();
       }
-      if (page.id === "itemDetailPage" && itemId) await mountMissing(page, itemId);
+      if (page.id === DETAIL_PAGE && itemId) await mountMissing(page, itemId);
+    },
+    // Routes, the tab click interceptor, the chrome observer and the namespace all wait for
+    // start(): a module switched off in the plugin's settings must not take the home tab over.
+    start() {
+      HT.discover = { openTitle, itemCard, badgeOf, seriesText, kindOf, errorStatus, errorMessage };
+      scope.add(kit.onRoute("discover", onRoute));
+      kit.intercept("discover", document, "click", onTabClick);
+      observeChrome();
     },
     teardown() {
       closeSheet();
@@ -1382,11 +1385,8 @@
       // Every copy, not just this instance's: a reloaded module must not leave a second tab.
       document.querySelectorAll(".hera-discover-tab").forEach((node) => node.remove());
       document.querySelectorAll(".hera-sheet").forEach((node) => node.remove());
-      cleanups.splice(0).forEach((fn) => fn());
+      scope.dispose();
       delete HT.discover;
     },
   });
-
-  HT.discover = { openTitle, itemCard, badgeOf, seriesText };
-  start();
 })();

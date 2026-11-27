@@ -2,13 +2,27 @@
  * Hera TV: extras. Registers with window.HeraTV (hera-tv.js). What Jellyfin Enhanced and Jellyfin
  * Tweaks used to add, rebuilt in Hera's own language:
  *  - Defaults for a person's first visit on a browser: page backdrops, detail banners, blurhash.
- *    They are written only where the person has not chosen, so a changed setting is never undone.
+ *    They are written only where the person has not chosen, so a changed setting is never undone
+ *    (and never taken back either: a stored "true" cannot be told from the person's own choice).
  *  - Quality on detail pages (meta line) and on cards (4K, HDR, Dolby Vision, Atmos), fetched in
  *    batches for the cards that are on screen.
  *  - IMDb and Rotten Tomatoes scores on film and series pages (from Seerr, through the server).
  *  - "Also on": the streaming services that carry a title in the configured region.
  *  - Hide titles: "Remove from Up Next" and "Not Interested", saved per user on the server,
  *    honoured by Hera's rows, Discover and search, and listed with Unhide in Settings > Home.
+ *
+ * Contracts with other files:
+ *  - Reads these expandos off Hera's cards (set by hera-home.js, hera-discover.js, hera-search.js):
+ *    `heraHide` ({ scope, keys, title, year, kind, image, extra }: this card can be hidden),
+ *    `heraItem` (a Seerr title) and `heraId` (a library item id).
+ *  - Offers `HeraTV.hidden` (ready, match, settingsGroup, menu) to home, Discover and Settings; it
+ *    is gone while this module is torn down, so callers use it optionally.
+ *  - Borrows Jellyfin's `mediaInfoItem` class for the nodes it adds to the detail meta line, so
+ *    they take the line's spacing and separator dots.
+ *  - Expects hera-tv.css for `.hera-card`, `.hera-card__art`, `.hera-card__progress` and
+ *    hera-dashboard.css for the `.hera-set-*` rows of the hidden-titles list.
+ *  - Its stylesheets are hera-extras.css (this module) and hera-extras-detail.css (`extras-detail`),
+ *    each gated on its own module's class, so the detail page's ratings and chips stand or fall apart.
  */
 (() => {
   "use strict";
@@ -18,18 +32,15 @@
   const { kit, jf } = heraTv;
   const { el, icon } = kit;
 
+  const MODULE = "extras";
+  const DETAIL = "extras-detail";
+
   const BADGE_LABEL = { "4k": "4K", dv: "Dolby Vision", hdr: "HDR", atmos: "Dolby Atmos", "7.1": "7.1", "5.1": "5.1" };
   // Cards carry the loudest facts only, in the shortest words.
   const CARD_LABEL = { "4k": "4K", dv: "DV", hdr: "HDR", atmos: "Atmos" };
   const CARD_ORDER = ["4k", "dv", "hdr", "atmos"];
-  const CARD_SELECTOR = [
-    '.card[data-id][data-type="Movie"]',
-    '.card[data-id][data-type="Series"]',
-    '.card[data-id][data-type="Episode"]',
-    '.card[data-id][data-type="Video"]',
-    '.hera-card[href^="#/details?id="]:not(.hera-card--person)',
-    ".hera-upnext > .hera-card",
-  ].join(",");
+  // Jellyfin's own cards come from the `extrasStockCards` key; these are Hera's.
+  const HERA_CARDS = '.hera-card[href^="#/details?id="]:not(.hera-card--person), .hera-upnext > .hera-card';
   const BADGE_BATCH = 40;
   const BADGE_KEPT = 1500;
   const EXTRAS_KEPT = 40;
@@ -39,27 +50,23 @@
   const LONG_PRESS_MS = 450;
 
   const state = {
-    run: 0,
-    cleanups: [],
-    extras: new Map(), // item id -> { at, promise }
-    badges: new Map(), // item id -> { at, badges }
+    run: 0, // detail-page mounts: a newer mount, or a teardown, makes an older one stale
     badgeQueue: new Set(),
     badgeTimer: 0,
     badgeObserver: null,
-    mutationObserver: null,
-    mutationQueued: false,
     detail: null,
   };
+  // Everything the module listens to or observes while it runs, so teardown is one call. Null
+  // while the module is off; an async step that outlives a teardown sees it change and stops.
+  let scope = null;
+
+  const badgeCache = kit.ttlCache({ ttl: BADGE_TTL, max: BADGE_KEPT }); // item id -> badge keys
+  const extrasCache = kit.ttlCache({ ttl: EXTRAS_TTL, max: EXTRAS_KEPT }); // item id -> the server's extras
 
   const plainId = (id) => String(id || "").replace(/-/g, "").toLowerCase();
-
-  /** Drops what has expired from a Map of `{ at }` entries, then the oldest past `kept`. */
-  const trim = (map, ttl, kept) => {
-    const cutoff = Date.now() - ttl;
-    for (const [key, value] of map) if (value.at < cutoff) map.delete(key);
-    while (map.size >= kept) map.delete(map.keys().next().value);
-  };
   const features = async () => (await kit.integrations())?.features || {};
+  /** True while `page` is the page on screen. */
+  const isShown = (page) => page.isConnected && kit.jf(DETAIL, "page") === page;
 
   // ---------- defaults ------------------------------------------------------------------------
   // Jellyfin keeps these in the browser, under "<user id>-<setting>". Jellyfin Tweaks forced them
@@ -68,11 +75,11 @@
   const DEFAULTS = { enableBackdrops: "true", detailsBanner: "true", blurhash: "true" };
 
   const applyDefaults = () => {
-    const user = kit.userId();
-    if (!user) return;
+    if (!kit.userId()) return;
     try {
-      for (const [key, value] of Object.entries(DEFAULTS)) {
-        if (localStorage.getItem(`${user}-${key}`) === null) localStorage.setItem(`${user}-${key}`, value);
+      for (const [name, value] of Object.entries(DEFAULTS)) {
+        const key = kit.storage.jfUserKey(name);
+        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
       }
     } catch {
       /* private mode: Jellyfin's own defaults stand */
@@ -307,11 +314,12 @@
     node.style.top = `${Math.round(y)}px`;
     menu.node = node;
     menu.opener = opener || null;
+    const menuScope = kit.scope();
     const away = (event) => {
       if (!node.contains(event.target)) closeMenu({ restore: false });
     };
     const keys = (event) => {
-      if (event.key === "Escape" || event.keyCode === 461 || event.keyCode === 10009 || event.key === "GoBack") {
+      if (kit.keys.isBack(event)) {
         event.preventDefault();
         event.stopPropagation();
         closeMenu();
@@ -324,15 +332,12 @@
         closeMenu({ restore: false });
       }
     };
-    setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
-    document.addEventListener("keydown", keys, true);
-    const onScroll = () => closeMenu({ restore: false });
-    window.addEventListener("scroll", onScroll, { passive: true, once: true });
-    menu.off = () => {
-      document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("keydown", keys, true);
-      window.removeEventListener("scroll", onScroll);
-    };
+    // The click that opened the menu is still travelling; listen for the next press.
+    const armed = setTimeout(() => menuScope.listen(document, "pointerdown", away, { capture: true }), 0);
+    menuScope.add(() => clearTimeout(armed));
+    menuScope.listen(document, "keydown", keys, { capture: true });
+    menuScope.listen(window, "scroll", () => closeMenu({ restore: false }), { passive: true, once: true });
+    menu.off = () => menuScope.dispose();
     buttons[0].focus({ preventScroll: true });
   };
 
@@ -419,20 +424,22 @@
       });
     };
     // The shelves scroll inside themselves; capture sees those scrolls too.
-    document.addEventListener("pointerover", over, true);
-    document.addEventListener("pointerout", out, true);
-    document.addEventListener("focusin", focus, true);
-    document.addEventListener("focusout", blur, true);
-    window.addEventListener("scroll", reposition, { passive: true, capture: true });
-    state.cleanups.push(() => {
-      document.removeEventListener("pointerover", over, true);
-      document.removeEventListener("pointerout", out, true);
-      document.removeEventListener("focusin", focus, true);
-      document.removeEventListener("focusout", blur, true);
-      window.removeEventListener("scroll", reposition, true);
+    scope.listen(document, "pointerover", over, { capture: true });
+    scope.listen(document, "pointerout", out, { capture: true });
+    scope.listen(document, "focusin", focus, { capture: true });
+    scope.listen(document, "focusout", blur, { capture: true });
+    scope.listen(window, "scroll", reposition, { passive: true, capture: true });
+    scope.add(() => {
+      clearTimeout(more.timer);
       more.node?.remove();
       more.node = null;
     });
+  };
+
+  /** Where a card's menu opens from when there is no pointer: over its artwork, a little in from the right. */
+  const anchorOf = (card) => {
+    const rect = (card.querySelector(".hera-card__art") || card).getBoundingClientRect();
+    return { rect: { right: rect.left + rect.width * 0.7, bottom: rect.top + rect.height * 0.5, top: rect.top } };
   };
 
   // Right-click, the keyboard's Menu key and Shift+F10 all raise a `contextmenu` event on the card.
@@ -442,11 +449,11 @@
     if (!descriptor || cellOf(card).hidden) return;
     event.preventDefault();
     const fromKeyboard = event.clientX === 0 && event.clientY === 0;
-    const rect = (card.querySelector(".hera-card__art") || card).getBoundingClientRect();
-    menuFor(card, descriptor, fromKeyboard ? { rect: { right: rect.left + rect.width * 0.7, bottom: rect.top + rect.height * 0.5, top: rect.top } } : { at: { x: event.clientX, y: event.clientY } });
+    menuFor(card, descriptor, fromKeyboard ? anchorOf(card) : { at: { x: event.clientX, y: event.clientY } });
   };
 
-  // A remote has no pointer: holding OK on a card opens the same menu.
+  // A remote has no pointer: holding OK on a card opens the same menu. (Up Next's cards do their
+  // own, in hera-home.js, because their short press plays.)
   const press = { timer: 0, card: null, fired: false };
   const onPressStart = (event) => {
     if (!kit.isTv() || event.key !== "Enter" || event.repeat) return;
@@ -457,8 +464,7 @@
     press.card = card;
     press.timer = setTimeout(() => {
       press.fired = true;
-      const rect = (card.querySelector(".hera-card__art") || card).getBoundingClientRect();
-      menuFor(card, descriptor, { rect: { right: rect.left + rect.width * 0.7, bottom: rect.top + rect.height * 0.5, top: rect.top } });
+      menuFor(card, descriptor, anchorOf(card));
     }, LONG_PRESS_MS);
     event.preventDefault();
   };
@@ -480,13 +486,13 @@
   };
 
   const paintCard = (card, badges) => {
-    const art = card.querySelector(".hera-card__art, .cardScalable");
+    const art = card.querySelector(".hera-card__art") || kit.jf(MODULE, "extrasCardArt", card);
     if (!art) return;
     art.querySelector(":scope > .hera-quality")?.remove();
     const shown = CARD_ORDER.filter((key) => badges.includes(key) && !(key === "hdr" && badges.includes("dv")));
     if (!shown.length) return;
     const node = el("span", { class: "hera-quality hera-dark", "aria-label": shown.map((key) => BADGE_LABEL[key]).join(", ") }, shown.map((key) => el("span", { class: "hera-quality__chip", "aria-hidden": "true", text: CARD_LABEL[key] })));
-    if (art.querySelector(".hera-card__progress, .itemProgressBar")) node.classList.add("hera-quality--raised");
+    if (art.querySelector(".hera-card__progress") || kit.jf(MODULE, "extrasCardProgress", art)) node.classList.add("hera-quality--raised");
     art.append(node);
   };
 
@@ -497,30 +503,40 @@
   const flushBadges = async () => {
     state.badgeTimer = 0;
     const user = kit.userId();
-    trim(state.badges, BADGE_TTL, BADGE_KEPT);
-    const ids = [...state.badgeQueue].filter((id) => !(state.badges.get(id)?.at > Date.now() - BADGE_TTL));
+    const ids = [...state.badgeQueue];
     state.badgeQueue.clear();
     if (!ids.length || (await features()).qualityBadges === false) return;
     for (let at = 0; at < ids.length; at += BADGE_BATCH) {
       const chunk = ids.slice(at, at + BADGE_BATCH);
+      // One request per chunk, sent only if a title in it is not already held.
+      let request = null;
+      const fetchChunk = () => {
+        request = request || Promise.resolve(kit.hera("extras/badges", { query: { ids: chunk.join(",") } }));
+        return request;
+      };
       try {
-        const found = (await kit.hera("extras/badges", { query: { ids: chunk.join(",") } })) || {};
-        if (user !== kit.userId()) return;
-        for (const id of chunk) {
-          const badges = found[id] || [];
-          state.badges.set(id, { at: Date.now(), badges });
-          paintId(id, badges);
-        }
+        const painting = Promise.all(
+          chunk.map(async (id) => {
+            const badges = await badgeCache.get(id, async () => ((await fetchChunk()) || {})[id] || []);
+            if (user === kit.userId()) paintId(id, badges);
+          }),
+        );
+        kit.track(MODULE, painting);
+        await painting;
       } catch (error) {
         console.warn("[Hera TV:extras] badges", error);
+      }
+      if (user !== kit.userId()) {
+        badgeCache.clear();
+        return;
       }
     }
   };
 
   const queueBadges = (id) => {
-    const held = state.badges.get(id);
-    if (held && Date.now() - held.at < BADGE_TTL) {
-      paintId(id, held.badges);
+    const held = badgeCache.peek(id);
+    if (held) {
+      paintId(id, held);
       return;
     }
     state.badgeQueue.add(id);
@@ -532,59 +548,68 @@
     const id = cardId(card);
     if (!id) return;
     card.dataset.heraQid = id;
-    const held = state.badges.get(id);
-    if (held) paintCard(card, held.badges);
+    const held = badgeCache.peek(id);
+    if (held) paintCard(card, held);
     state.badgeObserver?.observe(card);
   };
 
   const scan = (root) => {
-    if (root.matches?.(CARD_SELECTOR)) watchCard(root);
-    for (const card of root.querySelectorAll?.(CARD_SELECTOR) || []) watchCard(card);
+    // `jf` is read for the plain selector here: one added node is tested with matches(), which a
+    // lookup by key cannot do.
+    if (root.matches?.(HERA_CARDS) || root.matches?.(jf.extrasStockCards)) watchCard(root);
+    for (const card of root.querySelectorAll?.(HERA_CARDS) || []) watchCard(card);
+    for (const card of kit.jfAll(MODULE, "extrasStockCards", root)) watchCard(card);
     filterCards(root);
   };
 
-  const startCards = async () => {
-    if ((await features()).qualityBadges !== false) {
-      state.badgeObserver = new IntersectionObserver(
+  const startCards = async (mine) => {
+    const flags = await features();
+    if (scope !== mine) return;
+    if (flags.qualityBadges !== false) {
+      const io = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) {
             if (!entry.isIntersecting) continue;
-            state.badgeObserver.unobserve(entry.target);
+            io.unobserve(entry.target);
             queueBadges(entry.target.dataset.heraQid);
           }
         },
         { rootMargin: "240px 400px" },
       );
+      state.badgeObserver = io;
+      mine.add(() => {
+        io.disconnect();
+        state.badgeObserver = null;
+      });
     }
     const pending = new Set();
-    state.mutationObserver = new MutationObserver((records) => {
+    let queued = false;
+    const mutations = new MutationObserver((records) => {
       for (const record of records) for (const node of record.addedNodes) if (node.nodeType === 1) pending.add(node);
-      if (state.mutationQueued || !pending.size) return;
-      state.mutationQueued = true;
+      if (queued || !pending.size) return;
+      queued = true;
       requestAnimationFrame(() => {
-        state.mutationQueued = false;
+        queued = false;
         const nodes = [...pending];
         pending.clear();
+        if (scope !== mine) return;
         for (const node of nodes) if (node.isConnected) scan(node);
       });
     });
-    state.mutationObserver.observe(document.body, { childList: true, subtree: true });
+    mutations.observe(document.body, { childList: true, subtree: true });
+    mine.add(() => mutations.disconnect());
     scan(document.body);
   };
 
   // ---------- detail pages --------------------------------------------------------------------
 
   const extrasFor = (id) => {
-    const held = state.extras.get(id);
-    if (held && Date.now() - held.at < EXTRAS_TTL) return held.promise;
-    const promise = Promise.resolve(kit.hera(`extras/${id}`)).catch((error) => {
-      if (state.extras.get(id)?.promise === promise) state.extras.delete(id);
+    const request = extrasCache.get(id, () => kit.hera(`extras/${id}`));
+    kit.track(DETAIL, request);
+    return request.catch((error) => {
       console.warn("[Hera TV:extras] extras", error);
       return null;
     });
-    trim(state.extras, EXTRAS_TTL, EXTRAS_KEPT);
-    state.extras.set(id, { at: Date.now(), promise });
-    return promise;
   };
 
   const ratingText = (value) => `${value}%`;
@@ -674,12 +699,12 @@
   };
 
   const paintDetail = (page, data) => {
-    const meta = page.querySelector(jf.detailMisc);
+    const meta = kit.jf(DETAIL, "detailMisc", page);
     if (meta) {
       meta.querySelectorAll(".hera-xmeta").forEach((node) => node.remove());
       const ratings = data.ratings ? ratingsNode(data.ratings) : null;
       const quality = qualityNode(data.badges);
-      const before = meta.querySelector(".endsAt");
+      const before = kit.jf(DETAIL, "extrasEndsAt", meta);
       for (const node of [ratings, quality]) {
         if (!node) continue;
         if (before) meta.insertBefore(node, before);
@@ -688,7 +713,7 @@
       // Our scores stand in for the stock TMDB star and critic score.
       meta.classList.toggle("hera-meta-ratings", !!ratings);
     }
-    const section = page.querySelector(".detailPagePrimaryContent .detailSectionContent");
+    const section = kit.jf(DETAIL, "extrasDetailContent", page);
     page.querySelectorAll(".hera-elsewhere").forEach((node) => node.remove());
     const elsewhere = data.providers ? elsewhereNode(data.providers) : null;
     if (section && elsewhere) section.prepend(elsewhere);
@@ -699,9 +724,12 @@
     if (state.detail?.page === page && state.detail.id === id && page.querySelector(".hera-xmeta, .hera-elsewhere")) return;
     clearDetail();
     const run = ++state.run;
+    // A newer visit, another page or a teardown makes this answer stale.
+    const current = () => run === state.run && isShown(page) && plainId(kit.itemIdFromHash()) === plainId(id);
     const data = await extrasFor(plainId(id));
-    if (!data || run !== state.run || !page.isConnected || page.classList.contains("hide") || plainId(kit.itemIdFromHash()) !== plainId(id)) return;
+    if (!data || !current()) return;
     const flags = await features();
+    if (!current()) return;
     const shown = {
       badges: flags.qualityBadges === false ? [] : data.badges,
       ratings: flags.ratings === false ? null : data.ratings,
@@ -709,7 +737,7 @@
     };
     paintDetail(page, shown);
     // Jellyfin draws the meta line again when the item reloads (a played mark, a refreshed rating).
-    const meta = page.querySelector(jf.detailMisc);
+    const meta = kit.jf(DETAIL, "detailMisc", page);
     const observer = new MutationObserver(() => {
       if (meta.querySelector(".hera-xmeta") || (!shown.ratings && !shown.badges?.length)) return;
       observer.disconnect();
@@ -769,7 +797,7 @@
     return node;
   };
 
-  heraTv.hidden = {
+  const hiddenApi = {
     /** Resolves once this user's hidden titles are known. */
     ready: loadHidden,
     /** The entry hiding a title in `scope` ("upnext" or "interest") by any of `keys`, or null. */
@@ -779,45 +807,51 @@
     menu(card) {
       const descriptor = describe(card);
       if (!descriptor) return false;
-      const rect = (card.querySelector(".hera-card__art") || card).getBoundingClientRect();
-      menuFor(card, descriptor, { rect: { right: rect.left + rect.width * 0.7, bottom: rect.top + rect.height * 0.5, top: rect.top } });
+      menuFor(card, descriptor, anchorOf(card));
       return true;
     },
   };
 
   // ---------- module --------------------------------------------------------------------------
 
-  let started = false;
-  const start = () => {
-    if (started) return;
-    started = true;
+  const watchCards = () => {
+    if (scope) return;
+    const mine = kit.scope();
+    scope = mine;
     mountMore();
-    document.addEventListener("contextmenu", onContextMenu);
-    document.addEventListener("keydown", onPressStart, true);
-    document.addEventListener("keyup", onPressEnd, true);
-    state.cleanups.push(() => {
-      document.removeEventListener("contextmenu", onContextMenu);
-      document.removeEventListener("keydown", onPressStart, true);
-      document.removeEventListener("keyup", onPressEnd, true);
+    mine.listen(document, "contextmenu", onContextMenu);
+    kit.intercept(MODULE, document, "keydown", onPressStart);
+    kit.intercept(MODULE, document, "keyup", onPressEnd);
+    mine.add(() => {
+      clearTimeout(press.timer);
+      press.timer = 0;
+      press.card = null;
     });
-    loadHidden().then(() => scan(document.body));
-    startCards().catch((error) => console.error("[Hera TV:extras]", error));
+    loadHidden().then(() => scope === mine && scan(document.body));
+    const cards = startCards(mine);
+    kit.track(MODULE, cards);
+    cards.catch((error) => console.error("[Hera TV:extras]", error));
   };
 
   // Two modules, so that a detail page Jellyfin has redrawn costs only the detail page's extras
   // (the ratings, quality and where-to-watch), not the badges on cards or hidden titles.
   heraTv.register({
-    name: "extras",
+    name: MODULE,
+    // The namespace home, Discover and Settings call is offered by start(): a module switched off
+    // in the plugin's settings offers none, and they fall back to showing everything.
+    start() {
+      heraTv.hidden = hiddenApi;
+    },
     onView() {
       applyDefaults();
-      start();
+      watchCards();
     },
     teardown() {
-      state.run++;
-      state.cleanups.splice(0).forEach((fn) => fn());
-      state.badgeObserver?.disconnect();
-      state.mutationObserver?.disconnect();
+      scope?.dispose();
+      scope = null;
       clearTimeout(state.badgeTimer);
+      state.badgeTimer = 0;
+      state.badgeQueue.clear();
       closeMenu({ restore: false });
       toast?.remove();
       document.querySelectorAll(".hera-quality").forEach((node) => node.remove());
@@ -826,13 +860,12 @@
         cell.hidden = false;
         cell.classList.remove("hera-card--hidden");
       });
-      started = false;
       delete heraTv.hidden;
     },
   });
 
   heraTv.register({
-    name: "extras-detail",
+    name: DETAIL,
     // The ratings and quality badges join the meta line; without it there is nothing to join.
     requires: { itemDetailPage: ["detailMisc"] },
     onView(page, { itemId }) {

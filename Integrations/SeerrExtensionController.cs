@@ -513,11 +513,7 @@ public partial class SeerrExtensionController(
         return found.Count > 0 ? found[0].Id.ToString("N", CultureInfo.InvariantCulture) : null;
     }
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 
     // One credit per title; roles are the characters or jobs it is credited under.
     private sealed class Credit(JsonNode node, string mediaType, int tmdbId, string title)

@@ -10,6 +10,7 @@ A Jellyfin plugin that gives the web client the look of Apple's TV app, with See
 [Features](#features) •
 [Install](#install) •
 [Configuration](#configuration) •
+[After a Jellyfin update](#after-a-jellyfin-update) •
 [Design](DESIGN.md)
 
 <br clear="left">
@@ -93,6 +94,33 @@ Everything is on the plugin's page in the Dashboard. Environment variables take 
 Requests go through the plugin's own endpoints, so no API key reaches the browser.
 
 </details>
+
+## After a Jellyfin update
+
+Hera TV restyles and adds to Jellyfin's own web client, so a Jellyfin release can change something it leans on. The plugin is built so that costs a feature on one page, never a usable page, and so that someone hears about it.
+
+**What CI checks.** Every pull request, and every push to main, runs Hera in a real Jellyfin (`.github/workflows/compat.yaml`, `tests/compat`) and fails unless:
+
+- the plugin is Active and Jellyfin's log has no error with the plugin in its stack;
+- every Hera endpoint answers as it should to an administrator, to an ordinary user and to nobody, with no 5xx;
+- both of Hera's scheduled tasks run to the end, and Jellyfin is still up after a film has played for over a minute;
+- on every page (home, Discover, Requests, Statistics, libraries, the collections library, films, series, episodes, collections, a person, search, preferences, the Dashboard, Hera's own two Dashboard pages and the player) no module is idle, partial, degraded or disabled, the bundle logged no console error, and Hera's own markup is on the page;
+- the same holds in the TV layout at 1920×1080 driven with a remote's keys, on the sign-in page, and `?hera=off` really does take Hera off the tab;
+- the header's search, the profile menu (Control Center) and the pause screen answer to a click or a pause.
+
+Further checks on pull requests (`.github/workflows/build.yaml`) catch a misspelt or unused name in the scripts, a selector for Jellyfin's markup written outside the `JF` map, a stylesheet or module the server's manifest and the scripts disagree about, a Jellyfin.Controller whose major.minor differs from `meta.json`'s `targetAbi` or the releases listed in `Compatibility.Tested`, and a `Microsoft.Data.Sqlite` that differs from the one Jellyfin itself ships (the server supplies that assembly, and a different one stops the server). Merging needs the "Compatibility" check, which passes only when every compat run on the pull request passed; its name stays the same when the Jellyfin release under test changes. A release is published only after the compat run passed on its commit. Nightly, the same run goes against Jellyfin's `latest` and `unstable` images, as released and recompiled against the newest `Jellyfin.Controller` on NuGet, and one issue per tag, *Compatibility: Jellyfin latest* or *unstable*, collects what failed and closes itself when it passes again.
+
+**What the Dashboard shows.** Dashboard → Plugins → Hera TV has a compatibility section: the Jellyfin version and the releases this build was tested on, when Hera last added itself to the web client's page, how many browsers have reported since the server started, any server feature that failed (stream sampling, the notification centre, the Letterboxd watcher, and so on, with when it began and how often), and a table of every module that is standing aside, only partly working or switched off, with the page, the piece of Jellyfin it is missing and who reported it. It says everything is fine only when a browser has actually checked in. The same faults are in Jellyfin's log, once at warning level and as errors when a feature gives up.
+
+**If a page looks wrong.** Add `?hera=off` to its address (before or after the `#`) and Jellyfin shows its own page; `?hera=on` brings Hera back. That applies to one browser tab until it is closed. To take a part of Hera off for everyone while waiting for a fix, switch it off under Dashboard → Plugins → Hera TV → "Switch off a part of Hera" (or list it in `DisabledModules` in `plugins/configurations/Jellyfin.Plugin.HeraTv.xml`); browsers pick it up when they next load the page. A switched-off module is never registered, so its script, its click handlers and its stylesheet are all off. The module names are `hero`, `banner`, `overview`, `logo`, `ribbon`, `seasons`, `boxset`, `control-center`, `paddles`, `british`, `home`, `discover`, `player`, `pause`, `postplay`, `trailer`, `settings`, `login`, `search`, `seerr`, `extras`, `extras-detail`, `activity`, `stats`, `notify`, `notify-detail` and `collections-browse`; the Dashboard's table names the one that has a problem. The same page has a master switch that takes Hera off the web client altogether.
+
+**Fixing a piece of Jellyfin that moved.** The Dashboard and the CI summary name the key, as in "Jellyfin has no `detailRibbon`".
+
+1. Open the page in Jellyfin (with `?hera=off`) and find what that part of the page is called now.
+2. Change the selector of that key in `JF_TABLE` in `web/hera-tv.js`. That is the only place Jellyfin's classes and ids are named: `npm run lint` fails on one written anywhere else. The entry also says whether the piece is on the page or in the header and whether the module cannot work without it (`required`), which decides whether a miss makes the module stand aside or only run partly.
+3. If a CSS rule in `web/*.css` leaned on the old markup, fix it there; each module's stylesheet applies only while its module runs.
+4. `npm ci && npm run lint && npm test` for the checks, and `node tests/compat/run.mjs` (see [tests/compat](tests/compat/README.md)) to run Hera against a real Jellyfin.
+5. When it passes on the new release, add its major.minor to `Compatibility.Tested` in `Compatibility.cs`; a release for a newer Jellyfin also moves `targetAbi` in `meta.json` and the `Jellyfin.Controller` and `Jellyfin.Model` packages together, with the Sqlite packages set to what Jellyfin's `Directory.Packages.props` pins for that release.
 
 ## Contributing
 

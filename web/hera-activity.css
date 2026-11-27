@@ -107,18 +107,7 @@
 
 /* ---------- The Requests view: #/home?hera=requests ------------------------------------------- */
 
-/* The view takes the place of the home tab, as Discover and a person's page do: no hero, no home rows, and Home steps back. */
-html.hera-activity-on[data-hera-view] .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root:not(:has(> a.MuiButton-colorPrimary)) > a:first-child,
-html.hera-activity-on .headerTabs .emby-tab-button.emby-tab-button-active:not(:focus) {
-  background: transparent !important;
-  color: var(--hera-label-2) !important;
-}
-html.hera-activity-on #homeTab > .hera-hero,
-html.hera-activity-on #indexPage .homeSectionsContainer,
-html.hera-activity-on .backdropContainer,
-html.hera-activity-on #slides-container {
-  display: none !important;
-}
+/* The view takes the place of the home tab through hera-tv.css's html.hera-view-taken block. */
 
 .hera-av {
   box-sizing: border-box;

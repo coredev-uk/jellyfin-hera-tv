@@ -1,6 +1,4 @@
 using MediaBrowser.Controller.Session;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Stats;
 
@@ -11,74 +9,72 @@ namespace Jellyfin.Plugin.HeraTv.Stats;
 /// first ran.
 /// </summary>
 /// <remarks>
-/// Nothing here may take the server down: a failed tick is logged and the next one runs as normal.
+/// A failed tick is reported and the next one runs as normal. The tick is called from inside the
+/// try below, not guarded within itself: a Jellyfin member that has changed fails where
+/// <see cref="Tick"/> is compiled, which is its caller.
 /// </remarks>
-internal sealed class StreamRecorder(ISessionManager sessions, StatsStore store, ILogger<StreamRecorder> logger) : BackgroundService
+internal sealed class StreamRecorder(ISessionManager sessions, StatsStore store, ServerHealth health) : GuardedBackgroundService(Feature, health)
 {
+    internal const string Feature = "Stream sampling";
+
     private DateTime pruned = DateTime.MinValue;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(StatsStore.SampleSeconds));
-        try
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            try
             {
                 Tick(DateTime.UtcNow);
+                Health.Recovered(Feature);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // The server is stopping.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Health.Fault(Feature, "sample the playing streams", ex);
+            }
         }
     }
 
     private void Tick(DateTime now)
     {
-        try
+        var samples = new List<Sample>();
+        foreach (var session in sessions.Sessions)
         {
-            var samples = new List<Sample>();
-            foreach (var session in sessions.Sessions)
+            // A paused stream isn't being delivered, so it doesn't count towards concurrency or the mix.
+            if (session.NowPlayingItem is not { } item || session.PlayState?.IsPaused == true || session.UserId == Guid.Empty)
             {
-                // A paused stream isn't being delivered, so it doesn't count towards concurrency or the mix.
-                if (session.NowPlayingItem is not { } item || session.PlayState?.IsPaused == true || session.UserId == Guid.Empty)
-                {
-                    continue;
-                }
-
-                var stream = StreamInfo.From(session);
-                if (stream is null)
-                {
-                    continue;
-                }
-
-                samples.Add(new Sample(
-                    session.UserId.ToString("N"),
-                    item.Id.ToString("N"),
-                    stream.PlayMethod,
-                    stream.Source.Width,
-                    stream.Source.Height,
-                    stream.Source.Bitrate,
-                    stream.Transcode?.Width,
-                    stream.Transcode?.Height,
-                    stream.Transcode?.Bitrate,
-                    stream.Transcode?.Hardware ?? false,
-                    string.Join(',', stream.Transcode?.Reasons ?? [])));
+                continue;
             }
 
-            store.Add(now, samples);
-
-            if (pruned.Date != now.Date)
+            var stream = StreamInfo.From(session);
+            if (stream is null)
             {
-                // Once the day's prune has run, even a failed one waits for tomorrow: the table is tiny
-                // and a retry every minute would only repeat the same logged failure.
-                pruned = now;
-                store.Prune(now);
+                continue;
             }
+
+            samples.Add(new Sample(
+                session.UserId.ToString("N"),
+                item.Id.ToString("N"),
+                stream.PlayMethod,
+                stream.Source.Width,
+                stream.Source.Height,
+                stream.Source.Bitrate,
+                stream.Transcode?.Width,
+                stream.Transcode?.Height,
+                stream.Transcode?.Bitrate,
+                stream.Transcode?.Hardware ?? false,
+                string.Join(',', stream.Transcode?.Reasons ?? [])));
         }
-        catch (Exception ex)
+
+        store.Add(now, samples);
+
+        if (pruned.Date != now.Date)
         {
-            logger.LogWarning(ex, "Hera TV couldn't sample the playing streams");
+            // Once the day's prune has run, even a failed one waits for tomorrow: the table is tiny
+            // and a retry every minute would only repeat the same logged failure.
+            pruned = now;
+            store.Prune(now);
         }
     }
 }

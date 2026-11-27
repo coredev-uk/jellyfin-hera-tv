@@ -110,35 +110,35 @@ public static class ArrActivity
     public static async Task<SabQueue?> SabAsync(UpstreamClient upstream)
     {
         var body = await upstream.ArrGetAsync(ArrService.Sabnzbd, "api?mode=queue", QueueTtl).ConfigureAwait(false);
-        if (body?["queue"] is not JsonObject queue)
+        if (body.At("queue") is not JsonObject queue)
         {
             return null;
         }
 
         var slots = new Dictionary<string, SabSlot>(StringComparer.OrdinalIgnoreCase);
-        foreach (var slot in queue["slots"] as JsonArray ?? [])
+        foreach (var slot in queue["slots"].Items())
         {
-            var id = (string?)slot?["nzo_id"];
-            if (slot is null || string.IsNullOrEmpty(id))
+            var id = slot.At("nzo_id").Str();
+            if (string.IsNullOrEmpty(id))
             {
                 continue;
             }
 
             slots[id] = new SabSlot(
-                (string?)slot["status"] ?? string.Empty,
-                Megabytes(slot["mb"]),
-                Megabytes(slot["mbleft"]),
-                Seconds((string?)slot["timeleft"]));
+                slot.At("status").Str() ?? string.Empty,
+                Megabytes(slot.At("mb")),
+                Megabytes(slot.At("mbleft")),
+                Seconds(slot.At("timeleft").Str()));
         }
 
-        var kbPerSecond = Number(queue["kbpersec"]) ?? 0;
+        var kbPerSecond = queue["kbpersec"].Num() ?? 0;
         return new SabQueue(
-            (string?)queue["status"] ?? string.Empty,
-            queue["paused"]?.GetValue<bool?>() ?? false,
+            queue["status"].Str() ?? string.Empty,
+            queue["paused"].Bool() ?? false,
             (long)(kbPerSecond * 1024),
             Megabytes(queue["mbleft"]),
-            Seconds((string?)queue["timeleft"]),
-            (int)(Number(queue["noofslots"]) ?? slots.Count),
+            Seconds(queue["timeleft"].Str()),
+            (int)(queue["noofslots"].Num() ?? slots.Count),
             slots);
     }
 
@@ -152,22 +152,8 @@ public static class ArrActivity
         var sab = await sabTask.ConfigureAwait(false);
 
         var items = new List<QueueItem>();
-        foreach (var node in await sonarr.ConfigureAwait(false) as JsonArray ?? [])
-        {
-            if (node is not null && Item(ArrService.Sonarr, node, sab) is { } item)
-            {
-                items.Add(item);
-            }
-        }
-
-        foreach (var node in await radarr.ConfigureAwait(false) as JsonArray ?? [])
-        {
-            if (node is not null && Item(ArrService.Radarr, node, sab) is { } item)
-            {
-                items.Add(item);
-            }
-        }
-
+        items.AddRange(upstream.MapEach("Sonarr", (await sonarr.ConfigureAwait(false)).Items(), node => Item(ArrService.Sonarr, node, sab)).OfType<QueueItem>());
+        items.AddRange(upstream.MapEach("Radarr", (await radarr.ConfigureAwait(false)).Items(), node => Item(ArrService.Radarr, node, sab)).OfType<QueueItem>());
         return items;
     }
 
@@ -179,17 +165,17 @@ public static class ArrActivity
             return null;
         }
 
-        var downloadId = (string?)node["downloadId"];
-        var key = string.IsNullOrEmpty(downloadId) ? $"{source}:{node["id"]}" : downloadId;
+        var downloadId = node.At("downloadId").Str();
+        var key = string.IsNullOrEmpty(downloadId) ? $"{source}:{node.At("id")}" : downloadId;
         SabSlot? slot = null;
         if (!string.IsNullOrEmpty(downloadId))
         {
             sab?.ById.TryGetValue(downloadId, out slot);
         }
 
-        var size = (long)(Number(node["size"]) ?? 0);
-        var left = (long)(Number(node["sizeleft"]) ?? 0);
-        var eta = Seconds((string?)node["timeleft"]) ?? SecondsUntil((string?)node["estimatedCompletionTime"]);
+        var size = (long)(node.At("size").Num() ?? 0);
+        var left = (long)(node.At("sizeleft").Num() ?? 0);
+        var eta = Seconds(node.At("timeleft").Str()) ?? SecondsUntil(node.At("estimatedCompletionTime").Str());
         var paused = false;
         if (slot is not null && state is "downloading" or "queued")
         {
@@ -215,36 +201,36 @@ public static class ArrActivity
             eta = null;
         }
 
-        var series = node["series"];
-        var movie = node["movie"];
-        var episode = node["episode"];
+        var series = node.At("series");
+        var movie = node.At("movie");
+        var episode = node.At("episode");
         return new QueueItem(
             source,
-            node["seriesId"]?.GetValue<int?>() ?? node["movieId"]?.GetValue<int?>(),
-            node["seasonNumber"]?.GetValue<int?>() ?? episode?["seasonNumber"]?.GetValue<int?>(),
-            episode?["episodeNumber"]?.GetValue<int?>(),
-            (string?)episode?["title"],
-            (string?)series?["title"] ?? (string?)movie?["title"],
-            series?["year"]?.GetValue<int?>() ?? movie?["year"]?.GetValue<int?>(),
-            (string?)node["title"] ?? string.Empty,
+            node.At("seriesId").Int() ?? node.At("movieId").Int(),
+            node.At("seasonNumber").Int() ?? episode.At("seasonNumber").Int(),
+            episode.At("episodeNumber").Int(),
+            episode.At("title").Str(),
+            series.At("title").Str() ?? movie.At("title").Str(),
+            series.At("year").Int() ?? movie.At("year").Int(),
+            node.At("title").Str() ?? string.Empty,
             state,
             paused,
             size,
             left,
             eta,
-            (string?)node["downloadClient"],
-            (string?)node["protocol"],
+            node.At("downloadClient").Str(),
+            node.At("protocol").Str(),
             key,
             Message(node),
-            (string?)series?["titleSlug"] ?? (string?)movie?["titleSlug"],
-            series?["tmdbId"]?.GetValue<int?>() ?? movie?["tmdbId"]?.GetValue<int?>());
+            series.At("titleSlug").Str() ?? movie.At("titleSlug").Str(),
+            series.At("tmdbId").Int() ?? movie.At("tmdbId").Int());
     }
 
     // The *arr's own words, two layers: a download's state, then its status.
     private static string StateOf(JsonNode node)
     {
-        var tracked = (string?)node["trackedDownloadState"];
-        var status = ((string?)node["status"] ?? string.Empty).ToLowerInvariant();
+        var tracked = node.At("trackedDownloadState").Str();
+        var status = (node.At("status").Str() ?? string.Empty).ToLowerInvariant();
         return tracked switch
         {
             "importBlocked" => "attention",
@@ -265,16 +251,16 @@ public static class ArrActivity
     private static string? Message(JsonNode node)
     {
         var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace((string?)node["errorMessage"]))
+        if (node.At("errorMessage").Str() is { } error && !string.IsNullOrWhiteSpace(error))
         {
-            parts.Add(((string?)node["errorMessage"])!.Trim());
+            parts.Add(error.Trim());
         }
 
-        foreach (var entry in node["statusMessages"] as JsonArray ?? [])
+        foreach (var entry in node.At("statusMessages").Items())
         {
-            foreach (var message in entry?["messages"] as JsonArray ?? [])
+            foreach (var message in entry.At("messages").Items())
             {
-                var text = ((string?)message)?.Trim();
+                var text = message.Str()?.Trim();
                 if (!string.IsNullOrEmpty(text) && !parts.Contains(text))
                 {
                     parts.Add(text);
@@ -324,23 +310,23 @@ public static class ArrActivity
         if (arrId is int id)
         {
             movie = await upstream.ArrGetAsync(ArrService.Radarr, $"api/v3/movie/{id}", LibraryTtl).ConfigureAwait(false);
-            if (movie?["tmdbId"]?.GetValue<int?>() is int known && known != tmdbId)
+            if (movie.At("tmdbId").Int() is int known && known != tmdbId)
             {
                 movie = null;
             }
         }
 
-        movie ??= (await upstream.ArrGetAsync(ArrService.Radarr, $"api/v3/movie?tmdbId={tmdbId}", LibraryTtl).ConfigureAwait(false) as JsonArray)?.FirstOrDefault();
-        if (movie?["id"]?.GetValue<int?>() is not int movieId)
+        movie ??= (await upstream.ArrGetAsync(ArrService.Radarr, $"api/v3/movie?tmdbId={tmdbId}", LibraryTtl).ConfigureAwait(false)).Items().FirstOrDefault();
+        if (movie.At("id").Int() is not int movieId)
         {
             return null;
         }
 
-        slugSink((string?)movie["titleSlug"]);
+        slugSink(movie.At("titleSlug").Str());
 
-        var monitored = movie["monitored"]?.GetValue<bool?>() ?? false;
-        var hasFile = movie["hasFile"]?.GetValue<bool?>() ?? false;
-        long? onDisk = (long?)Number(movie["sizeOnDisk"]);
+        var monitored = movie.At("monitored").Bool() ?? false;
+        var hasFile = movie.At("hasFile").Bool() ?? false;
+        long? onDisk = (long?)movie.At("sizeOnDisk").Num();
         var items = queue.Where(q => q.Source == ArrService.Radarr && q.MediaId == movieId).ToList();
         if (hasFile)
         {
@@ -357,14 +343,14 @@ public static class ArrActivity
             return new Activity("radarr", movieId, "unmonitored", false, null, null, null, null, 0, false, null, null, null, null, null);
         }
 
-        if (movie["isAvailable"]?.GetValue<bool?>() ?? false)
+        if (movie.At("isAvailable").Bool() ?? false)
         {
             return new Activity("radarr", movieId, "searching", true, null, null, null, null, 0, false, null, null, null, null, null);
         }
 
         // Not out yet by the profile's rules. The digital or physical release is when it can arrive.
-        var release = Date((string?)movie["digitalRelease"]) ?? Date((string?)movie["physicalRelease"])
-            ?? ((string?)movie["minimumAvailability"] == "inCinemas" ? Date((string?)movie["inCinemas"]) : null);
+        var release = Date(movie.At("digitalRelease").Str()) ?? Date(movie.At("physicalRelease").Str())
+            ?? (movie.At("minimumAvailability").Str() == "inCinemas" ? Date(movie.At("inCinemas").Str()) : null);
         return new Activity("radarr", movieId, "waiting", true, null, null, null, null, 0, false, release, null, null, null, null);
     }
 
@@ -399,8 +385,8 @@ public static class ArrActivity
         {
             series = await upstream.ArrGetAsync(ArrService.Sonarr, $"api/v3/series/{id}", LibraryTtl).ConfigureAwait(false);
             // A stale id from Seerr: the show it names must be the show asked about.
-            if ((series?["tmdbId"]?.GetValue<int?>() is int known && known > 0 && known != tmdbId)
-                || (tvdbId is int tvdb && series?["tvdbId"]?.GetValue<int?>() is int knownTvdb && knownTvdb > 0 && knownTvdb != tvdb))
+            if ((series.At("tmdbId").Int() is int known && known > 0 && known != tmdbId)
+                || (tvdbId is int tvdb && series.At("tvdbId").Int() is int knownTvdb && knownTvdb > 0 && knownTvdb != tvdb))
             {
                 series = null;
             }
@@ -408,35 +394,35 @@ public static class ArrActivity
 
         if (series is null && tvdbId is int lookup)
         {
-            series = (await upstream.ArrGetAsync(ArrService.Sonarr, $"api/v3/series?tvdbId={lookup}", LibraryTtl).ConfigureAwait(false) as JsonArray)?.FirstOrDefault();
+            series = (await upstream.ArrGetAsync(ArrService.Sonarr, $"api/v3/series?tvdbId={lookup}", LibraryTtl).ConfigureAwait(false)).Items().FirstOrDefault();
         }
 
-        if (series?["id"]?.GetValue<int?>() is not int seriesId)
+        if (series.At("id").Int() is not int seriesId)
         {
             return null;
         }
 
-        slugSink((string?)series["titleSlug"]);
+        slugSink(series.At("titleSlug").Str());
 
-        var monitored = series["monitored"]?.GetValue<bool?>() ?? false;
+        var monitored = series.At("monitored").Bool() ?? false;
         var mine = queue.Where(q => q.Source == ArrService.Sonarr && q.MediaId == seriesId).ToList();
         var wanted = seasons is { Count: > 0 } ? seasons.ToHashSet() : null;
         var rows = new List<SeasonRow>();
-        foreach (var node in series["seasons"] as JsonArray ?? [])
+        foreach (var node in series.At("seasons").Items())
         {
-            var number = node?["seasonNumber"]?.GetValue<int?>();
-            if (node is null || number is null || (wanted is null ? number == 0 : !wanted.Contains(number.Value)))
+            var number = node.At("seasonNumber").Int();
+            if (number is null || (wanted is null ? number == 0 : !wanted.Contains(number.Value)))
             {
                 continue;
             }
 
-            var stats = node["statistics"];
-            var have = (int)(Number(stats?["episodeFileCount"]) ?? 0);
-            var want = Math.Max((int)(Number(stats?["episodeCount"]) ?? 0), have);
-            var total = Math.Max((int)(Number(stats?["totalEpisodeCount"]) ?? 0), want);
+            var stats = node.At("statistics");
+            var have = (int)(stats.At("episodeFileCount").Num() ?? 0);
+            var want = Math.Max((int)(stats.At("episodeCount").Num() ?? 0), have);
+            var total = Math.Max((int)(stats.At("totalEpisodeCount").Num() ?? 0), want);
             var seasonItems = mine.Where(q => q.SeasonNumber == number).ToList();
-            var next = Date((string?)stats?["nextAiring"], future: true);
-            var seasonMonitored = node["monitored"]?.GetValue<bool?>() ?? false;
+            var next = Date(stats.At("nextAiring").Str(), future: true);
+            var seasonMonitored = node.At("monitored").Bool() ?? false;
             string state;
             if (want > 0 && have >= want)
             {
@@ -582,22 +568,7 @@ public static class ArrActivity
 
     // ---------- parsing ------------------------------------------------------------------------
 
-    private static double? Number(JsonNode? node)
-    {
-        if (node is not JsonValue value)
-        {
-            return null;
-        }
-
-        if (value.TryGetValue(out double number))
-        {
-            return number;
-        }
-
-        return value.TryGetValue(out string? text) && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
-    }
-
-    private static long Megabytes(JsonNode? node) => (long)((Number(node) ?? 0) * 1048576);
+    private static long Megabytes(JsonNode? node) => (long)((node.Num() ?? 0) * 1048576);
 
     /// <summary>Reads "0:12:34" or "1.02:03:04"; a download with no time left or no estimate gives null.</summary>
     private static int? Seconds(string? text)

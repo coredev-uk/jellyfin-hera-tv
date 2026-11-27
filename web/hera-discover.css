@@ -2,12 +2,7 @@
 
 /* ---------- Discover tab and view ---------------------------------------------------- */
 
-/* While Discover shows it takes the tab; Home steps back. */
-html.hera-discover-on[data-hera-view] .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root:not(:has(> a.MuiButton-colorPrimary)) > a:first-child:not(.hera-discover-tab),
-html.hera-discover-on .headerTabs .emby-tab-button.emby-tab-button-active:not(.hera-discover-tab):not(:focus) {
-  background: transparent !important;
-  color: var(--hera-label-2) !important;
-}
+/* Our own tab: the header's capsule geometry, as the stock tabs have it. */
 .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root > a.hera-discover-tab {
   box-sizing: border-box;
   display: inline-flex;
@@ -17,14 +12,8 @@ html.hera-discover-on .headerTabs .emby-tab-button.emby-tab-button-active:not(.h
   cursor: pointer;
 }
 
-html.hera-discover-on #homeTab > .hera-hero,
-html.hera-discover-on #indexPage .homeSectionsContainer {
-  display: none !important;
-}
-html.hera-discover-on .backdropContainer,
-html.hera-discover-on #slides-container {
-  display: none !important;
-}
+/* The takeover itself (Home stepping back, hero and home rows hidden) is hera-tv.css's
+ * html.hera-view-taken block; it leaves `.hera-discover-tab` alone, so Discover keeps the tab. */
 
 .hera-discover {
   padding: 66px 0 64px;
@@ -764,4 +753,44 @@ html.hera-discover-on #slides-container {
 /* The note for an account Seerr doesn't know already links to Seerr; the pill under it would be a second. */
 .hera-sheet__actions:has(.hera-sheet__note a) ~ .hera-sheet__ext .hera-ext__link[title="Open in Seerr"] {
   display: none;
+}
+
+/* ---------- Cast in the title sheet: each links to the person page (hera-seerr.js) ---------- */
+
+.hera-sheet__person-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 14px;
+  color: inherit;
+  text-decoration: none;
+}
+.hera-sheet__person-link:hover .hera-sheet__person-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.hera-sheet__person-link:active img,
+.hera-sheet__person-link:active .hera-sheet__person-fallback {
+  transform: scale(0.95);
+}
+.hera-sheet__person-link img,
+.hera-sheet__person-link .hera-sheet__person-fallback {
+  transition: transform var(--hera-fast) var(--hera-ease);
+}
+.hera-sheet__person-link:focus-visible {
+  outline: 2px solid var(--hera-focus);
+  outline-offset: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hera-sheet__person-link img,
+  .hera-sheet__person-link .hera-sheet__person-fallback {
+    transition: none;
+  }
+  .hera-sheet__person-link:active img,
+  .hera-sheet__person-link:active .hera-sheet__person-fallback {
+    transform: none;
+  }
 }

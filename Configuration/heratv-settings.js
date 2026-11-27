@@ -55,7 +55,83 @@ const PAGE_NAMES = {
   itemDetailPage: "detail pages",
   loginPage: "the sign-in page",
   videoOsdPage: "the video player",
+  myPreferencesMenuPage: "the settings menu",
+  searchPage: "search",
+  boxsetsPage: "the Collections library",
 };
+
+const words = (key) => key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+
+/** A page id that isn't listed is turned into words rather than shown raw. */
+const pageName = (id) => PAGE_NAMES[id] || (id ? `the ${words(id.replace(/Page$/, ""))} page` : "this page");
+
+// The pieces of Jellyfin's web client Hera looks for (the JF table in web/hera-tv.js), as a person
+// would name them. A key not listed here is turned into words rather than shown raw.
+const PIECE_NAMES = {
+  page: "page",
+  appBar: "top bar",
+  appBarTabs: "header tabs",
+  legacyHeader: "header",
+  homeTab: "home tab",
+  homeSections: "home page sections",
+  detailRibbon: "info ribbon on the title page",
+  detailButtons: "buttons on the title page",
+  detailPlay: "Play button",
+  detailPrimary: "main column of the title page",
+  detailSection: "sections of the title page",
+  detailMisc: "runtime and rating line",
+  detailBanner: "title page backdrop",
+  detailSecondary: "lower column of the title page",
+  collectionItems: "list of films in a collection",
+  videoOsd: "player controls",
+  prefsLinks: "links on the settings menu",
+  loginForm: "sign-in form",
+  loginStack: "sign-in layout",
+  loginActions: "sign-in buttons",
+  loginUsers: "user picker",
+  libraryBody: "Collections library list",
+};
+
+const pieceName = (key) => PIECE_NAMES[key] || words(key);
+
+// [module name as the web client registers it (web/*.js, `name:`), icon, label, what switching it off does]
+const MODULES = [
+  ["home", "home", "Home rows", "Hera's rows on the home page; Jellyfin's own sections come back."],
+  ["hero", "view_carousel", "Home hero", "The large rotating title at the top of the home page."],
+  ["discover", "explore", "Discover tab", "Browsing and requesting through Seerr."],
+  ["collections-browse", "collections_bookmark", "Collections library", "Hera's shelves on the Collections page."],
+  ["activity", "downloading", "Download progress", "Download status on title pages and the Activity view."],
+  ["seerr", "playlist_add_check", "Requests on title pages", "Request buttons, cast and similar titles from Seerr."],
+  ["search", "search", "Search", "Hera's search page and header field."],
+  ["stats", "bar_chart", "Statistics view", "Each person's own watching statistics."],
+  ["settings", "settings", "Settings menu", "Hera's rebuilt settings pages."],
+  ["login", "login", "Sign-in page", "Hera's sign-in page."],
+  ["notify", "notifications", "Notification bell", "The bell in the header."],
+  ["notify-detail", "mark_email_unread", "New badges on title pages", "The New marks on titles and episodes."],
+  ["extras", "tune", "Display defaults", "The playback and display preferences Hera sets for new users."],
+  ["extras-detail", "star_rate", "Ratings and quality badges", "Critic ratings and 4K, HDR and audio badges on title pages."],
+  ["logo", "title", "Title logos", "The logo in place of the title on title pages."],
+  ["ribbon", "info", "Title page info line", "Hera's layout of the runtime, rating and end time."],
+  ["banner", "image", "Title page backdrop", "Hera's backdrop on title pages."],
+  ["overview", "notes", "Title page overview", "Hera's overview and tagline layout."],
+  ["seasons", "view_list", "Seasons on series pages", "Hera's season and episode lists."],
+  ["boxset", "video_library", "Collection pages", "Hera's layout for a collection's page."],
+  ["player", "play_circle", "Video player", "Hera's player controls."],
+  ["pause", "pause_circle", "Pause screen", "The title card shown while paused."],
+  ["postplay", "skip_next", "Next up after playback", "The screen offered when a film or episode ends."],
+  ["trailer", "movie", "Trailer button", "Playing trailers inside Hera."],
+  ["control-center", "tune", "Control Center", "The panel behind the profile button."],
+  ["paddles", "chevron_right", "Row scroll arrows", "The arrows beside scrolling rows."],
+  ["british", "spellcheck", "British spelling", "Jellyfin's text rewritten to British English."],
+];
+
+// A call that never answers must not leave the page on "Loading…" for ever.
+const REQUEST_TIMEOUT_MS = 20000;
+const withTimeout = (promise) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("The server took too long to answer.")), REQUEST_TIMEOUT_MS);
+    promise.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
 
 // [feature key in /HeraTV/settings, request field, icon, label, description]
 const SWITCHES = [
@@ -858,8 +934,8 @@ export default function (view) {
   /** What a module's report means, in plain words. */
   const describeModule = (m) => {
     if (m.status === "disabled") return `Switched off after repeated errors${m.lastError ? `: ${m.lastError}` : ""}`;
-    const gone = m.missing.length ? `Jellyfin has no ${m.missing.join(", ")}` : "a piece of Jellyfin it needs is missing";
-    return `Standing aside on ${PAGE_NAMES[m.page] || (m.page ? `the ${m.page} page` : "this page")}: ${gone}`;
+    const gone = m.missing.length ? `Jellyfin has no ${m.missing.map(pieceName).join(", ")}` : "a piece of Jellyfin it needs is missing";
+    return `${m.status === "partial" ? "Running without part of its page on" : "Standing aside on"} ${pageName(m.page)}: ${gone}`;
   };
 
   /** Everything that has gone wrong: modules that stood aside or were switched off, and times the whole client did. */
@@ -868,9 +944,38 @@ export default function (view) {
       .filter((b) => b.boot === "safe")
       .map((b) => ({ name: "Hera TV (whole page)", what: `Switched off in the browser${b.reason ? `: ${b.reason}` : ""}`, user: b.user, count: b.count, lastSeen: b.lastSeen })),
     ...data.modules
-      .filter((m) => m.status === "degraded" || m.status === "disabled")
+      .filter((m) => m.status === "degraded" || m.status === "partial" || m.status === "disabled")
       .map((m) => ({ name: m.name, what: describeModule(m), user: m.user, count: m.count, lastSeen: m.lastSeen })),
   ];
+
+  /** What the server itself couldn't do: background features and the page injection. */
+  const serverTable = (faults) =>
+    el("div", { class: "hera-set-list" }, el("div", { class: "hera-cfg-table-wrap" }, el("table", { class: "hera-cfg-table" }, [
+      el("thead", {}, el("tr", {}, ["Server feature", "What happened", "Since", "Times"].map((text) => el("th", { scope: "col", text })))),
+      el("tbody", {}, faults.map((f) =>
+        el("tr", {}, [
+          el("th", { scope: "row", text: f.feature }),
+          el("td", { text: `${f.status === "stopped" ? "Stopped until the server restarts" : "Failing, trying again"}: ${f.message}` }),
+          el("td", { text: when(f.since) }),
+          el("td", { text: String(f.count) }),
+        ]))),
+    ])));
+
+  /** The all-clear only when something has actually been checked; otherwise what isn't known. */
+  const verdictOf = (data, problems, faults) => {
+    if (problems.length || faults.length) return null;
+    const reporters = data.reporters?.count || 0;
+    if (data.injection?.lastInjected && reporters) {
+      return el("p", { class: "hera-set-status hera-cfg-verdict", role: "status" }, [
+        icon("check_circle"),
+        el("span", { text: `Nothing has gone wrong. ${reporters === 1 ? "One browser has" : `${reporters} browsers have`} checked in since the server started; a page nobody has opened since then hasn't been checked.` }),
+      ]);
+    }
+    return el("p", { class: "hera-set-status hera-cfg-verdict", role: "status" }, [
+      icon("info"),
+      el("span", { text: "No problems have been reported, but no browser has checked in since the server started, so nothing is known about how the web pages are doing. Open Jellyfin in a browser, then refresh this section." }),
+    ]);
+  };
 
   const problemTable = (problems) =>
     el("div", { class: "hera-set-list" }, el("div", { class: "hera-cfg-table-wrap" }, el("table", { class: "hera-cfg-table" }, [
@@ -904,11 +1009,17 @@ export default function (view) {
       ]);
     } else {
       const problems = problemsOf(compat);
+      const faults = Array.isArray(compat.server) ? compat.server : [];
+      const injection = compat.injection || {};
+      const reporters = compat.reporters || {};
+      const reporterCount = reporters.count || 0;
       body = el("div", { class: "hera-cfg-compat" }, [
         el("div", { class: "hera-set-list" }, [
           compatRow("dns", "Jellyfin", compat.jellyfin),
           compatRow("verified", "Tested with", compat.tested.join(", ")),
           compatRow("tv", "Hera TV", compat.plugin),
+          compatRow("web", "Added to Jellyfin's web page", injection.lastInjected ? `Last at ${when(injection.lastInjected)}` : "Not since the server started"),
+          compatRow("devices", "Browsers that have reported", reporterCount ? `${reporterCount}, the latest at ${when(reporters.lastSeen)}` : "None since the server started"),
         ]),
         compat.supported
           ? null
@@ -916,9 +1027,15 @@ export default function (view) {
               icon("warning"),
               el("span", { text: `Hera TV hasn't been tested with Jellyfin ${compat.jellyfin}. It keeps running, and any part that no longer fits Jellyfin's web client switches itself off and is listed below, but pages may look or behave differently until a release for this version is out.` }),
             ]),
-        problems.length
-          ? problemTable(problems)
-          : el("p", { class: "hera-set-status hera-cfg-verdict", role: "status" }, [icon("check_circle"), el("span", { text: "Everything is working. Nothing has been reported since the server started." })]),
+        injection.lastInjected
+          ? null
+          : el("p", { class: "hera-set-status hera-cfg-verdict is-error", role: "status" }, [
+              icon("warning"),
+              el("span", { text: `Hera TV hasn't added itself to Jellyfin's web page since the server started${injection.lastDecline ? `. It last left the page alone at ${when(injection.lastDecline.at)} because ${injection.lastDecline.reason}` : ", so either nobody has opened the web client yet or something is stopping it"}.` }),
+            ]),
+        faults.length ? serverTable(faults) : null,
+        problems.length ? problemTable(problems) : null,
+        verdictOf(compat, problems, faults),
         el("div", { class: "hera-cfg-test" }, refresh),
       ]);
     }
@@ -934,11 +1051,17 @@ export default function (view) {
   /** Fetches what browsers have reported; failing to is shown in the section, not on the whole page. */
   const loadCompat = async () => {
     try {
-      compat = await window.ApiClient.ajax({ type: "GET", url: window.ApiClient.getUrl("HeraTV/health"), dataType: "json" });
+      compat = await withTimeout(window.ApiClient.ajax({ type: "GET", url: window.ApiClient.getUrl("HeraTV/health"), dataType: "json" }));
     } catch (error) {
       compat = { error: await reason(error) };
     }
-    renderCompat();
+    // An answer this page can't read must end up in the section too, not leave it on "Checking…".
+    try {
+      renderCompat();
+    } catch {
+      compat = { error: "The server's health report wasn't in a form this page could read." };
+      renderCompat();
+    }
   };
 
   // ---------- save bar ------------------------------------------------------------------------
@@ -989,6 +1112,29 @@ export default function (view) {
 
   const sections = {};
 
+  const masterSection = () => {
+    refs.masterSwitch = switchRow("power_settings_new", "Hera TV", "Turn off to take Hera TV out of every browser; Jellyfin's own pages come back after a reload. Settings and data are kept.", server.enabled !== false);
+    return group("Hera TV on this server", el("div", { class: "hera-set-list" }, refs.masterSwitch));
+  };
+
+  /** One switch per part of the web client; on means it runs. A part saved as off but no longer listed here is still shown, so it can be turned back on. */
+  const modulesSection = () => {
+    const off = new Set(server.disabledModules || []);
+    const known = new Set(MODULES.map(([name]) => name));
+    const listed = [...MODULES, ...[...off].filter((name) => !known.has(name)).map((name) => [name, "extension", words(name), "This part of Hera TV is switched off."])];
+    refs.moduleSwitches = {};
+    const rows = listed.map(([name, iconName, label, description]) => {
+      const node = switchRow(iconName, label, description, !off.has(name));
+      refs.moduleSwitches[name] = node;
+      return node;
+    });
+    return group(
+      "Switch off a part of Hera",
+      el("div", { class: "hera-set-list" }, rows),
+      foot("For when a Jellyfin update breaks one part of Hera TV: switch that part off here and the rest carries on, with Jellyfin's own page in its place, until a fixed release is out. It takes effect when a browser next reloads."),
+    );
+  };
+
   const render = () => {
     refs = {};
     links = new Map(server.seerr.users.links.map((l) => [lower(l.username), l.seerrId]));
@@ -1011,6 +1157,7 @@ export default function (view) {
         anyLocked
           ? el("p", { class: "hera-cfg-lede hera-cfg-envnote" }, [icon("lock"), el("span", { text: "Fields marked Server environment are set by HERATV_* variables on the server. Those win over anything saved here, so they're shown for reference and can't be changed on this page." })])
           : null,
+        masterSection(),
         sections.seerr,
         sections.mapping,
         sections.requests,
@@ -1025,6 +1172,7 @@ export default function (view) {
         seasonsSection(),
         titleSection(),
         sections.compat,
+        modulesSection(),
         bar,
       ].filter(Boolean),
     );
@@ -1039,7 +1187,7 @@ export default function (view) {
     bar.classList.remove("is-on");
     root.setAttribute("aria-busy", "true");
     try {
-      [server, jellyfinUsers] = await Promise.all([send("GET", ""), window.ApiClient.getUsers()]);
+      [server, jellyfinUsers] = await Promise.all([withTimeout(send("GET", "")), withTimeout(window.ApiClient.getUsers())]);
       jellyfinUsers = (jellyfinUsers || []).slice().sort((a, b) => String(a.Name).localeCompare(String(b.Name), undefined, { sensitivity: "base" }));
       directory = null;
       render();
@@ -1077,6 +1225,10 @@ export default function (view) {
       body[bodyKey] = refs.switches[key].getAttribute("aria-checked") === "true";
     }
     body.notificationsEnabled = refs.notifySwitch.getAttribute("aria-checked") === "true";
+    body.enabled = refs.masterSwitch.getAttribute("aria-checked") === "true";
+    body.disabledModules = Object.entries(refs.moduleSwitches)
+      .filter(([, node]) => node.getAttribute("aria-checked") !== "true")
+      .map(([name]) => name);
     body.letterboxdEnabled = refs.letterboxdSwitch.getAttribute("aria-checked") === "true";
     body.collectionsEnabled = refs.collectionsSwitch.getAttribute("aria-checked") === "true";
     body.homeRowsEnabled = refs.homeRowsSwitch.getAttribute("aria-checked") === "true";
@@ -1143,12 +1295,20 @@ export default function (view) {
     }
   }
 
-  view.addEventListener("viewshow", () => {
+  // The controller can finish loading after Jellyfin has already fired viewshow, and the page would
+  // then stay on "Loading settings…" for ever; so it also starts itself if it finds the view showing.
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
     window.addEventListener("resize", centre);
     load();
-  });
+  };
+  view.addEventListener("viewshow", start);
   view.addEventListener("viewhide", () => {
+    started = false;
     buildWatch += 1;
     window.removeEventListener("resize", centre);
   });
+  if (view.isConnected && !view.classList.contains("hide")) start();
 }

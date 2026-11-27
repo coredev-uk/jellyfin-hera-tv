@@ -1,4 +1,6 @@
-/* Hera TV: search. Loaded after hera-tv.css. */
+/* Hera TV: search. Loaded after hera-tv.css, whose --hera-* tokens, shelves and cards it uses.
+ * Hides Jellyfin's own search page markup and restyles the app bar while the header field is open
+ * (the app bar and tab capsule are read through kit.jf by hera-search.js). */
 
 /*
  * The search page: one left edge. The heading, field, chips, recent searches and every shelf

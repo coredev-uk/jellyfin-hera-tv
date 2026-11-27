@@ -78,8 +78,16 @@ internal sealed class StreamingSnapshot
 /// It fails soft. If Seerr is down the last file stays in use, however old; a title Seerr can't
 /// answer for keeps what it was last known to have.
 /// </remarks>
-internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager libraryManager, ILogger<StreamingCache> logger)
+internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager libraryManager, ILogger<StreamingCache> logger, ServerHealth health)
 {
+    private const string Feature = "Streaming availability";
+
+    /// <summary>A refresh that finds fewer than this share of the titles the last snapshot had on a service is taken for a broken answer, not a real change.</summary>
+    private const int DropFactor = 5;
+
+    /// <summary>Below this many titles on a service in the last snapshot, a drop proves nothing: a small library may truly lose them all.</summary>
+    private const int ComparableTitles = 10;
+
     /// <summary>Older than this and a read starts a refresh in the background; the nightly task normally gets there first.</summary>
     private static readonly TimeSpan Stale = TimeSpan.FromHours(30);
 
@@ -147,7 +155,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Hera TV: refreshing streaming availability failed");
+                health.Fault(Feature, "refresh streaming availability", ex);
             }
             finally
             {
@@ -215,23 +223,41 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
 
         if (library.Count > 0 && answered == 0)
         {
-            logger.LogWarning("Hera TV: Seerr gave no streaming availability for any title; keeping the last snapshot");
+            health.Fault(Feature, "refresh streaming availability: Seerr gave none for any title, so the last snapshot is kept");
             return false;
+        }
+
+        // Seerr answering, but with providers for hardly any title it used to, is a changed answer (a renamed
+        // field reads as "no providers") far more often than a library that left every service at once.
+        // Keeping the last snapshot keeps the "On <service>" collections the build would otherwise delete.
+        var withProviders = titles.Count(t => t.Value.Length > 0);
+        if (previous is not null && previous.Region == region)
+        {
+            var hadProviders = previous.Titles.Count(t => t.Value.Length > 0);
+            if (hadProviders >= ComparableTitles && withProviders * DropFactor < hadProviders)
+            {
+                health.Fault(Feature, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"refresh streaming availability: only {withProviders} titles had a streaming service where the last snapshot had {hadProviders}. Seerr's answers may have changed shape, so the last snapshot is kept"));
+
+                // The next full sweep is a day's work for nothing if Seerr still answers the same way: leave it until the snapshot would be stale.
+                _attemptRegion = region;
+                Interlocked.Exchange(ref _nextAttempt, Environment.TickCount64 + (long)Stale.TotalMilliseconds);
+                return false;
+            }
         }
 
         var trending = new List<string>();
         for (var page = 1; page <= 5; page++)
         {
             var node = await upstream.SeerrGetAsync($"api/v1/discover/trending?page={page}&language=en", TimeSpan.Zero).ConfigureAwait(false);
-            if (node?["results"] is not JsonArray results)
+            if (node.At("results") is not JsonArray results)
             {
                 break;
             }
 
-            foreach (var result in results)
+            foreach (var result in results.Items())
             {
-                var type = (string?)result?["mediaType"];
-                if (type is "movie" or "tv" && result?["id"]?.GetValue<int>() is int id)
+                var type = result.At("mediaType").Str();
+                if (type is "movie" or "tv" && result.At("id").Int() is int id)
                 {
                     trending.Add(Keys.Of(type, id));
                 }
@@ -256,7 +282,8 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             _loaded = true;
         }
 
-        logger.LogInformation("Hera TV: streaming availability for {Region} refreshed: {Titles} titles, {Trending} trending, {Logos} logos", region, titles.Count, next.Trending.Count, logos.Count);
+        health.Recovered(Feature);
+        logger.LogInformation("Hera TV: streaming availability for {Region} refreshed: {Titles} titles, {WithProviders} on a service, {Trending} trending, {Logos} logos", region, titles.Count, withProviders, next.Trending.Count, logos.Count);
         return true;
     }
 
@@ -270,9 +297,9 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
         foreach (var kind in new[] { "movies", "tv" })
         {
             var list = await upstream.SeerrGetAsync($"api/v1/watchproviders/{kind}?watchRegion={region}", TimeSpan.Zero).ConfigureAwait(false);
-            foreach (var provider in list?.AsArray() ?? [])
+            foreach (var provider in list.Items())
             {
-                if (provider?["id"]?.GetValue<int>() is int id && (string?)provider["logoPath"] is { Length: > 0 } path)
+                if (provider.At("id").Int() is int id && provider.At("logoPath").Str() is { Length: > 0 } path)
                 {
                     icons.TryAdd(id, path);
                 }
@@ -286,7 +313,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
             if (service.Network is int network)
             {
                 var node = await upstream.SeerrGetAsync($"api/v1/network/{network}", TimeSpan.Zero).ConfigureAwait(false);
-                wordmark = (string?)node?["logoPath"];
+                wordmark = node.At("logoPath").Str();
             }
 
             var icon = service.Ids.Select(id => icons.GetValueOrDefault(id)).FirstOrDefault(path => path is not null);
@@ -306,18 +333,18 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
     private static int[] Flatrate(JsonNode title, string region)
     {
         var ids = new List<int>();
-        foreach (var entry in title["watchProviders"]?.AsArray() ?? [])
+        foreach (var entry in title.At("watchProviders").Items())
         {
-            if ((string?)entry?["iso_3166_1"] != region)
+            if (entry.At("iso_3166_1").Str() != region)
             {
                 continue;
             }
 
             foreach (var tier in new[] { "flatrate", "ads", "free" })
             {
-                foreach (var provider in entry[tier]?.AsArray() ?? [])
+                foreach (var provider in entry.At(tier).Items())
                 {
-                    if (provider?["id"]?.GetValue<int>() is int id && !ids.Contains(id))
+                    if (provider.At("id").Int() is int id && !ids.Contains(id))
                     {
                         ids.Add(id);
                     }
@@ -346,9 +373,15 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
                 ? JsonSerializer.Deserialize<StreamingSnapshot>(System.IO.File.ReadAllText(file), Json)
                 : null;
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Hera TV couldn't read its streaming availability file; it will be fetched again");
+            // Unreadable, and about to be fetched again and replaced: keep what was there.
+            health.Fault(Feature, $"read its streaming availability file ({DamagedFiles.Describe(DamagedFiles.Keep(DataFile!))}); it will be fetched again", ex);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            health.Fault(Feature, "read its streaming availability file; it will be fetched again", ex);
             return null;
         }
     }
@@ -371,7 +404,7 @@ internal sealed class StreamingCache(UpstreamClient upstream, ILibraryManager li
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            logger.LogWarning(ex, "Hera TV couldn't save its streaming availability file");
+            health.Fault(Feature, "save its streaming availability file", ex);
         }
     }
 }

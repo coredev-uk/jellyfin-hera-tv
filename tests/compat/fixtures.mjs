@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SECONDS = 90; // longer than the test plays, so the player is still up when it is judged
+const SECONDS = 150; // longer than the soak in run.mjs, so the film is still playing when the server is judged
 
 // One ffmpeg run makes every source file; the layout below copies them into place. VP9 and Opus
 // because the Chromium that Playwright ships has no H.264 or AAC, so Jellyfin can direct-play
@@ -37,7 +37,7 @@ export const ffmpegArgs = () => [
 const xml = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 const film = (title, year, plot, runtime) =>
-  `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>${xml(title)}</title>\n  <year>${year}</year>\n  <plot>${xml(plot)}</plot>\n  <runtime>${runtime}</runtime>\n  <genre>Animation</genre>\n  <mpaa>U</mpaa>\n</movie>\n`;
+  `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<movie>\n  <title>${xml(title)}</title>\n  <year>${year}</year>\n  <plot>${xml(plot)}</plot>\n  <runtime>${runtime}</runtime>\n  <genre>Animation</genre>\n  <mpaa>U</mpaa>\n  <actor>\n    <name>Hera Tester</name>\n    <role>Narrator</role>\n    <type>Actor</type>\n  </actor>\n</movie>\n`;
 
 const show = (title, year, plot) =>
   `<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n<tvshow>\n  <title>${xml(title)}</title>\n  <year>${year}</year>\n  <plot>${xml(plot)}</plot>\n  <genre>Drama</genre>\n</tvshow>\n`;

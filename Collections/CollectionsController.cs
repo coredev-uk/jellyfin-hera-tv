@@ -3,6 +3,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.HeraTv.Collections;
 
@@ -30,18 +31,18 @@ public class CollectionsController(ICollectionsView view, IUserManager userManag
     public IActionResult GetNext([FromRoute] Guid itemId)
         => CurrentUser() is not { } user ? Unauthorized() : view.NextInCollection(user, itemId) is { } next ? Ok(next) : NoContent();
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 }
 
 /// <summary>
 /// Builds Hera TV's collections (BoxSets) every morning, and whenever an administrator asks from
 /// the dashboard or Scheduled Tasks. The work is in <see cref="ICollectionBuilder"/>.
 /// </summary>
-public sealed class BuildCollectionsTask(ICollectionBuilder builder) : IScheduledTask
+/// <remarks>
+/// Jellyfin builds tasks itself and marks the whole plugin as failed if one can't be built, so this takes only
+/// the service provider and asks for the builder when it runs: a builder that can't be made is a failed run.
+/// </remarks>
+public sealed class BuildCollectionsTask(IServiceProvider services) : IScheduledTask
 {
     public string Name => "Build Hera TV collections";
 
@@ -52,7 +53,7 @@ public sealed class BuildCollectionsTask(ICollectionBuilder builder) : ISchedule
     public string Category => "Hera TV";
 
     public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
-        => builder.RunAsync(progress, cancellationToken);
+        => services.GetRequiredService<ICollectionBuilder>().RunAsync(progress, cancellationToken);
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {

@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Globalization;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Jellyfin.Data.Enums;
@@ -26,6 +24,7 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 [Route("HeraTV")]
 public partial class ExtrasController(
     UpstreamClient upstream,
+    HiddenStore hidden,
     ILibraryManager libraryManager,
     IUserManager userManager,
     IMediaSourceManager mediaSources) : ControllerBase
@@ -34,8 +33,8 @@ public partial class ExtrasController(
     private const int MaxBadgeIds = 60;
 
     private static readonly TimeSpan BadgeTtl = TimeSpan.FromMinutes(30);
-    private static readonly ConcurrentDictionary<Guid, (DateTime Expires, string[] Badges)> BadgeCache = new();
     private const int MaxBadgeEntries = 4000;
+    private static readonly AsyncTtlCache<Guid, string[]> BadgeCache = new(MaxBadgeEntries);
 
     // A provider offered again as an ad tier or as a channel inside another service adds nothing.
     [GeneratedRegex(@"\s+(Standard )?with Ads$|\s+(Amazon|Apple TV|Roku Premium|Prime Video) Channel$", RegexOptions.IgnoreCase)]
@@ -125,7 +124,7 @@ public partial class ExtrasController(
             return Unauthorized();
         }
 
-        return Ok(Describe(HiddenStore.Read(user.Id)));
+        return Ok(Describe(hidden.Read(user.Id)));
     }
 
     [HttpPost("hidden")]
@@ -155,7 +154,7 @@ public partial class ExtrasController(
             Aliases = (body.Aliases ?? []).Where(a => !string.IsNullOrWhiteSpace(a) && a.Length <= 100).Select(a => a.Trim()).Distinct().Take(4).ToList(),
             At = DateTime.UtcNow,
         };
-        return Ok(Describe(HiddenStore.Add(user.Id, entry)));
+        return Ok(Describe(hidden.Add(user.Id, entry)));
     }
 
     [HttpDelete("hidden")]
@@ -167,7 +166,7 @@ public partial class ExtrasController(
             return Unauthorized();
         }
 
-        return Ok(Describe(HiddenStore.Remove(user.Id, scope, key)));
+        return Ok(Describe(hidden.Remove(user.Id, scope, key)));
     }
 
     private static string? Clip(string? value, int length)
@@ -201,11 +200,11 @@ public partial class ExtrasController(
         }
 
         // A series answers with the Rotten Tomatoes record itself; a film nests it beside IMDb's.
-        var rt = type == "tv" ? node : node["rt"];
-        var imdb = type == "tv" ? null : node["imdb"];
-        var critics = Score(rt?["criticsScore"], (string?)rt?["criticsRating"]);
-        var audience = Score(rt?["audienceScore"], (string?)rt?["audienceRating"]);
-        var imdbScore = imdb?["criticsScore"]?.GetValue<double?>();
+        var rt = type == "tv" ? node : node.At("rt");
+        var imdb = type == "tv" ? null : node.At("imdb");
+        var critics = Score(rt.At("criticsScore"), rt.At("criticsRating").Str());
+        var audience = Score(rt.At("audienceScore"), rt.At("audienceRating").Str());
+        var imdbScore = imdb.At("criticsScore").Num();
         if (critics is null && audience is null && imdbScore is null)
         {
             return null;
@@ -213,15 +212,15 @@ public partial class ExtrasController(
 
         return new
         {
-            imdb = imdbScore is null ? null : new { score = imdbScore, votes = imdb?["criticsScoreCount"]?.GetValue<int?>(), url = (string?)imdb?["url"] },
-            rt = critics is null && audience is null ? null : new { url = (string?)rt?["url"], critics, audience },
+            imdb = imdbScore is null ? null : new { score = imdbScore, votes = imdb.At("criticsScoreCount").Int(), url = imdb.At("url").Str() },
+            rt = critics is null && audience is null ? null : new { url = rt.At("url").Str(), critics, audience },
         };
     }
 
     // Rotten Tomatoes' own words for a score's state: Certified Fresh and Fresh, Rotten; Upright, Spilled.
     private static object? Score(JsonNode? score, string? rating)
     {
-        var value = score?.GetValue<int?>();
+        var value = score.Num() is { } number ? (int)Math.Round(number) : (int?)null;
         if (value is null)
         {
             return null;
@@ -234,72 +233,64 @@ public partial class ExtrasController(
     private async Task<object?> Providers(string type, string tmdbId, string region)
     {
         var node = await upstream.SeerrGetAsync($"api/v1/{type}/{tmdbId}?language=en", TimeSpan.FromMinutes(30)).ConfigureAwait(false);
-        var here = node?["watchProviders"]?.AsArray()
-            .FirstOrDefault(p => string.Equals((string?)p?["iso_3166_1"], region, StringComparison.OrdinalIgnoreCase));
-        var streaming = here?["flatrate"]?.AsArray()
-            .Where(p => p is not null && !string.IsNullOrEmpty((string?)p["logoPath"]))
-            .OrderBy(p => p!["displayPriority"]?.GetValue<int?>() ?? int.MaxValue)
+        var here = node.At("watchProviders").Items()
+            .FirstOrDefault(p => string.Equals(p.At("iso_3166_1").Str(), region, StringComparison.OrdinalIgnoreCase));
+        var streaming = here.At("flatrate").Items()
+            .Where(p => !string.IsNullOrEmpty(p.At("logoPath").Str()))
+            .OrderBy(p => p.At("displayPriority").Int() ?? int.MaxValue)
             .ToList();
-        if (streaming is null || streaming.Count == 0)
+        if (streaming.Count == 0)
         {
             return null;
         }
 
-        var names = streaming.Select(p => (string?)p!["name"] ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var names = streaming.Select(p => p.At("name").Str() ?? string.Empty).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var shown = streaming
             .Where(p =>
             {
-                var name = (string?)p!["name"] ?? string.Empty;
+                var name = p.At("name").Str() ?? string.Empty;
                 var bare = Variant().Replace(name, string.Empty);
                 return bare == name || !names.Contains(bare);
             })
             .Take(MaxProviders)
             .Select(p => new
             {
-                id = p!["id"]?.GetValue<int?>(),
-                name = (string?)p["name"],
-                logo = SeerrMapper.Image((string?)p["logoPath"], "w154"),
+                id = p.At("id").Int(),
+                name = p.At("name").Str(),
+                logo = SeerrMapper.Image(p.At("logoPath").Str(), "w154"),
             })
             .ToArray();
-        return new { region = region.ToUpperInvariant(), link = (string?)here?["link"], streaming = shown };
+        return new { region = region.ToUpperInvariant(), link = here.At("link").Str(), streaming = shown };
     }
 
     // ---------- quality -------------------------------------------------------------------------
 
     private string[] BadgesOf(BaseItem item, User user)
-    {
-        var now = DateTime.UtcNow;
-        if (BadgeCache.TryGetValue(item.Id, out var hit) && hit.Expires > now)
+        => BadgeCache.Get(item.Id, BadgeTtl, () =>
         {
-            return hit.Badges;
-        }
+            // A show has no file of its own: its first few episodes say what it is shot and mastered in.
+            IEnumerable<BaseItem> sources = item is Series
+                ? libraryManager.GetItemList(new InternalItemsQuery(user)
+                {
+                    AncestorIds = [item.Id],
+                    IncludeItemTypes = [BaseItemKind.Episode],
+                    Recursive = true,
+                    IsVirtualItem = false,
+                    Limit = 3,
+                })
+                : [item];
 
-        // A show has no file of its own: its first few episodes say what it is shot and mastered in.
-        IEnumerable<BaseItem> sources = item is Series
-            ? libraryManager.GetItemList(new InternalItemsQuery(user)
+            var found = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var source in sources)
             {
-                AncestorIds = [item.Id],
-                IncludeItemTypes = [BaseItemKind.Episode],
-                Recursive = true,
-                IsVirtualItem = false,
-                Limit = 3,
-            })
-            : [item];
-
-        var found = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var source in sources)
-        {
-            foreach (var badge in Quality(mediaSources.GetMediaStreams(source.Id)))
-            {
-                found.Add(badge);
+                foreach (var badge in Quality(mediaSources.GetMediaStreams(source.Id)))
+                {
+                    found.Add(badge);
+                }
             }
-        }
 
-        var badges = new[] { "4k", "dv", "hdr", "atmos", "7.1", "5.1" }.Where(found.Contains).ToArray();
-        BadgeCache[item.Id] = (now + BadgeTtl, badges);
-        CachePruning.Prune(BadgeCache, MaxBadgeEntries, e => e.Expires, item.Id);
-        return badges;
-    }
+            return new[] { "4k", "dv", "hdr", "atmos", "7.1", "5.1" }.Where(found.Contains).ToArray();
+        });
 
     private static IEnumerable<string> Quality(IReadOnlyList<MediaStream> streams)
     {
@@ -312,19 +303,19 @@ public partial class ExtrasController(
                     yield return "4k";
                 }
 
-                var range = stream.VideoRangeType.ToString();
-                if (range.StartsWith("DOVI", StringComparison.Ordinal) && range != "DOVIInvalid")
+                var range = stream.VideoRangeType;
+                if (range != VideoRangeType.DOVIInvalid && range.ToString().StartsWith("DOVI", StringComparison.Ordinal))
                 {
                     yield return "dv";
                 }
-                else if (range is "HDR10" or "HDR10Plus" or "HLG")
+                else if (range is VideoRangeType.HDR10 or VideoRangeType.HDR10Plus or VideoRangeType.HLG)
                 {
                     yield return "hdr";
                 }
             }
             else if (stream.Type == MediaStreamType.Audio)
             {
-                if (stream.AudioSpatialFormat.ToString() == "DolbyAtmos" || (stream.Profile ?? string.Empty).Contains("Atmos", StringComparison.OrdinalIgnoreCase))
+                if (stream.AudioSpatialFormat == AudioSpatialFormat.DolbyAtmos || (stream.Profile ?? string.Empty).Contains("Atmos", StringComparison.OrdinalIgnoreCase))
                 {
                     yield return "atmos";
                 }
@@ -340,11 +331,7 @@ public partial class ExtrasController(
         }
     }
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 
     public sealed class HideBody
     {
@@ -361,129 +348,5 @@ public partial class ExtrasController(
         public string? Image { get; set; }
 
         public List<string>? Aliases { get; set; }
-    }
-}
-
-/// <summary>One title a person hid, as saved.</summary>
-public sealed class HiddenTitle
-{
-    public string Scope { get; set; } = string.Empty;
-
-    public string Key { get; set; } = string.Empty;
-
-    public string Title { get; set; } = string.Empty;
-
-    public string? Year { get; set; }
-
-    public string? Kind { get; set; }
-
-    public string? Image { get; set; }
-
-    public List<string> Aliases { get; set; } = [];
-
-    public DateTime At { get; set; }
-}
-
-/// <summary>
-/// Hidden titles, one JSON file per user in the plugin's own data folder. "upnext" removes a
-/// series or film from Up Next until it is watched again; "interest" keeps it out of every
-/// suggestion row.
-/// </summary>
-public static class HiddenStore
-{
-    public const string UpNext = "upnext";
-    public const string Interest = "interest";
-
-    private const int Limit = 500;
-    private static readonly object Gate = new();
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
-
-    // Each user's list after its first read. Lists are replaced whole, never edited in place, so a
-    // list handed out stays valid for whoever holds it; the file is only read once per user per process.
-    private static readonly Dictionary<Guid, IReadOnlyList<HiddenTitle>> Lists = [];
-
-    public static IReadOnlyList<HiddenTitle> Read(Guid user)
-    {
-        lock (Gate)
-        {
-            return Held(user);
-        }
-    }
-
-    public static IReadOnlyList<HiddenTitle> Add(Guid user, HiddenTitle entry)
-    {
-        lock (Gate)
-        {
-            var list = Held(user).Where(t => t.Scope != entry.Scope || t.Key != entry.Key).ToList();
-            list.Add(entry);
-            if (list.Count > Limit)
-            {
-                list = [.. list.OrderByDescending(t => t.At).Take(Limit)];
-            }
-
-            // Saved before it is kept, so a write that fails leaves memory agreeing with the file.
-            Save(user, list);
-            return Lists[user] = list;
-        }
-    }
-
-    public static IReadOnlyList<HiddenTitle> Remove(Guid user, string scope, string key)
-    {
-        lock (Gate)
-        {
-            var current = Held(user);
-            var list = current.Where(t => t.Scope != scope || (t.Key != key && !t.Aliases.Contains(key))).ToList();
-            if (list.Count == current.Count)
-            {
-                return current;
-            }
-
-            Save(user, list);
-            return Lists[user] = list;
-        }
-    }
-
-    private static IReadOnlyList<HiddenTitle> Held(Guid user)
-    {
-        if (!Lists.TryGetValue(user, out var list))
-        {
-            Lists[user] = list = Load(user);
-        }
-
-        return list;
-    }
-
-    private static string FileOf(Guid user)
-    {
-        var folder = Path.Combine(Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("The plugin is not loaded."), "hidden");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, user.ToString("N", CultureInfo.InvariantCulture) + ".json");
-    }
-
-    private static List<HiddenTitle> Load(Guid user)
-    {
-        var file = FileOf(user);
-        if (!File.Exists(file))
-        {
-            return [];
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<HiddenTitle>>(File.ReadAllText(file), Json) ?? [];
-        }
-        catch (JsonException)
-        {
-            // A damaged file starts the list again; the next save replaces it.
-            return [];
-        }
-    }
-
-    private static void Save(Guid user, List<HiddenTitle> list)
-    {
-        var file = FileOf(user);
-        var temporary = file + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(list, Json));
-        File.Move(temporary, file, overwrite: true);
     }
 }

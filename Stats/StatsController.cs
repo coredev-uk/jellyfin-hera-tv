@@ -19,7 +19,7 @@ public class StatsController(ISessionManager sessions, IStatsReports reports) : 
 
     /// <summary>Gets every stream in progress, and what they add up to.</summary>
     [HttpGet("now")]
-    [Authorize(Policy = "RequiresElevation")]
+    [Authorize(Policy = HeraUser.Elevated)]
     public IActionResult GetNow()
     {
         var playing = new List<object>();
@@ -102,7 +102,7 @@ public class StatsController(ISessionManager sessions, IStatsReports reports) : 
 
     /// <summary>Gets the history of everyone's watching over the last 7, 30, 90 or 365 days.</summary>
     [HttpGet("history")]
-    [Authorize(Policy = "RequiresElevation")]
+    [Authorize(Policy = HeraUser.Elevated)]
     public IActionResult GetHistory([FromQuery] int days = 30)
     {
         if (!HistoryDays.Contains(days))
@@ -124,7 +124,7 @@ public class StatsController(ISessionManager sessions, IStatsReports reports) : 
         }
 
         // Only ever the caller's own: there is no way to ask for anyone else's.
-        if (!Guid.TryParse(User.FindFirst("Jellyfin-UserId")?.Value, out var user))
+        if (this.IdOf() is not { } user)
         {
             return Unauthorized();
         }

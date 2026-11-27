@@ -10,10 +10,15 @@
  *  - user configuration (`Users/Configuration`): autoplay, audio and subtitle preferences,
  *    Recently Added filters. These follow the user to every device.
  *  - Hera's appearance: HeraTV.kit.appearance (display-preferences record + localStorage).
- *  - layout and skip-intro/credits behaviour: localStorage, exactly where Jellyfin's own
- *    pages keep them (they are per browser by design: a TV and a laptop differ).
+ *  - layout and skip-intro/credits behaviour: localStorage, under the key names Jellyfin's own
+ *    pages use (kit.storage; they are per browser by design: a TV and a laptop differ).
  * The stock page's own markup is kept (hidden): its links to other pages and anything another
  * plugin adds to it are mirrored into the "More" section, so nothing is lost.
+ *
+ * Contracts: Jellyfin's pieces are all HT.jf keys (prefs*). `.hera-set-page` hides the stock
+ * page's children (hera-settings.css); an admin viewing another account's preferences keeps
+ * Jellyfin's page. The stock subpages get a `.hera-set-back` link; the Sign Out wording is the
+ * SIGN_OUT constant below.
  */
 (() => {
   "use strict";
@@ -21,7 +26,7 @@
   const kit = window.HeraTV && window.HeraTV.kit;
   if (!kit) return;
   const { el, icon, api, userId, getJSON, appearance, isTv } = kit;
-  const { jf } = window.HeraTV;
+  const jf = window.HeraTV.jf;
 
   const PAGE_ID = "myPreferencesMenuPage";
   const SECTION_KEY = "hera-settings-section";
@@ -154,9 +159,11 @@
       ctx.user = { ...user, Configuration: config };
     });
 
-  // Jellyfin keeps these two per browser: the layout under a bare key, a segment's behaviour
-  // under "<userId>-segmentTypeAction__<Type>" (see its media-segment settings).
-  const segmentKey = (type) => `${ctx.user.Id}-segmentTypeAction__${type}`;
+  // Jellyfin keeps these per browser, under its own key names (kit.storage): the layout, a
+  // segment's behaviour ("<userId>-segmentTypeAction__<Type>") and the display language.
+  const layoutKey = () => kit.storage.jfKey("layout");
+  const segmentKey = (type) => kit.storage.jfUserKey(`segmentTypeAction__${type}`);
+  const languageKey = () => kit.storage.jfUserKey("language");
   const readSegment = (type) => {
     try {
       return localStorage.getItem(segmentKey(type)) || "AskToSkip";
@@ -164,8 +171,6 @@
       return "AskToSkip";
     }
   };
-  // The display language lives with the user's other per-browser settings: "<userId>-language".
-  const languageKey = () => `${ctx.user.Id}-language`;
   const readLanguage = () => {
     try {
       return localStorage.getItem(languageKey()) || "";
@@ -175,7 +180,7 @@
   };
   const readLayout = () => {
     try {
-      const value = localStorage.getItem("layout");
+      const value = localStorage.getItem(layoutKey());
       return value === "desktop" || value === "tv" ? value : "auto";
     } catch {
       return "auto";
@@ -423,9 +428,9 @@
       if (e.target === dialog) dialog.close();
     });
     // Back belongs to the sheet while it is open: Jellyfin would otherwise also leave the page.
-    // webOS (461) and Tizen (10009) remotes send their own Back keys.
+    // Backspace is left alone inside a text field, where it deletes.
     dialog.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" || e.keyCode === 461 || e.keyCode === 10009 || e.key === "GoBack") {
+      if (kit.keys.isBack(e) && !(e.key === "Backspace" && e.target.closest("input, textarea"))) {
         e.preventDefault();
         e.stopPropagation();
         dialog.close();
@@ -811,10 +816,13 @@
   const isAdmin = () => !!(ctx.user.Policy && ctx.user.Policy.IsAdministrator);
   const config = () => ctx.user.Configuration || {};
 
+  // Jellyfin's Sign Out link has no attribute of its own to find it by, only its text. This is the
+  // one place that knows the English wording; Dashboard.logout is tried first and needs no text.
+  const SIGN_OUT = /sign out/i;
   // Jellyfin's own Sign Out, should its Dashboard helper go; the stock list stays in the page, hidden.
   const signOut = () => {
     if (window.Dashboard?.logout) return window.Dashboard.logout();
-    [...ctx.page.querySelectorAll(jf.prefsLinks)].find((node) => /sign out/i.test(node.textContent))?.click();
+    kit.jfAll("settings", "prefsLinks", ctx.page).find((node) => SIGN_OUT.test(node.textContent))?.click();
   };
 
   const sections = [
@@ -893,8 +901,8 @@
               options: LAYOUTS,
               value: readLayout(),
               save: async (key) => {
-                if (key === "auto") localStorage.removeItem("layout");
-                else localStorage.setItem("layout", key);
+                if (key === "auto") localStorage.removeItem(layoutKey());
+                else localStorage.setItem(layoutKey(), key);
                 needsReload(display, "Layout", readLayout());
               },
             }),
@@ -1139,14 +1147,15 @@
   const KNOWN = ["userprofile", "quickconnect", "mypreferencesdisplay", "mypreferenceshome", "mypreferencesplayback", "mypreferencessubtitles", "mypreferencescontrols"];
   const stockExtras = () => {
     const out = [];
-    ctx.page.querySelectorAll(jf.prefsLinks).forEach((node) => {
+    kit.jfAll("settings", "prefsLinks", ctx.page).forEach((node) => {
       if (ctx.root.contains(node)) return;
       const href = node.getAttribute("href") || "";
-      const label = (node.querySelector(".listItemBodyText") || node).textContent.trim();
-      if (!label || /^sign out$/i.test(label) || KNOWN.some((name) => href.includes(`#/${name}`))) return;
-      const mark = node.querySelector(".listItemIcon");
+      const label = (kit.jf("settings", "prefsLinkLabel", node) || node).textContent.trim();
+      if (!label || SIGN_OUT.test(label) || KNOWN.some((name) => href.includes(`#/${name}`))) return;
+      const mark = kit.jf("settings", "prefsLinkIcon", node);
+      // The glyph's name is the one class on Jellyfin's icon span that is not one of its own.
       const iconName = mark ? [...mark.classList].filter((c) => !/^(material-icons|listItemIcon|listItemIcon-transparent)$/.test(c)).pop() : null;
-      out.push({ label, href: href && href !== "#" ? href : null, node, icon: iconName || "chevron_right", admin: !!node.closest(".adminSection") });
+      out.push({ label, href: href && href !== "#" ? href : null, node, icon: iconName || "chevron_right", admin: !!node.closest(jf.prefsAdmin) });
     });
     return out;
   };
@@ -1337,7 +1346,7 @@
     renderNav();
     renderPane();
     // Plugins add their menu links after the page first draws; keep "More" current.
-    const stock = page.querySelector(".readOnlyContent");
+    const stock = kit.jf("settings", "prefsMenu", page);
     if (stock) {
       let pending = false;
       ctx.observer = new MutationObserver(() => {
@@ -1360,8 +1369,8 @@
 
   // The stock subpages (Display, Playback, Subtitles, ...) lead back to the Settings app.
   const mountBackLink = (page) => {
-    if (!page.classList.contains("userPreferencesPage")) return;
-    const host = [...page.children].find((child) => child.classList.contains("padded-left"));
+    if (!page.matches(jf.prefsSubpage)) return;
+    const host = kit.jf("settings", "prefsSubpageBody", page);
     if (!host || host.querySelector(".hera-set-back")) return;
     host.prepend(el("a", { class: "hera-set-back", href: "#/mypreferencesmenu" }, [icon("chevron_left"), el("span", { text: "Settings" })]));
   };
@@ -1379,7 +1388,7 @@
       // Someone else's preferences (an admin's view of another account) keep Jellyfin's page.
       const target = params.get("userId");
       if (target && target !== userId()) return;
-      // viewshow and the hashchange fallback both land here; one mount serves both.
+      // onView can run again for a page that is already mounted; one mount serves both.
       if (ctx && ctx.page === page && ctx.root.isConnected && Date.now() - ctx.mountedAt < 1500) return;
       try {
         await mount(page, userId());

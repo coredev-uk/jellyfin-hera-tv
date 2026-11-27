@@ -231,11 +231,7 @@ public class LetterboxdController(
         };
     }
 
-    private User? CurrentUser()
-    {
-        var claim = User.FindFirst("Jellyfin-UserId")?.Value;
-        return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
-    }
+    private User? CurrentUser() => this.Current(userManager);
 
     public sealed class LinkBody
     {

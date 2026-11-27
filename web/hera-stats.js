@@ -7,8 +7,13 @@
  *  - When you watch (a 7 x 24 heatmap), what you watch (genres), every day (a calendar) and a few
  *    sentences about streaks and the busiest day.
  * The page lives at #/home?hera=stats and takes the place of the home tab, as Discover and the
- * Requests view do. HeraTV.stats.render(container, data) draws it from any response, so the same
- * code paints the live page and a sample.
+ * Requests view do.
+ *
+ * Contracts: nothing here is exported or read by another module. The page asks core for the takeover
+ * of the home tab (kit.view.take, with `art` while the banner has a backdrop, so the header sits over it as
+ * on a detail page) and never touches <html> itself. Expects hera-tv.css for cards, shelves and
+ * `.hera-dark` (light text over art), and borrows Jellyfin's sectionTitle sectionTitle-cards classes on
+ * its section headings.
  */
 (() => {
   "use strict";
@@ -18,14 +23,10 @@
   const { kit } = HT;
   const { el, icon } = kit;
 
-  const root = document.documentElement;
-  const cleanups = [];
-  const listen = (target, type, handler, options) => {
-    target.addEventListener(type, handler, options);
-    cleanups.push(() => target.removeEventListener(type, handler, options));
-  };
+  const scope = kit.scope();
 
-  const STATS_HASH = "#/home?hera=stats";
+  // Jellyfin's page id for the home page, the key `requires` is written in.
+  const INDEX_PAGE = "indexPage";
   const RANGES = [
     { days: 365, label: "This Year" },
     { days: 30, label: "This Month" },
@@ -43,7 +44,7 @@
 
   // ---------- wording -----------------------------------------------------------------------
 
-  const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  const { plural } = kit.text;
 
   // "6 hours 20 minutes", as it reads in a sentence.
   const spoken = (seconds) => {
@@ -559,25 +560,11 @@
 
   // ---------- the view ------------------------------------------------------------------------
 
-  const view = { root: null, token: 0, art: false, classWatch: null, days: 365 };
+  const view = { root: null, token: 0, days: 365 };
 
-  // The page marks the root for its hero, and the banner's art sits under the header as a detail page's does.
-  const keepRootClasses = () => {
-    view.classWatch?.disconnect();
-    const fix = () => {
-      if (root.classList.contains("hera-home")) root.classList.remove("hera-home");
-      if (view.art && !root.classList.contains("hera-art-top")) root.classList.add("hera-art-top");
-    };
-    fix();
-    view.classWatch = new MutationObserver(fix);
-    view.classWatch.observe(root, { attributes: true, attributeFilter: ["class"] });
-  };
-
+  // The banner's art sits under the header as a detail page's does, once there is a banner with art.
   const setArt = (on) => {
-    view.art = on;
-    if (!view.root) return;
-    if (on) root.classList.add("hera-art-top");
-    else root.classList.remove("hera-art-top");
+    if (view.root) kit.view.take("stats", { art: on });
   };
 
   const load = async (days, { refocus = false } = {}) => {
@@ -587,7 +574,9 @@
     view.days = days;
     loading(mine);
     try {
-      const data = await kit.hera("stats/me", { query: { days } });
+      const request = kit.hera("stats/me", { query: { days } });
+      kit.track("stats", request);
+      const data = await request;
       if (token !== view.token || !mine.isConnected) return;
       render(mine, data, { days, onRange: (d) => load(d, { refocus: true }), onArt: setArt });
       if (refocus || kit.isTv()) mine.querySelector('.hera-stats__range-btn[aria-pressed="true"], .hera-stats__home')?.focus({ preventScroll: true });
@@ -601,62 +590,54 @@
 
   const unmountView = () => {
     view.token++;
+    if (view.root) kit.view.release("stats");
     view.root?.remove();
     view.root = null;
-    view.classWatch?.disconnect();
-    view.classWatch = null;
-    if (view.art) root.classList.remove("hera-art-top");
-    view.art = false;
-    root.classList.remove("hera-stats-on");
   };
 
   const mountView = (page) => {
-    const host = page.querySelector(HT.jf.homeTab);
+    const host = kit.jf("stats", "homeTab", page);
     if (!host) return;
     unmountView();
     view.root = el("div", { class: "hera-stats", "data-hera-stats": "" });
     host.append(view.root);
-    root.classList.add("hera-stats-on");
-    keepRootClasses();
+    kit.view.take("stats", { art: false });
     window.scrollTo(0, 0);
     load(view.days);
   };
 
-  const wantsView = () => {
-    const [path, query = ""] = window.location.hash.split("?");
-    return path.startsWith("#/home") && new URLSearchParams(query).get("hera") === "stats";
-  };
+  // The `hera` query of the route showing, from kit.onRoute and from onView, which both carry it.
+  let params = new URLSearchParams();
+  const wantsView = () => params.get("hera") === "stats";
 
   const syncView = (page) => {
-    if (!wantsView() || page?.id !== "indexPage" || !kit.userId()) {
+    if (!wantsView() || page?.id !== INDEX_PAGE || !kit.userId()) {
       if (view.root) unmountView();
       return;
     }
-    if (view.root?.isConnected) {
-      // Hera's own pass removed the art class on its way through the page; put it back.
-      if (view.art) root.classList.add("hera-art-top");
-      return;
-    }
+    if (view.root?.isConnected) return;
     mountView(page);
   };
 
-  const onHash = () => requestAnimationFrame(() => syncView(document.querySelector(".page:not(.hide)")));
+  const onRoute = (route) => {
+    params = route.params;
+    syncView(route.page ?? kit.jf("stats", "page"));
+  };
 
   HT.register({
     name: "stats",
     // The page mounts into the home tab; it has nowhere to appear without it.
     requires: { indexPage: ["homeTab"] },
-    onView(page) {
+    onView(page, { params: viewParams }) {
+      params = viewParams;
       syncView(page);
+    },
+    start() {
+      scope.add(kit.onRoute("stats", onRoute));
     },
     teardown() {
       unmountView();
-      cleanups.splice(0).forEach((fn) => fn());
-      delete HT.stats;
+      scope.dispose();
     },
   });
-
-  listen(window, "hashchange", onHash);
-
-  HT.stats = { render, loading, failed, hash: STATS_HASH };
 })();

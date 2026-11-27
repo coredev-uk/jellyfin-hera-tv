@@ -15,21 +15,37 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<IStartupFilter, WebInjection>();
+        serviceCollection.AddSingleton<ServerHealth>(provider =>
+        {
+            var health = new ServerHealth(provider.GetRequiredService<ILogger<ServerHealth>>());
+            try
+            {
+                health.LogStartup(applicationHost);
+            }
+            catch (Exception ex)
+            {
+                // The line is a convenience; the plugin must not fail to load over it.
+                health.Fault("Startup report", "log its version line", ex);
+            }
+
+            return health;
+        });
         serviceCollection.AddSingleton<HealthStore>();
         serviceCollection.AddSingleton<Integrations.UpstreamClient>();
         serviceCollection.AddSingleton<Integrations.LibraryLookup>();
+        serviceCollection.AddSingleton<Integrations.HiddenStore>();
         serviceCollection.AddSingleton<Stats.PlaybackReportingSource>();
         serviceCollection.AddSingleton<Stats.StatsStore>();
         serviceCollection.AddSingleton<Stats.IItemCatalogue, Stats.ItemCatalogue>();
         serviceCollection.AddSingleton<Stats.IStatsReports, Stats.StatsReports>();
-        serviceCollection.AddHostedService<Stats.StreamRecorder>();
+        serviceCollection.AddGuardedHostedService<Stats.StreamRecorder>(Stats.StreamRecorder.Feature);
         serviceCollection.AddSingleton<Integrations.UserRequests>();
         serviceCollection.AddSingleton<Notifications.NotificationStore>();
-        serviceCollection.AddHostedService<Notifications.NotificationCentre>();
+        serviceCollection.AddGuardedHostedService<Notifications.NotificationCentre>(Notifications.NotificationCentre.Feature);
         serviceCollection.AddSingleton<Letterboxd.LetterboxdStore>();
         serviceCollection.AddSingleton<Letterboxd.LetterboxdSync>();
         serviceCollection.AddSingleton<Letterboxd.LetterboxdWatcher>();
-        serviceCollection.AddHostedService(services => services.GetRequiredService<Letterboxd.LetterboxdWatcher>());
+        serviceCollection.AddGuardedHostedService(Letterboxd.LetterboxdWatcher.Feature, provider => provider.GetRequiredService<Letterboxd.LetterboxdWatcher>());
         serviceCollection.AddSingleton<Collections.Snapshots>();
         serviceCollection.AddSingleton<Collections.Catalogue>();
         serviceCollection.AddSingleton<Collections.StreamingCache>();
@@ -47,7 +63,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 /// It fails open: this runs in front of the server's own web page, so whatever goes wrong while
 /// rewriting, the page Jellyfin produced is what gets sent.
 /// </remarks>
-public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
+public sealed class WebInjection(ILogger<WebInjection> logger, ServerHealth health) : IStartupFilter
 {
     private const string Marker = "data-hera-tv";
 
@@ -55,14 +71,19 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
     private const string SchemeScript =
         """(function(){try{var p=localStorage.getItem("hera-appearance");var l=p==="light"||(p!=="dark"&&!!window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches);document.documentElement.setAttribute("data-hera-scheme",l?"light":"dark");}catch(e){}})();""";
 
-    /// <summary>What goes into the page, the same for every request (the fingerprint is the only thing in it that varies, and that is fixed per build).</summary>
-    private static readonly Lazy<Fragments> Injected = new(BuildFragments);
+    /// <summary>
+    /// Switches Hera's styling on before first paint: the core stylesheets sit behind <c>hera-on</c> and
+    /// each module's behind <c>hera-m-&lt;module&gt;</c> (see <see cref="CssGate"/>), so without these
+    /// classes on the page from the start the web client would draw unstyled until the script ran. They
+    /// are left off when this tab has asked for Hera to be off (<c>?hera=off</c>, or hera-off in
+    /// sessionStorage, which <c>?hera=on</c> overrides): hera-tv.js, once it runs, only ever removes them
+    /// (safe mode, a module standing aside, one switched off in the settings since this page was served).
+    /// </summary>
+    private const string GateScript =
+        """(function(){try{var q=new URLSearchParams(location.search).get("hera")||new URLSearchParams(location.hash.split("?")[1]||"").get("hera"),o=q==="off";if(!o&&q!=="on"){try{o=sessionStorage.getItem("hera-off")==="1"}catch(e){}}if(!o)document.documentElement.classList.add(@CLASSES);}catch(e){}})();""";
 
     /// <summary>The last page rewritten. Jellyfin's index.html is one file that changes only with an upgrade, so this is nearly always the one asked for again.</summary>
     private static volatile Page? latest;
-
-    /// <summary>Set once a rewrite failure has been logged as a warning; later ones are debug, so a broken page doesn't fill the log on every load.</summary>
-    private static int warned;
 
     public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
     {
@@ -134,13 +155,24 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
         // is only the write to the client.
         var bytes = buffer.GetBuffer().AsMemory(0, (int)buffer.Length);
         Rewrite? rewritten = null;
+        string? decline = null;
         try
         {
-            rewritten = TryRewrite(context, bytes, coding, held);
+            rewritten = TryRewrite(context, bytes, coding, held, out decline);
         }
         catch (Exception ex)
         {
-            Warn(ex, context.Request.Path);
+            health.Declined($"rewriting {context.Request.Path} failed", ex);
+            decline = null;
+        }
+
+        if (rewritten is not null)
+        {
+            health.Injected();
+        }
+        else if (decline is not null)
+        {
+            health.Declined(decline);
         }
 
         if (rewritten is null)
@@ -184,20 +216,33 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
     /// a response that has already started (its headers are on the wire, so its length can no
     /// longer change).
     /// </summary>
-    private static Rewrite? TryRewrite(HttpContext context, ReadOnlyMemory<byte> source, string? coding, IList<EntityTagHeaderValue> held)
+    private static Rewrite? TryRewrite(HttpContext context, ReadOnlyMemory<byte> source, string? coding, IList<EntityTagHeaderValue> held, out string? decline)
     {
+        // A redirect (Jellyfin's /web to /web/) carries no page to rewrite and is nothing to report.
+        if (context.Response.StatusCode is >= 300 and < 400)
+        {
+            decline = null;
+            return null;
+        }
+
         var isHtml = context.Response.StatusCode == StatusCodes.Status200OK
             && !context.Response.HasStarted
             && (context.Response.ContentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) ?? false);
         if (!isHtml)
         {
+            decline = $"Jellyfin answered {context.Response.StatusCode} ({context.Response.ContentType ?? "no content type"}) rather than an HTML page";
             return null;
         }
 
+        // The page is the file Jellyfin served with this build's fragments and the modules the
+        // settings leave on; a change to either (a module switched off, a new Jellyfin file) is a
+        // different page, with its own validator.
+        var enabled = EnabledModules();
+        var key = string.Join(',', enabled);
         var page = latest;
-        if (page is null || !page.Original.AsSpan().SequenceEqual(source.Span))
+        if (page is null || page.Key != key || !page.Original.AsSpan().SequenceEqual(source.Span))
         {
-            page = Inject(source.ToArray());
+            page = Inject(source.ToArray(), key, enabled, out decline);
             if (page is null)
             {
                 return null;
@@ -206,65 +251,72 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
             latest = page;
         }
 
-        // The page depends on nothing but Jellyfin's file and this build, so its validator is a hash
-        // of what is sent. Jellyfin's own ETag is for the file it has on disk, not for this.
+        decline = null;
+
+        // The page depends on nothing but Jellyfin's file, this build and the modules switched off, so
+        // its validator is a hash of what is sent. Jellyfin's own ETag is for the file it has on disk,
+        // not for this.
         var etag = page.Payload.ETag(coding);
-        var notModified = held.Any(tag => tag.Equals(EntityTagHeaderValue.Any) || tag.Compare(new EntityTagHeaderValue(etag), useStrongComparison: false));
+        var notModified = held.Any(tag => tag.Equals(EntityTagHeaderValue.Any) || tag.Compare(EntityTagHeaderValue.Parse(etag), useStrongComparison: false));
         return new Rewrite(etag, notModified ? [] : page.Payload.Encoded(coding), notModified);
     }
 
-    /// <summary>The page with Hera TV added, or null where it has no head and body to add it to or has it already.</summary>
-    private static Page? Inject(byte[] source)
+    /// <summary>The modules in the manifest that the plugin's settings leave switched on.</summary>
+    private static string[] EnabledModules()
+    {
+        var off = Plugin.Instance?.Configuration.DisabledModules ?? [];
+        return [.. WebAssets.Modules.Where(module => !off.Contains(module, StringComparer.Ordinal))];
+    }
+
+    /// <summary>The page with Hera TV added, or null (with the reason) where it has no head and body to add it to or has it already.</summary>
+    private static Page? Inject(byte[] source, string key, string[] enabled, out string? decline)
     {
         var html = Encoding.UTF8.GetString(source);
         var headEnd = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
         var bodyEnd = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
-        if (headEnd < 0 || bodyEnd < 0 || html.Contains(Marker, StringComparison.Ordinal))
+        if (headEnd < 0 || bodyEnd < 0)
         {
+            decline = "Jellyfin's page has no </head> or </body> to add to";
             return null;
         }
 
-        var fragments = Injected.Value;
+        if (html.Contains(Marker, StringComparison.Ordinal))
+        {
+            decline = "the page already carries Hera TV";
+            return null;
+        }
+
+        var fragments = BuildFragments(enabled);
         html = new StringBuilder(html.Length + fragments.Head.Length + fragments.Body.Length)
             .Append(html, 0, headEnd).Append(fragments.Head)
             .Append(html, headEnd, bodyEnd - headEnd).Append(fragments.Body)
             .Append(html, bodyEnd, html.Length - bodyEnd)
             .ToString();
 
-        return new Page(source, new WebAssets.Payload(Encoding.UTF8.GetBytes(html)));
+        decline = null;
+        return new Page(source, key, new WebAssets.Payload(Encoding.UTF8.GetBytes(html)));
     }
 
-    private static Fragments BuildFragments()
+    private static Fragments BuildFragments(string[] enabled)
     {
         var v = WebAssets.Version;
         // The stylesheet asks for the font by a bare relative URL, so the preload must match it.
         // The inline script paints the saved appearance before first render; hera-tv.js keeps it
         // in step afterwards (see `appearance` there). Without it a dark choice on a light-mode
         // device would flash white on every load.
+        var gates = string.Join(',', new[] { "hera-on" }.Concat(enabled.Select(module => $"hera-m-{module}")).Select(name => $"\"{name}\""));
         var head =
             $"<link {Marker} rel=\"preload\" as=\"font\" type=\"font/woff2\" crossorigin href=\"../HeraTV/InterVariable.woff2?v={v}\">" +
-            $"<script {Marker}>{SchemeScript}</script>" +
+            $"<script {Marker}>{SchemeScript}{GateScript.Replace("@CLASSES", gates, StringComparison.Ordinal)}</script>" +
             $"<link {Marker} rel=\"stylesheet\" href=\"../HeraTV/{WebAssets.StylesheetBundle}?v={v}\">";
         var body = $"<script {Marker} src=\"../HeraTV/{WebAssets.ScriptBundle}?v={v}\" defer></script>";
         return new Fragments(head, body);
     }
 
-    private void Warn(Exception ex, PathString path)
-    {
-        if (Interlocked.Exchange(ref warned, 1) == 0)
-        {
-            logger.LogWarning(ex, "Hera TV couldn't rewrite {Path}; serving Jellyfin's page unmodified. Further failures are logged at debug level", path);
-        }
-        else
-        {
-            logger.LogDebug(ex, "Hera TV couldn't rewrite {Path}", path);
-        }
-    }
-
     private sealed record Fragments(string Head, string Body);
 
-    /// <summary>Jellyfin's page as it was (to recognise it again) and the page sent in its place.</summary>
-    private sealed record Page(byte[] Original, WebAssets.Payload Payload);
+    /// <summary>Jellyfin's page as it was (to recognise it again), the modules it was made for, and the page sent in its place.</summary>
+    private sealed record Page(byte[] Original, string Key, WebAssets.Payload Payload);
 
     /// <summary>What to send: the validator, the body in the client's encoding (empty when it already holds this page).</summary>
     private sealed record Rewrite(string ETag, byte[] Body, bool NotModified);

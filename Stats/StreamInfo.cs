@@ -1,4 +1,5 @@
 using System.Text;
+using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
@@ -62,7 +63,7 @@ internal sealed record StreamInfo(string PlayMethod, SourceInfo Source, Transcod
                 transcoding.Width,
                 transcoding.Height,
                 transcoding.Bitrate,
-                transcoding.HardwareAccelerationType is { } hw && !string.Equals(hw.ToString(), "none", StringComparison.OrdinalIgnoreCase),
+                transcoding.HardwareAccelerationType is { } hw && hw != HardwareAccelerationType.none,
                 [.. Enum.GetValues<TranscodeReason>().Where(r => (int)r != 0 && transcoding.TranscodeReasons.HasFlag(r)).Select(r => r.ToString())]);
         }
 
@@ -115,16 +116,16 @@ internal sealed record StreamInfo(string PlayMethod, SourceInfo Source, Transcod
             video?.Width,
             video?.Height,
             bitrate,
-            HdrLabel(video?.VideoRangeType.ToString()));
+            HdrLabel(video?.VideoRangeType));
     }
 
-    private static string? HdrLabel(string? range) => range switch
+    private static string? HdrLabel(VideoRangeType? range) => range switch
     {
-        null or "" or "Unknown" or "SDR" => null,
-        _ when range.StartsWith("DOVI", StringComparison.Ordinal) => "Dolby Vision",
-        "HDR10Plus" => "HDR10+",
-        "HDR10" => "HDR10",
-        "HLG" => "HLG",
+        null or VideoRangeType.Unknown or VideoRangeType.SDR => null,
+        VideoRangeType.HDR10Plus => "HDR10+",
+        VideoRangeType.HDR10 => "HDR10",
+        VideoRangeType.HLG => "HLG",
+        _ when range.ToString()!.StartsWith("DOVI", StringComparison.Ordinal) => "Dolby Vision",
         _ => "HDR",
     };
 }

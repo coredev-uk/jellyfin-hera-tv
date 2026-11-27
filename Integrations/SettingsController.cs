@@ -1,7 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Jellyfin.Plugin.HeraTv.Collections;
-using Jellyfin.Plugin.HeraTv.Letterboxd;
-using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -12,18 +11,16 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 /// What the dashboard's Hera TV page reads and writes. Admin only. HERATV_* environment variables
 /// win over saved values, so each field reports where its effective value comes from and a save
 /// leaves the fields the environment owns alone. The Seerr API key is write-only: it is accepted
-/// here, never sent back.
+/// here, never sent back. Connection tests are in <see cref="ConnectionTestsController"/> and the
+/// one-off admin actions in <see cref="AdminToolsController"/>.
 /// </summary>
 [ApiController]
-[Authorize(Policy = "RequiresElevation")]
+[Authorize(Policy = HeraUser.Elevated)]
 [Route("HeraTV/settings")]
 public class SettingsController(
     UpstreamClient upstream,
     ICollectionBuilder collectionBuilder,
-    ICollectionsView collectionsView,
-    ITaskManager taskManager,
-    LetterboxdStore letterboxd,
-    IUserManager userManager) : ControllerBase
+    ICollectionsView collectionsView) : ControllerBase
 {
     [HttpGet]
     public IActionResult Get() => Ok(Describe());
@@ -153,8 +150,6 @@ public class SettingsController(
             }
         }
 
-        config.LetterboxdEnabled = body.LetterboxdEnabled ?? config.LetterboxdEnabled;
-
         var users = Writable(IntegrationSettings.SeerrUsersVariable, body.SeerrUsers);
         if (users is not null)
         {
@@ -162,10 +157,14 @@ public class SettingsController(
             config.SeerrUsers = Clean(string.Join(",", pairs.Select(p => $"{p.Key}={p.Value}")));
         }
 
+        FeatureSwitches.Apply(config, body.Switches);
+        if (body.DisabledModules is not null)
+        {
+            FeatureSwitches.SetDisabledModules(config, body.DisabledModules);
+        }
+
         config.HeroItemCount = Math.Clamp(body.HeroItemCount ?? config.HeroItemCount, 1, 20);
         config.HeroIntervalSeconds = Math.Clamp(body.HeroIntervalSeconds ?? config.HeroIntervalSeconds, 4, 60);
-        config.DiscoverEnabled = body.DiscoverEnabled ?? config.DiscoverEnabled;
-        config.LeavingSoonEnabled = body.LeavingSoonEnabled ?? config.LeavingSoonEnabled;
         config.LeavingSoonDays = Math.Clamp(body.LeavingSoonDays ?? config.LeavingSoonDays, 0, 365);
         config.RequestQualityPicker = body.RequestQualityPicker is "seerr" or "admins" or "off" ? body.RequestQualityPicker : config.RequestQualityPicker;
         config.RequestDefaultQuality = body.RequestDefaultQuality is "server" or "1080p" or "4K" ? body.RequestDefaultQuality : config.RequestDefaultQuality;
@@ -180,16 +179,7 @@ public class SettingsController(
             config.RequestTv4kProfile = Profile("tv4k", config.RequestTv4kProfile);
         }
 
-        config.RequestsRowEnabled = body.RequestsRowEnabled ?? config.RequestsRowEnabled;
-        config.TrendingRowEnabled = body.TrendingRowEnabled ?? config.TrendingRowEnabled;
-        config.ElsewhereEnabled = body.ElsewhereEnabled ?? config.ElsewhereEnabled;
-        config.RatingsEnabled = body.RatingsEnabled ?? config.RatingsEnabled;
-        config.QualityBadgesEnabled = body.QualityBadgesEnabled ?? config.QualityBadgesEnabled;
-        config.ActivityEnabled = body.ActivityEnabled ?? config.ActivityEnabled;
-        config.NotificationsEnabled = body.NotificationsEnabled ?? config.NotificationsEnabled;
         config.ArrivalsHour = Math.Clamp(body.ArrivalsHour ?? config.ArrivalsHour, 0, 23);
-        config.CollectionsEnabled = body.CollectionsEnabled ?? config.CollectionsEnabled;
-        config.HomeRowsEnabled = body.HomeRowsEnabled ?? config.HomeRowsEnabled;
         foreach (var group in CollectionGroups.InOrder.Where(g => g.Builds()))
         {
             if (body.CollectionGroups is not null && body.CollectionGroups.TryGetValue(group.Id(), out var on))
@@ -229,175 +219,6 @@ public class SettingsController(
         return Ok(Describe());
     }
 
-    /// <summary>Tries Seerr with the form's values (or the saved ones): reachable, is Seerr, accepts the key.</summary>
-    [HttpPost("test/seerr")]
-    public async Task<IActionResult> TestSeerr([FromBody] ConnectionBody? body)
-        => Ok(await CheckSeerr(body).ConfigureAwait(false));
-
-    [HttpPost("test/maintainerr")]
-    public async Task<IActionResult> TestMaintainerr([FromBody] ConnectionBody? body)
-    {
-        var field = IntegrationSettings.Inspect(IntegrationSettings.MaintainerrUrlVariable, Plugin.Instance?.Configuration.MaintainerrUrl);
-        var raw = field.Locked ? field.Value : body?.Url ?? field.Value;
-        var url = IntegrationSettings.ParseUri(raw);
-        if (url is null)
-        {
-            return Ok(new { ok = false, message = "Enter the Maintainerr URL first." });
-        }
-
-        var host = url.GetLeftPart(UriPartial.Authority);
-        var status = await upstream.ProbeAsync(url, "api/app/status", null).ConfigureAwait(false);
-        if (status.Failure is not null)
-        {
-            return Ok(new { ok = false, message = $"Could not reach {host}: {status.Failure}" });
-        }
-
-        if (status.Status == 200 && status.Body?["version"] is { } version)
-        {
-            return Ok(new { ok = true, version = version.ToString(), message = $"Connected to Maintainerr {version}." });
-        }
-
-        // Older builds have no status route; their collections list says the same thing.
-        var collections = await upstream.ProbeAsync(url, "api/collections", null).ConfigureAwait(false);
-        if (collections.Status == 200 && collections.Body is System.Text.Json.Nodes.JsonArray list)
-        {
-            return Ok(new { ok = true, message = $"Connected to Maintainerr ({list.Count} collections)." });
-        }
-
-        return Ok(new { ok = false, message = $"{host} answered HTTP {status.Status} but does not look like Maintainerr. Check the URL." });
-    }
-
-    [HttpPost("test/sonarr")]
-    public async Task<IActionResult> TestSonarr([FromBody] ConnectionBody? body)
-        => Ok(await CheckArr(ArrService.Sonarr, body).ConfigureAwait(false));
-
-    [HttpPost("test/radarr")]
-    public async Task<IActionResult> TestRadarr([FromBody] ConnectionBody? body)
-        => Ok(await CheckArr(ArrService.Radarr, body).ConfigureAwait(false));
-
-    [HttpPost("test/sabnzbd")]
-    public async Task<IActionResult> TestSabnzbd([FromBody] ConnectionBody? body)
-        => Ok(await CheckArr(ArrService.Sabnzbd, body).ConfigureAwait(false));
-
-    /// <summary>The Seerr accounts a Jellyfin user can be linked to.</summary>
-    [HttpPost("seerr/users")]
-    public async Task<IActionResult> SeerrUsers([FromBody] ConnectionBody? body)
-    {
-        var (url, key, problem) = ResolveSeerr(body);
-        if (url is null || problem is not null)
-        {
-            return Ok(new { ok = false, message = problem, users = Array.Empty<object>() });
-        }
-
-        var reply = await upstream.ProbeAsync(url, "api/v1/user?take=100&sort=displayname", key).ConfigureAwait(false);
-        if (reply.Status != 200 || reply.Body?["results"] is not System.Text.Json.Nodes.JsonArray results)
-        {
-            return Ok(new
-            {
-                ok = false,
-                message = reply.Failure ?? (reply.Status is 401 or 403 ? "Seerr rejected the API key." : $"Seerr answered HTTP {reply.Status}."),
-                users = Array.Empty<object>(),
-            });
-        }
-
-        var users = results
-            .Where(r => r?["id"] is not null)
-            .Select(r => new
-            {
-                id = r!["id"]!.GetValue<int>(),
-                displayName = (string?)r["displayName"] ?? (string?)r["username"] ?? $"User {r["id"]}",
-                email = (string?)r["email"],
-                username = (string?)r["jellyfinUsername"] ?? (string?)r["plexUsername"] ?? (string?)r["username"],
-            })
-            .OrderBy(u => u.displayName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        return Ok(new { ok = true, message = (string?)null, users });
-    }
-
-    /// <summary>Tries Letterboxd with the form's key and secret (or the saved ones): signs a film lookup and reads the answer.</summary>
-    [HttpPost("test/letterboxd")]
-    public async Task<IActionResult> TestLetterboxd([FromBody] LetterboxdTestBody? body, CancellationToken ct)
-    {
-        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var keyField = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiKeyVariable, config.LetterboxdApiKey);
-        var secretField = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiSecretVariable, config.LetterboxdApiSecret);
-        var key = keyField.Locked || string.IsNullOrWhiteSpace(body?.ApiKey) ? keyField.Value : body.ApiKey.Trim();
-        var secret = secretField.Locked || string.IsNullOrWhiteSpace(body?.ApiSecret) ? secretField.Value : body.ApiSecret.Trim();
-        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(secret))
-        {
-            return Ok(new { ok = false, message = "Enter the Letterboxd API key and secret first." });
-        }
-
-        try
-        {
-            // A film lookup needs no member, so this proves the key and the signature without anyone's account.
-            var film = await new LetterboxdClient(key, secret).FindFilmAsync("155", null, "The Dark Knight", 2008, ct).ConfigureAwait(false);
-            return Ok(film is null
-                ? new { ok = false, message = "Letterboxd answered, but didn't find a film it should know. Try again in a moment." }
-                : new { ok = true, message = "Connected to Letterboxd. The key and secret work." });
-        }
-        catch (LetterboxdException ex)
-        {
-            return Ok(new
-            {
-                ok = false,
-                message = ex.Failure switch
-                {
-                    LetterboxdFailure.Unauthorised or LetterboxdFailure.KeyRejected or LetterboxdFailure.BadCredentials => "Letterboxd refused the API key or secret.",
-                    LetterboxdFailure.Unreachable or LetterboxdFailure.RateLimited => "Couldn't reach Letterboxd. Try again in a moment.",
-                    _ => $"Letterboxd answered unexpectedly ({ex.Status?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "no status"}).",
-                },
-            });
-        }
-    }
-
-    /// <summary>Which Jellyfin users have linked Letterboxd, and how each diary is going. Tokens never leave the server.</summary>
-    [HttpGet("letterboxd/links")]
-    public IActionResult LetterboxdLinks()
-    {
-        var links = letterboxd.Links().Select(link => new
-        {
-            user = Guid.TryParse(link.UserId, out var id) ? userManager.GetUserById(id)?.Username : null,
-            username = link.Username,
-            logFinished = link.LogFinished,
-            linkedAt = link.LinkedAt,
-            lastLoggedAt = link.LastLoggedAt,
-            lastError = link.LastError,
-            pending = letterboxd.Count(link.UserId, WatchState.Pending),
-            failed = letterboxd.Count(link.UserId, WatchState.Failed),
-        });
-        return Ok(new { links });
-    }
-
-    /// <summary>Starts the Build Hera TV collections task now, unless it is already running.</summary>
-    [HttpPost("collections/build")]
-    public IActionResult BuildCollections()
-    {
-        if (collectionBuilder.Status.Running)
-        {
-            return Ok(new { ok = true, message = "A build is already running." });
-        }
-
-        taskManager.QueueIfNotRunning<BuildCollectionsTask>();
-        return Ok(new { ok = true, message = "Building collections. This takes a minute or two for a larger library." });
-    }
-
-    /// <summary>Whether the collections build is running, and how the last one went.</summary>
-    [HttpGet("collections/status")]
-    public IActionResult CollectionsStatus() => Ok(DescribeBuild());
-
-    private object DescribeBuild()
-    {
-        var status = collectionBuilder.Status;
-        return new
-        {
-            running = status.Running,
-            last = status.Last is { } last
-                ? new { at = last.At, created = last.Created, updated = last.Updated, removed = last.Removed, unchanged = last.Unchanged, failed = last.Failed, seconds = last.Seconds, note = last.Note }
-                : null,
-        };
-    }
-
     private object Describe()
     {
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
@@ -405,6 +226,8 @@ public class SettingsController(
         var users = IntegrationSettings.Inspect(IntegrationSettings.SeerrUsersVariable, config.SeerrUsers);
         return new
         {
+            enabled = FeatureSwitches.On("enabled", config),
+            disabledModules = FeatureSwitches.DisabledModules(config),
             seerr = new
             {
                 url = Show(IntegrationSettings.Inspect(IntegrationSettings.SeerrUrlVariable, config.SeerrUrl)),
@@ -430,7 +253,7 @@ public class SettingsController(
                 count = Math.Clamp(config.HeroItemCount, 1, 20),
                 intervalSeconds = Math.Clamp(config.HeroIntervalSeconds, 4, 60),
             },
-            features = IntegrationSettings.Features(config),
+            features = FeatureSwitches.Describe(config),
             elsewhere = new { region = string.IsNullOrWhiteSpace(config.WatchRegion) ? "GB" : config.WatchRegion.ToUpperInvariant() },
             notifications = new { arrivalsHour = Math.Clamp(config.ArrivalsHour, 0, 23) },
             letterboxd = DescribeLetterboxd(config),
@@ -449,54 +272,13 @@ public class SettingsController(
             },
             collections = new
             {
-                enabled = config.CollectionsEnabled,
-                homeRows = config.HomeRowsEnabled,
+                enabled = FeatureSwitches.On("collections", config),
+                homeRows = FeatureSwitches.On("homeRows", config),
                 groups = CollectionGroups.InOrder.Where(g => g.Builds()).ToDictionary(g => g.Id(), g => g.Enabled(config)),
                 seasons = Collections.Catalogue.SeasonNames.Select(s => new { key = s.Key, name = s.Name, on = !Collections.Catalogue.SeasonsOff(config).Contains(s.Key) }).ToArray(),
-                build = DescribeBuild(),
+                build = AdminToolsController.DescribeBuild(collectionBuilder),
             },
         };
-    }
-
-    /// <summary>Seerr's Radarr and Sonarr servers and their profiles, for the Requests settings' pickers.</summary>
-    [HttpGet("seerr/profiles")]
-    public async Task<IActionResult> GetSeerrProfiles()
-    {
-        if (!IntegrationSettings.Current.SeerrEnabled)
-        {
-            return Ok(new { movie = Array.Empty<object>(), tv = Array.Empty<object>() });
-        }
-
-        async Task<object[]> Servers(string service)
-        {
-            var servers = await upstream.SeerrGetAsync($"api/v1/settings/{service}", TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-            var list = new List<object>();
-            foreach (var server in servers?.AsArray() ?? [])
-            {
-                if (server?["id"]?.GetValue<int>() is not int id)
-                {
-                    continue;
-                }
-
-                var detail = await upstream.SeerrGetAsync($"api/v1/service/{service}/{id}", TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-                list.Add(new
-                {
-                    id,
-                    name = (string?)server["name"],
-                    is4k = server["is4k"]?.GetValue<bool>() == true,
-                    isDefault = server["isDefault"]?.GetValue<bool>() == true,
-                    activeProfileId = server["activeProfileId"]?.GetValue<int?>(),
-                    profiles = (detail?["profiles"]?.AsArray() ?? [])
-                        .Where(p => p?["id"]?.GetValue<int>() is not null)
-                        .Select(p => new { id = p!["id"]!.GetValue<int>(), name = (string?)p["name"], guess = DiscoverController.Resolution((string?)p["name"]) })
-                        .ToArray(),
-                });
-            }
-
-            return [.. list];
-        }
-
-        return Ok(new { movie = await Servers("radarr").ConfigureAwait(false), tv = await Servers("sonarr").ConfigureAwait(false) });
     }
 
     private static object Show(IntegrationSettings.Field field) => new { value = field.Value, source = field.Source, variable = field.Variable };
@@ -519,75 +301,10 @@ public class SettingsController(
         var secret = IntegrationSettings.Inspect(IntegrationSettings.LetterboxdApiSecretVariable, config.LetterboxdApiSecret);
         return new
         {
-            enabled = config.LetterboxdEnabled,
+            enabled = FeatureSwitches.On("letterboxd", config),
             apiKey = new { set = key.Value is not null, source = key.Source, variable = key.Variable },
             apiSecret = new { set = secret.Value is not null, source = secret.Source, variable = secret.Variable },
         };
-    }
-
-    /// <summary>
-    /// Tries one service of the download stack with the form's values (or the saved ones). The key
-    /// is only ever sent to the address being tested and never echoed back.
-    /// </summary>
-    private async Task<object> CheckArr(ArrService service, ConnectionBody? body)
-    {
-        var def = IntegrationSettings.Arr.First(d => d.Service == service);
-        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var urlField = IntegrationSettings.Inspect(def.UrlVariable, def.SavedUrl(config));
-        var keyField = IntegrationSettings.Inspect(def.KeyVariable, def.SavedKey(config));
-        var url = IntegrationSettings.ParseUri(urlField.Locked ? urlField.Value : body?.Url ?? urlField.Value);
-        var key = keyField.Locked || string.IsNullOrWhiteSpace(body?.ApiKey) ? keyField.Value : body.ApiKey.Trim();
-        if (url is null)
-        {
-            return new { ok = false, message = $"Enter the {def.Name} URL first." };
-        }
-
-        if (string.IsNullOrEmpty(key))
-        {
-            return new { ok = false, message = $"Enter the {def.Name} API key first." };
-        }
-
-        var host = url.GetLeftPart(UriPartial.Authority);
-        if (service == ArrService.Sabnzbd)
-        {
-            // Its version call is public; a queue read is what needs the key.
-            var version = await upstream.ProbeAsync(url, "api?mode=version&output=json", null).ConfigureAwait(false);
-            if (version.Failure is not null)
-            {
-                return new { ok = false, message = $"Could not reach {host}: {version.Failure}" };
-            }
-
-            if (version.Status != 200 || version.Body?["version"] is not { } sabVersion)
-            {
-                return new { ok = false, message = $"{host} answered HTTP {version.Status} but does not look like SABnzbd. Check the URL." };
-            }
-
-            var queue = await upstream.ProbeAsync(url, $"api?mode=queue&limit=1&output=json&apikey={Uri.EscapeDataString(key)}", null).ConfigureAwait(false);
-            return queue.Status == 200 && queue.Body?["queue"] is not null
-                ? new { ok = true, version = sabVersion.ToString(), message = $"Connected to SABnzbd {sabVersion}. The API key works." }
-                : new { ok = false, version = sabVersion.ToString(), message = $"Reached SABnzbd {sabVersion}, but it rejected the API key." };
-        }
-
-        var status = await upstream.ProbeAsync(url, "api/v3/system/status", key).ConfigureAwait(false);
-        if (status.Failure is not null)
-        {
-            return new { ok = false, message = $"Could not reach {host}: {status.Failure}" };
-        }
-
-        if (status.Status is 401 or 403)
-        {
-            return new { ok = false, message = $"Reached {host}, but {def.Name} rejected the API key." };
-        }
-
-        if (status.Status == 200 && status.Body?["version"] is { } arrVersion)
-        {
-            var app = (string?)status.Body["appName"];
-            return app is not null && !app.Equals(def.Name, StringComparison.OrdinalIgnoreCase)
-                ? new { ok = false, version = arrVersion.ToString(), message = $"{host} is {app}, not {def.Name}. Check the URL." }
-                : new { ok = true, version = arrVersion.ToString(), message = $"Connected to {def.Name} {arrVersion}. The API key works." };
-        }
-
-        return new { ok = false, message = $"{host} answered HTTP {status.Status} but does not look like {def.Name}. Check the URL." };
     }
 
     private static bool Locked(string variable) => IntegrationSettings.Inspect(variable, null).Locked;
@@ -599,70 +316,6 @@ public class SettingsController(
 
     private static bool IsWebAddress(string value)
         => Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
-
-    private static (Uri? Url, string? Key, string? Problem) ResolveSeerr(ConnectionBody? body)
-    {
-        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var urlField = IntegrationSettings.Inspect(IntegrationSettings.SeerrUrlVariable, config.SeerrUrl);
-        var keyField = IntegrationSettings.Inspect(IntegrationSettings.SeerrApiKeyVariable, config.SeerrApiKey);
-        var url = IntegrationSettings.ParseUri(urlField.Locked ? urlField.Value : body?.Url ?? urlField.Value);
-        var key = keyField.Locked || string.IsNullOrWhiteSpace(body?.ApiKey) ? keyField.Value : body.ApiKey.Trim();
-        if (url is null)
-        {
-            return (null, key, "Enter the Seerr URL first.");
-        }
-
-        return string.IsNullOrEmpty(key) ? (url, null, "Enter the Seerr API key first.") : (url, key, null);
-    }
-
-    private async Task<object> CheckSeerr(ConnectionBody? body)
-    {
-        var (url, key, problem) = ResolveSeerr(body);
-        if (url is null)
-        {
-            return new { ok = false, message = problem };
-        }
-
-        var host = url.GetLeftPart(UriPartial.Authority);
-        var status = await upstream.ProbeAsync(url, "api/v1/status", null).ConfigureAwait(false);
-        if (status.Failure is not null)
-        {
-            return new { ok = false, message = $"Could not reach {host}: {status.Failure}" };
-        }
-
-        if (status.Status != 200 || status.Body?["version"] is not { } version)
-        {
-            return new { ok = false, message = $"{host} answered HTTP {status.Status} but does not look like Seerr. Check the URL." };
-        }
-
-        if (problem is not null)
-        {
-            return new { ok = false, version = version.ToString(), message = $"Reached Seerr {version}. {problem}" };
-        }
-
-        // /status is public; the settings route needs a valid key, which is the thing worth testing.
-        var auth = await upstream.ProbeAsync(url, "api/v1/settings/main", key).ConfigureAwait(false);
-        return auth.Status switch
-        {
-            200 => new { ok = true, version = version.ToString(), message = $"Connected to Seerr {version}. The API key works." },
-            401 or 403 => new { ok = false, version = version.ToString(), message = $"Reached Seerr {version}, but it rejected the API key." },
-            _ => new { ok = false, version = version.ToString(), message = $"Reached Seerr {version}, but the key check answered {(auth.Failure ?? $"HTTP {auth.Status}")}." },
-        };
-    }
-
-    public sealed class ConnectionBody
-    {
-        public string? Url { get; set; }
-
-        public string? ApiKey { get; set; }
-    }
-
-    public sealed class LetterboxdTestBody
-    {
-        public string? ApiKey { get; set; }
-
-        public string? ApiSecret { get; set; }
-    }
 
     public sealed class SettingsBody
     {
@@ -682,40 +335,26 @@ public class SettingsController(
         /// <summary>Gets or sets the download stack's addresses and keys, by service id: "sonarr", "radarr", "sabnzbd".</summary>
         public Dictionary<string, ServiceBody>? Services { get; set; }
 
+        /// <summary>
+        /// Gets or sets every on/off switch the form sent, by the name it posts it under (<c>discoverEnabled</c>,
+        /// <c>activityEnabled</c>, ...). The names and what they change are listed once, in <see cref="FeatureSwitches"/>.
+        /// </summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Switches { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Gets or sets the web modules to leave switched off, by name; null leaves them as saved.</summary>
+        public List<string?>? DisabledModules { get; set; }
+
         public int? HeroItemCount { get; set; }
 
         public int? HeroIntervalSeconds { get; set; }
-
-        public bool? DiscoverEnabled { get; set; }
-
-        public bool? LeavingSoonEnabled { get; set; }
-
-        public bool? RequestsRowEnabled { get; set; }
-
-        public bool? TrendingRowEnabled { get; set; }
-
-        public bool? ElsewhereEnabled { get; set; }
-
-        public bool? RatingsEnabled { get; set; }
-
-        public bool? QualityBadgesEnabled { get; set; }
-
-        public bool? ActivityEnabled { get; set; }
-
-        public bool? NotificationsEnabled { get; set; }
 
         public int? ArrivalsHour { get; set; }
 
         public string? WatchRegion { get; set; }
 
-        public bool? CollectionsEnabled { get; set; }
-
-        public bool? HomeRowsEnabled { get; set; }
-
         /// <summary>Gets or sets which groups become collections, by group id: "genres", "awards", ...</summary>
         public Dictionary<string, bool>? CollectionGroups { get; set; }
-
-        public bool? LetterboxdEnabled { get; set; }
 
         /// <summary>Gets or sets a new key; empty or absent keeps the saved one.</summary>
         public string? LetterboxdApiKey { get; set; }

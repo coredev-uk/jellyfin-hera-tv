@@ -1,0 +1,16 @@
+{
+  "name": "hera-tv-tooling",
+  "private": true,
+  "description": "Lint for the web layer's scripts. The plugin itself is built with dotnet; the compat run has its own package in tests/compat.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "test": "node --test \"tests/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "eslint": "10.16.0",
+    "globals": "17.14.0"
+  }
+}

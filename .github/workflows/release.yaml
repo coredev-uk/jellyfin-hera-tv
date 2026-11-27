@@ -8,6 +8,10 @@
 # meta.json as hera-tv_<version>.zip, creates the GitHub release with it, and regenerates manifest.json
 # from every release onto the orphan `manifest` branch. A version already released is left alone.
 # Run by hand, it regenerates the manifest even when the release exists.
+#
+# A release is published only after compat.yaml has passed on the same commit: the plugin has then
+# loaded in a real Jellyfin, answered every endpoint and drawn every kind of page without a module
+# standing aside. The job waits for that run to finish and fails if it failed or never started.
 name: release
 
 on:
@@ -26,10 +30,12 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Needs to create the release and push the manifest branch.
+    # Waits for the compat run, which takes up to half an hour.
+    timeout-minutes: 60
+    # Needs to create the release and push the manifest branch, and to read the compat run.
     permissions:
       contents: write
+      actions: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -53,6 +59,25 @@ jobs:
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Compatibility
+        if: ${{ steps.version.outputs.released == 'false' }}
+        run: |
+          run=""
+          for attempt in $(seq 1 30); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow compat.yaml --commit "$GITHUB_SHA" --event push --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$run" ] && break
+            echo "No compat run for ${GITHUB_SHA::7} yet (attempt ${attempt})"
+            sleep 10
+          done
+          if [ -z "$run" ]; then
+            echo "::error::compat.yaml has no run for ${GITHUB_SHA::7}; a release needs one that passed"
+            exit 1
+          fi
+          echo "Waiting for https://github.com/${GITHUB_REPOSITORY}/actions/runs/${run}"
+          # --exit-status makes a failed or cancelled run fail this step.
+          gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30 > /dev/null
 
       - name: Setup .NET
         if: ${{ steps.version.outputs.released == 'false' }}

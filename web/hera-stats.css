@@ -2,18 +2,7 @@
 
 /* ---------- The view: #/home?hera=stats ---------------------------------------------------- */
 
-/* The page takes the place of the home tab, as Discover and the Requests view do: no hero, no home rows, and Home steps back. */
-html.hera-stats-on[data-hera-view] .MuiAppBar-root > .MuiToolbar-root:first-child > .MuiStack-root:not(:has(> a.MuiButton-colorPrimary)) > a:first-child,
-html.hera-stats-on .headerTabs .emby-tab-button.emby-tab-button-active:not(:focus) {
-  background: transparent !important;
-  color: var(--hera-label-2) !important;
-}
-html.hera-stats-on #homeTab > .hera-hero,
-html.hera-stats-on #indexPage .homeSectionsContainer,
-html.hera-stats-on .backdropContainer,
-html.hera-stats-on #slides-container {
-  display: none !important;
-}
+/* The page takes the place of the home tab through hera-tv.css's html.hera-view-taken block. */
 
 .hera-stats {
   padding-bottom: 72px;

@@ -58,7 +58,8 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     {
         var today = Clock.Today;
         var from = today.AddDays(1 - days);
-        return BuildHistory(source.Read(from, null), store.Read(from, today), today, days, catalogue, UserName);
+        var history = source.Read(from, null);
+        return BuildHistory(history.Plays, history.Reason, store.Read(from, today), today, days, catalogue, UserName);
     });
 
     /// <summary>Gets one person's history for the last <paramref name="days"/> days, or all of it when 0.</summary>
@@ -66,10 +67,11 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     {
         var today = Clock.Today;
         var from = days == 0 ? DateTime.MinValue : today.AddDays(1 - days);
-        return BuildMe(source.Read(from, user.ToString("N")), today, days, catalogue);
+        var history = source.Read(from, user.ToString("N"));
+        return BuildMe(history.Plays, history.Reason, today, days, catalogue);
     });
 
-    internal static object BuildHistory(IReadOnlyList<Play>? plays, Recorded? recorded, DateTime today, int days, IItemCatalogue catalogue, Func<string, string> userName)
+    internal static object BuildHistory(IReadOnlyList<Play>? plays, string? reason, Recorded? recorded, DateTime today, int days, IItemCatalogue catalogue, Func<string, string> userName)
     {
         var from = today.AddDays(1 - days);
         var viewed = Classify(plays ?? [], catalogue);
@@ -133,6 +135,7 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
         return new
         {
             available = plays is not null,
+            reason,
             range = new { from = DateString(from), to = DateString(today), days },
             totals = new { plays = viewed.Count, seconds = totalSeconds, users = people.Count, titles = films.Count + shows.Count },
             daily = daily.Select((d, i) => new { date = DateString(from.AddDays(i)), plays = d.Plays, seconds = d.Seconds, films = d.Films, episodes = d.Episodes }),
@@ -158,7 +161,7 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
         };
     }
 
-    internal static object BuildMe(IReadOnlyList<Play>? plays, DateTime today, int days, IItemCatalogue catalogue)
+    internal static object BuildMe(IReadOnlyList<Play>? plays, string? reason, DateTime today, int days, IItemCatalogue catalogue)
     {
         var viewed = Classify(plays ?? [], catalogue);
 
@@ -222,6 +225,7 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
         return new
         {
             available = plays is not null,
+            reason,
             range = new { from = DateString(from), to = DateString(today), days = span },
             totals = new
             {

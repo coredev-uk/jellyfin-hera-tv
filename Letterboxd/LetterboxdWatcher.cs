@@ -5,7 +5,6 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HeraTv.Letterboxd;
@@ -19,16 +18,19 @@ namespace Jellyfin.Plugin.HeraTv.Letterboxd;
 /// stopping early isn't a completion, and marking a film watched by hand involves no playback, so
 /// neither counts. The title, ids and the server's local date are captured when it happens, so a
 /// file deleted later still logs. The minute's wait lets a burst (a few films finished together, or
-/// the same one twice) go in a single run.
+/// the same one twice) go in a single run. While Letterboxd is off the watcher does nothing at all,
+/// not even open its database.
 /// </remarks>
-public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore store, LetterboxdSync sync, ILogger<LetterboxdWatcher> logger) : BackgroundService
+public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore store, LetterboxdSync sync, ILogger<LetterboxdWatcher> logger, ServerHealth health) : GuardedBackgroundService(Feature, health)
 {
+    /// <summary>The name the dashboard and the log know this feature by.</summary>
+    internal const string Feature = "Letterboxd logging";
+
     private static readonly TimeSpan Debounce = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan AfterStart = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan Tick = TimeSpan.FromSeconds(15);
 
     private long dueAt;
-    private int failedBefore;
 
     /// <summary>Asks for the queue to be processed once things have gone quiet for a minute.</summary>
     public void Schedule() => Interlocked.Exchange(ref dueAt, (DateTime.UtcNow + Debounce).Ticks);
@@ -51,20 +53,32 @@ public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore 
     /// <summary>Queues many watches in one step; returns how many were new.</summary>
     internal int EnqueueMany(IReadOnlyList<WatchDraft> drafts) => store.EnqueueMany(drafts, DateTime.UtcNow);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task RunAsync(CancellationToken stoppingToken)
     {
         sessions.PlaybackStopped += OnStopped;
         try
         {
-            // Whatever a restart interrupted.
-            if (store.Count(null, WatchState.Pending) > 0)
-            {
-                Interlocked.Exchange(ref dueAt, (DateTime.UtcNow + AfterStart).Ticks);
-            }
-
             using var timer = new PeriodicTimer(Tick);
+            var resumed = false;
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
+                if (!IntegrationSettings.Current.LetterboxdEnabled)
+                {
+                    // Switched off: nothing is read or written, and what a restart interrupted is looked at again when it comes on.
+                    resumed = false;
+                    continue;
+                }
+
+                if (!resumed)
+                {
+                    resumed = true;
+                    // Whatever a restart interrupted.
+                    if (store.Count(null, WatchState.Pending) > 0)
+                    {
+                        Interlocked.Exchange(ref dueAt, (DateTime.UtcNow + AfterStart).Ticks);
+                    }
+                }
+
                 var due = Interlocked.Read(ref dueAt);
                 if (due == 0 || due > DateTime.UtcNow.Ticks)
                 {
@@ -75,7 +89,7 @@ public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore 
                 try
                 {
                     var result = await sync.RunAsync(null, false, LetterboxdSync.RunCap, stoppingToken).ConfigureAwait(false);
-                    Interlocked.Exchange(ref failedBefore, 0);
+                    Health.Recovered(Feature);
 
                     // A backlog is worked through a run at a time, for as long as runs make progress.
                     if (result.Pending > 0 && result.Logged + result.Skipped > 0)
@@ -89,20 +103,9 @@ public sealed class LetterboxdWatcher(ISessionManager sessions, LetterboxdStore 
                 }
                 catch (Exception ex)
                 {
-                    if (Interlocked.Exchange(ref failedBefore, 1) == 0)
-                    {
-                        logger.LogWarning(ex, "Hera TV couldn't log films to Letterboxd; the daily task will try again. Further failures are logged at debug level");
-                    }
-                    else
-                    {
-                        logger.LogDebug(ex, "Hera TV couldn't log films to Letterboxd");
-                    }
+                    Health.Fault(Feature, "log films to Letterboxd; the daily task will try again", ex);
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // The server is stopping.
         }
         finally
         {

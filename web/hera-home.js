@@ -7,17 +7,29 @@
  * Jellyfin's own Recently Added rows stay. Every other stock section (Continue Watching, Next Up,
  * My Media, ...) is hidden here, whatever the person's home settings say, because Up Next and
  * the rows below stand in for them; a TV layout keeps My Media, its only way to the libraries.
+ * They are hidden only while Up Next works: if its request fails, Jellyfin's sections come back.
  * Titles the person hid (hera-extras.js) stay out of the rows.
+ *
+ * Contracts with other files:
+ *  - Cards built here carry `heraId`, `heraHide` ({ scope, keys, title, year, kind, image, extra })
+ *    or `heraItem` expandos, which hera-extras.js reads for its "more" button and menus.
+ *  - Calls `HeraTV.hidden` (hera-extras.js), `HeraTV.discover.openTitle` and `HeraTV.activity`
+ *    (hera-activity.js), all optionally: a module that is off simply isn't there.
+ *  - Jellyfin's home container holds one child per home-settings slot, classed `section<N>`; the
+ *    ones hidden here get `hera-stock-hidden` (styled in hera-home.css). Hera's rows are `hera-row`
+ *    (kit.shelf); `.hera-shelf` and `.hera-card` come from hera-tv.css.
+ *  - Discover's view shares the home page (`?hera=` in the address): while it shows, these rows hide.
  */
 (() => {
   "use strict";
 
   const heraTv = window.HeraTV;
   if (!heraTv) return;
-  const { kit, jf } = heraTv;
+  const { kit } = heraTv;
 
+  const MODULE = "home";
   const UP_NEXT_LIMIT = 16;
-  const HOLD_MS = 4000; // how long Jellyfin's own sections wait for the person's home settings
+  const HOLD_MS = 4000; // how long Jellyfin's own sections wait for the person's home settings and Up Next
   const SHELF_LIMIT = 20;
   const LONG_PRESS_MS = 450;
   const MINUTE = 600000000;
@@ -29,37 +41,43 @@
   const state = {
     user: null,
     run: 0,
-    cache: new Map(),
     shown: new Map(), // row id -> { sig, row }
     container: null,
     observer: null,
     detailObserver: null,
+    chipFor: null, // the item whose Leaving chip is being placed
+    discover: false, // Discover's view is showing on the home page
     kept: null, // slots of Jellyfin's own sections to keep: a Set, "all", or null while unknown
+    upNext: null, // Up Next answered (true) or failed (false); null while unknown
+    holdTimer: 0,
   };
 
   // ---------- data ------------------------------------------------------------------------
 
-  /** One fetch per key, remembered for `ttl` ms; a failure is forgotten at once, and so is whatever has expired. */
-  const load = (key, ttl, fetcher) => {
-    const now = Date.now();
-    const entry = state.cache.get(key);
-    if (entry && now - entry.at < entry.ttl) return entry.promise;
-    const promise = Promise.resolve()
-      .then(fetcher)
-      .catch((error) => {
-        if (state.cache.get(key)?.promise === promise) state.cache.delete(key);
-        console.warn(`[Hera TV:home] ${key}`, error);
-        return null;
-      });
-    for (const [k, v] of state.cache) if (now - v.at >= v.ttl) state.cache.delete(k);
-    state.cache.set(key, { at: now, ttl, promise });
-    return promise;
+  // One fetch per key, remembered for the cache's lifetime; a failure is forgotten at once and
+  // rejects, so the row that asked can report it.
+  const caches = {
+    live: kit.ttlCache({ ttl: 5 * 1000, max: 8 }),
+    prefs: kit.ttlCache({ ttl: 30 * 1000, max: 2 }),
+    rows: kit.ttlCache({ ttl: 5 * 60 * 1000, max: 8 }),
+    picks: kit.ttlCache({ ttl: 10 * 60 * 1000, max: 8 }),
   };
+  const clearCaches = () => Object.values(caches).forEach((cache) => cache.clear());
+
+  /** For data a row can do without: a failure is logged and the row carries on without it. */
+  const soft = (promise, label) =>
+    promise.catch((error) => {
+      console.warn(`[Hera TV:home] ${label}`, error);
+      return null;
+    });
+
+  /** True while `page` is the page on screen. */
+  const isShown = (page) => page.isConnected && kit.jf(MODULE, "page") === page;
 
   const plainId = (id) => String(id || "").replace(/-/g, "").toLowerCase();
 
   const leavingList = () =>
-    load("leaving", 5 * 60 * 1000, async () => {
+    caches.rows.get("leaving", async () => {
       const { maintainerr, features } = await kit.integrations();
       if (!maintainerr || features?.leavingSoon === false) return [];
       const list = (await kit.hera("leaving")) || [];
@@ -73,7 +91,7 @@
 
   // Episodes watched most recently, newest first: when each series was last watched, and which was.
   const recentlyWatched = () =>
-    load("watched", 5 * 1000, async () => {
+    caches.live.get("watched", async () => {
       const result = await kit.getJSON(`Users/${kit.userId()}/Items`, {
         IncludeItemTypes: "Episode",
         Recursive: true,
@@ -121,7 +139,7 @@
   };
 
   const upNextEntries = () =>
-    load("upnext", 5 * 1000, async () => {
+    caches.live.get("upnext", async () => {
       const user = kit.userId();
       const fields = "PrimaryImageAspectRatio,BasicSyncInfo";
       const cutoff = new Date(Date.now() - 365 * 86400000).toISOString();
@@ -142,7 +160,7 @@
           NextUpDateCutoff: cutoff,
           EnableTotalRecordCount: false,
         }),
-        recentlyWatched(),
+        soft(recentlyWatched(), "watched"),
       ]);
       const seriesWatchedAt = new Map((watched ?? []).map((s) => [s.id, s.at]));
       const byKey = new Map();
@@ -292,7 +310,7 @@
   };
 
   const picksForMovies = () =>
-    load("recommendations", 10 * 60 * 1000, async () => {
+    caches.picks.get("recommendations", async () => {
       const categories = await kit.getJSON("Movies/Recommendations", {
         userId: kit.userId(),
         categoryLimit: 6,
@@ -315,8 +333,8 @@
     });
 
   const picksForSeries = () =>
-    load("similar-series", 10 * 60 * 1000, async () => {
-      const [watched, upNext] = await Promise.all([recentlyWatched(), upNextEntries()]);
+    caches.picks.get("similar-series", async () => {
+      const [watched, upNext] = await Promise.all([soft(recentlyWatched(), "watched"), soft(upNextEntries(), "upnext")]);
       const seed = watched?.[0] ?? null;
       if (!seed) return null;
       const result = await kit.getJSON(`Items/${seed.id}/Similar`, { userId: kit.userId(), limit: 16, fields: "ProductionYear" });
@@ -328,7 +346,7 @@
   const leavingRow = async () => {
     const list = await leavingList();
     if (!list?.length) return null;
-    const entries = await load("leaving-items", 5 * 60 * 1000, async () => {
+    const entries = await caches.rows.get("leaving-items", async () => {
       const result = await kit.getJSON(`Users/${kit.userId()}/Items`, {
         Ids: list.map((entry) => entry.jellyfinId).join(","),
         Fields: "ProductionYear",
@@ -418,7 +436,7 @@
     const run = state.run;
     const pace = heraTv.activity?.pacer?.();
     let running = false;
-    const live = () => run === state.run && page.isConnected && !page.classList.contains("hide");
+    const live = () => run === state.run && isShown(page);
     const schedule = (ms) => {
       clearTimeout(requestsTimer);
       requestsTimer = setTimeout(tick, ms);
@@ -426,8 +444,7 @@
     async function tick() {
       requestsTimer = 0;
       if (!live()) return;
-      const onDiscover = new URLSearchParams(window.location.hash.split("?")[1] || "").get("hera");
-      if (document.hidden || onDiscover || !watching.seen || !state.shown.has("requests")) return;
+      if (document.hidden || state.discover || !watching.seen || !state.shown.has("requests")) return;
       let wait = 30000;
       running = true;
       try {
@@ -450,7 +467,7 @@
   const trendingRow = async () => {
     const { seerr, features } = await kit.integrations();
     if (!seerr || features?.trending === false) return null;
-    const items = await load("trending", 10 * 60 * 1000, async () => {
+    const items = await caches.picks.get("trending", async () => {
       const pages = await Promise.all([1, 2].map((page) => kit.hera("discover/lists/trending", { query: { page } }).catch(() => null)));
       const seen = new Set();
       return pages
@@ -480,7 +497,7 @@
 
   // ---------- mounting -----------------------------------------------------------------------
 
-  const homeContainer = () => document.querySelector(jf.homeSections);
+  const homeContainer = () => kit.jf(MODULE, "homeSections");
 
   /** Where a row goes among its siblings: by rank, after Jellyfin's own sections. */
   const place = (row) => {
@@ -585,12 +602,17 @@
   // (display preferences, client "emby") says which slot holds Recently Added. Every other slot
   // is hidden, by a class of ours that Jellyfin's own show/hide never touches. An account that
   // never changed its home settings has jellyfin-web's own layout, below. Until the settings are
-  // known a stylesheet rule holds the stock sections back, so nothing flashes.
+  // known every slot waits, so nothing flashes. Up Next is what replaces Continue Watching and
+  // Next Up, so the sections are hidden only while it works: once its request has failed (or has
+  // not answered within HOLD_MS) they all stay, and a broken Hera never takes them away.
 
+  // jellyfin-web's own default order, for an account that never saved a layout.
   const STOCK_LAYOUT = ["smalllibrarytiles", "resume", "resumeaudio", "resumebook", "livetv", "nextup", "latestmedia"];
+  // How Jellyfin classes the home container's children: "section0", "section1", ...
+  const SLOT_CLASS = /(?:^|\s)section(\d+)(?:\s|$)/;
 
   const homeSettings = () =>
-    load("home-settings", 30 * 1000, async () => {
+    caches.prefs.get("home-settings", async () => {
       const prefs = await kit.getJSON("DisplayPreferences/usersettings", { userId: kit.userId(), client: "emby" });
       return prefs?.CustomPrefs || {};
     });
@@ -612,24 +634,28 @@
   };
 
   const slotOf = (node) => {
-    const match = /(?:^|\s)section(\d+)(?:\s|$)/.exec(node.className);
+    const match = SLOT_CLASS.exec(node.className);
     return match ? Number(match[1]) : null;
   };
 
   const tidyStock = (container) => {
-    if (state.kept) {
-      for (const section of container.children) {
-        if (section.classList.contains("hera-row")) continue;
-        const slot = slotOf(section);
-        // A child that is not a numbered slot is not one Hera knows how to judge: it stays.
-        const keep = slot === null || state.kept === "all" || state.kept.has(slot);
-        const was = section.classList.contains("hera-stock-hidden");
-        section.classList.toggle("hera-keep", keep);
-        section.classList.toggle("hera-stock-hidden", !keep);
-        if (!keep) section.classList.add("hide");
-        else if (was) section.classList.remove("hide");
-      }
+    if (state.kept !== null && state.upNext !== null) clearTimeout(state.holdTimer);
+    const holding = state.kept === null;
+    const keepAll = state.upNext === false || state.kept === "all";
+    for (const section of container.children) {
+      if (section.classList.contains("hera-row")) continue;
+      const slot = slotOf(section);
+      // A child that is not a numbered slot is not one Hera knows how to judge: it stays.
+      if (slot === null) continue;
+      section.classList.toggle("hera-stock-hidden", holding || !(keepAll || state.kept.has(slot)));
     }
+  };
+
+  /** Up Next answered, or failed; either way the stock sections can be judged. */
+  const settleUpNext = (ok) => {
+    if (ok) state.upNext = true;
+    else if (state.upNext !== true) state.upNext = false;
+    if (state.container?.isConnected) tidyStock(state.container);
   };
 
   const jobs = [
@@ -679,8 +705,8 @@
   const collectionRows = async () => {
     const { features } = await kit.integrations();
     if (features?.homeRows === false) return [];
-    const data = await load("collection-rows", 5 * 60 * 1000, () => kit.hera("collections/rows"));
-    // A failed request leaves the page as it was.
+    const data = await caches.rows.get("collection-rows", () => kit.hera("collections/rows"));
+    // An answer without rows leaves the page as it was.
     return data?.rows ? data.rows : null;
   };
 
@@ -690,59 +716,66 @@
     const user = kit.userId();
     if (state.user !== user) {
       for (const id of [...state.shown.keys()]) removeRow(id);
-      state.cache.clear();
+      clearCaches();
       state.kept = null;
+      state.upNext = null;
       state.user = user;
     }
     const container = homeContainer();
     if (!container) return;
     watch(container);
     const run = ++state.run;
-    // The hold on Jellyfin's own sections is on this container, so it ends with it.
-    container.classList.add("hera-owns-home");
-    state.cache.delete("home-settings");
-    // A settings request that never answers must not keep Jellyfin's sections held back.
-    const release = setTimeout(() => {
-      if (run !== state.run || state.kept !== null) return;
-      state.kept = "all";
-      if (container.isConnected) tidyStock(container);
-    }, HOLD_MS);
+    caches.prefs.delete("home-settings");
+    // A request that never answers must not keep Jellyfin's sections held back.
+    clearTimeout(state.holdTimer);
+    if (state.kept === null || state.upNext === null) {
+      state.holdTimer = setTimeout(() => {
+        if (run !== state.run) return;
+        if (state.kept === null) state.kept = "all";
+        if (state.upNext === null) state.upNext = false;
+        if (container.isConnected) tidyStock(container);
+      }, HOLD_MS);
+    }
     homeSettings()
       .then((prefs) => {
         state.kept = keptSlots(prefs);
       })
-      .catch(() => {
+      .catch((error) => {
         // Unknown settings: show Jellyfin's sections rather than risk hiding Recently Added.
+        console.warn("[Hera TV:home] settings", error);
         state.kept = "all";
       })
       .finally(() => {
-        clearTimeout(release);
         if (run === state.run && container.isConnected) tidyStock(container);
       });
-    collectionRows()
-      .then(async (rows) => {
-        if (!rows) return;
-        await hiddenReady();
-        if (run !== state.run || state.user !== kit.userId() || !page.isConnected) return;
-        const keep = new Set();
-        rows.forEach((row, index) => {
-          const id = SERVER_ROW + row.id;
-          keep.add(id);
-          RANK[id] = serverRank(String(row.id), index);
-          show(id, { title: row.title, href: row.href || undefined, entries: (row.items ?? []).map(serverEntry) });
-        });
-        for (const id of [...state.shown.keys()]) if (id.startsWith(SERVER_ROW) && !keep.has(id)) removeRow(id);
-      })
-      .catch((error) => console.error("[Hera TV:home] collections", error));
+    const collections = collectionRows().then(async (rows) => {
+      if (!rows) return;
+      await hiddenReady();
+      if (run !== state.run || state.user !== kit.userId() || !page.isConnected) return;
+      const keep = new Set();
+      rows.forEach((row, index) => {
+        const id = SERVER_ROW + row.id;
+        keep.add(id);
+        RANK[id] = serverRank(String(row.id), index);
+        show(id, { title: row.title, href: row.href || undefined, entries: (row.items ?? []).map(serverEntry) });
+      });
+      for (const id of [...state.shown.keys()]) if (id.startsWith(SERVER_ROW) && !keep.has(id)) removeRow(id);
+    });
+    kit.track(MODULE, collections);
+    collections.catch((error) => console.error("[Hera TV:home] collections", error));
     for (const [id, job] of jobs) {
-      job()
-        .then(async (spec) => {
-          await hiddenReady();
-          // A newer visit, a different profile or another page showing makes this answer stale.
-          if (run !== state.run || state.user !== kit.userId() || !page.isConnected) return;
-          show(id, spec);
-        })
-        .catch((error) => console.error(`[Hera TV:home] ${id}`, error));
+      const done = job().then(async (spec) => {
+        await hiddenReady();
+        // A newer visit, a different profile or another page showing makes this answer stale.
+        if (run !== state.run || state.user !== kit.userId() || !page.isConnected) return;
+        show(id, spec);
+        if (id === "upnext") settleUpNext(true);
+      });
+      kit.track(MODULE, done);
+      done.catch((error) => {
+        console.error(`[Hera TV:home] ${id}`, error);
+        if (id === "upnext" && run === state.run) settleUpNext(false);
+      });
     }
     pollRequests(page);
   };
@@ -750,6 +783,7 @@
   // ---------- leaving chip on detail pages ---------------------------------------------------
 
   const clearChips = () => {
+    state.chipFor = null;
     state.detailObserver?.disconnect();
     state.detailObserver = null;
     document.querySelectorAll(".hera-leaving").forEach((chip) => chip.remove());
@@ -758,21 +792,22 @@
   const markLeaving = async (page, itemId) => {
     clearChips();
     if (!itemId) return;
-    const list = await leavingList();
+    state.chipFor = itemId;
+    const list = await soft(leavingList(), "leaving");
     const entry = list?.find((e) => plainId(e.jellyfinId) === plainId(itemId));
-    if (!entry || !page.isConnected || kit.itemIdFromHash() !== itemId) return;
+    if (!entry || !page.isConnected || state.chipFor !== itemId) return;
     const text = `Leaving ${kit.shortDate(entry.leavesOn)}`;
     const apply = () => {
-      const meta = page.querySelector(jf.detailMisc);
+      const meta = kit.jf(MODULE, "detailMisc", page);
       if (!meta || meta.querySelector(".hera-leaving") || !meta.children.length) return;
       const chip = kit.el("span", { class: "hera-leaving", text });
-      const rating = meta.querySelector(".mediaInfoOfficialRating");
+      const rating = kit.jf(MODULE, "homeOfficialRating", meta);
       if (rating) rating.after(chip);
       else meta.append(chip);
     };
     apply();
     // The meta line is redrawn when the item finishes loading; keep the chip on it.
-    const target = page.querySelector(jf.detailMisc)?.parentElement || page;
+    const target = kit.jf(MODULE, "detailMisc", page)?.parentElement || page;
     state.detailObserver = new MutationObserver(apply);
     state.detailObserver.observe(target, { childList: true, subtree: true });
   };
@@ -780,7 +815,7 @@
   // ---------- module -------------------------------------------------------------------------
 
   heraTv.register({
-    name: "home",
+    name: MODULE,
     // Jellyfin only draws the sections container for an account with libraries; the module waits
     // for it itself (waitForHomeSections), so the home tab is what it needs. Without the meta line
     // there is nowhere for the Leaving chip.
@@ -789,7 +824,8 @@
       if (page.id === "indexPage") {
         clearChips();
         // Discover's view shares the home page; its rows stay out of the way.
-        if (params.get("hera")) {
+        state.discover = !!params.get("hera");
+        if (state.discover) {
           setHidden(true);
           return;
         }
@@ -806,12 +842,13 @@
       state.observer?.disconnect();
       state.observer = null;
       state.container = null;
-      state.cache.clear();
+      clearTimeout(state.holdTimer);
+      clearCaches();
       for (const id of [...state.shown.keys()]) removeRow(id);
-      document.querySelectorAll(".hera-stock-hidden").forEach((n) => n.classList.remove("hide", "hera-stock-hidden"));
-      document.querySelectorAll(".hera-keep").forEach((n) => n.classList.remove("hera-keep"));
-      document.querySelectorAll(".hera-owns-home").forEach((n) => n.classList.remove("hera-owns-home"));
+      document.querySelectorAll(".hera-stock-hidden").forEach((n) => n.classList.remove("hera-stock-hidden"));
       state.kept = null;
+      state.upNext = null;
+      state.discover = false;
       clearChips();
       stopRequestsPoll();
       watching.io?.disconnect();

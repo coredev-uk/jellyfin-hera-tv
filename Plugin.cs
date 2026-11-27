@@ -9,9 +9,41 @@ namespace Jellyfin.Plugin.HeraTv;
 public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
-        : base(applicationPaths, xmlSerializer)
+        : base(BackedUp(applicationPaths), xmlSerializer)
     {
         Instance = this;
+    }
+
+    /// <summary>
+    /// Keeps a copy of the saved configuration the first time each version of the plugin starts, before anything
+    /// has read or changed it. Jellyfin replaces a configuration file it can't read with the defaults, and saves
+    /// over it, without a word; a copy from before the upgrade is what makes that recoverable. It runs ahead of
+    /// the base constructor for that reason. A failure to copy never stops the plugin (there is nowhere to log
+    /// yet), and only the newest few copies are kept.
+    /// </summary>
+    private static IApplicationPaths BackedUp(IApplicationPaths paths)
+    {
+        const int Kept = 5;
+        try
+        {
+            var assembly = typeof(Plugin).Assembly.GetName();
+            var file = Path.Combine(paths.PluginConfigurationsPath, assembly.Name + ".xml");
+            var copy = $"{file}.before-{assembly.Version}";
+            if (File.Exists(file) && !File.Exists(copy))
+            {
+                File.Copy(file, copy);
+                foreach (var old in new DirectoryInfo(paths.PluginConfigurationsPath).GetFiles(Path.GetFileName(file) + ".before-*").OrderByDescending(f => f.LastWriteTimeUtc).Skip(Kept))
+                {
+                    old.Delete();
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Left uncopied; see above.
+        }
+
+        return paths;
     }
 
     public static Plugin? Instance { get; private set; }
@@ -62,7 +94,12 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override string Description => "Apple TV-style theme, personalised home, Discover with Seerr requests and Maintainerr's Leaving Soon for the web client.";
 }
 
-/// <summary>Settings read by the web client through <c>/HeraTV/config</c>.</summary>
+/// <summary>
+/// Settings read by the web client through <c>/HeraTV/config</c>, and saved by Jellyfin as XML that every
+/// version of the plugin shares. A property is never given another type or meaning: a new one is added
+/// instead, because Jellyfin replaces a file it can't read with the defaults without saying so. The on/off
+/// switches are listed once, in <see cref="Integrations.FeatureSwitches"/>.
+/// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>Gets or sets a value indicating whether the stylesheet and script are injected.</summary>
@@ -73,6 +110,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets how long each hero title stays before the next, in seconds.</summary>
     public int HeroIntervalSeconds { get; set; } = 8;
+
+    /// <summary>
+    /// Gets or sets the names of the web client's modules switched off (hero, player, login, ...): the
+    /// script never runs them and their styling never applies. The way to turn a surface off that a
+    /// Jellyfin update has broken, until Hera has been updated for it.
+    /// </summary>
+    public List<string> DisabledModules { get; set; } = [];
 
     /// <summary>Gets or sets a value indicating whether the Discover tab shows.</summary>
     public bool DiscoverEnabled { get; set; } = true;
