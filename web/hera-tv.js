@@ -2781,8 +2781,8 @@
 
   // A module is run once the server's settings say it may be (some can be switched off there).
   const addModule = (module) => {
-    const m = moduleHealth(module.name);
     if (state.disabled.has(module.name)) return;
+    const m = moduleHealth(module.name);
     m.registered = true;
     modules.push(module);
     refresh(module.name);

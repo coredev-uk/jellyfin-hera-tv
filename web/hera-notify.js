@@ -386,8 +386,9 @@
     const host = findHost();
     if (!host) {
       if (state.bell && !state.bell.isConnected) removeBell();
-      // The admin Dashboard's header never has a search button: no bell there is normal, not a miss.
-      if (kit.jf("notify", "dashboardDocument")) {
+      // The admin Dashboard's header and the player's never have a search button: no bell there is
+      // normal, not a miss.
+      if (kit.jf("notify", "dashboardDocument") || kit.jf("notify", "page")?.matches(jf.videoOsdPage)) {
         kit.report("notify", "idle");
         return;
       }

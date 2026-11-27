@@ -17,8 +17,9 @@
 // Page ids and markup are Jellyfin's, so they are the first thing to check when a run fails here
 // with "shown as <something else>": the summary names what was showing.
 
-const DETAIL_MODULES = ["core", "trailer", "extras-detail", "notify-detail", "activity", "discover"];
-const HOME_MODULES = ["core", "home", "search", "stats", "activity", "discover", "notify"];
+// Core is several modules (hera-tv.js: hero, banner, overview, ribbon, ...), each reporting on its own.
+const DETAIL_MODULES = ["banner", "overview", "ribbon", "trailer", "extras-detail", "notify-detail", "activity", "discover"];
+const HOME_MODULES = ["hero", "home", "search", "stats", "activity", "discover", "notify", "control-center"];
 
 const details = (id) => `#/details?id=${id}`;
 
@@ -34,6 +35,18 @@ const selectorFor = async (page, key, what) => {
   return selector;
 };
 
+/**
+ * Clicks the first element of a JF selector that is actually showing. A JF key can list Jellyfin's
+ * modern and legacy markup together (the hidden one first in the document), and page.click would
+ * wait on the first match for ever.
+ */
+const clickShown = async (page, selector, what) => {
+  const handle = await page.evaluateHandle((sel) => [...document.querySelectorAll(sel)].find((node) => node.getClientRects().length > 0) ?? null, selector);
+  const element = handle.asElement();
+  if (!element) throw new Error(`no ${what} is showing (${selector})`);
+  await element.click({ timeout: 10_000 });
+};
+
 // ---------- interactions ---------------------------------------------------------------------------
 
 /** The search button in the header opens Hera's field. */
@@ -41,7 +54,7 @@ const openSearch = {
   name: "header search",
   async run(page) {
     const button = await selectorFor(page, "headerSearchButton", "the header's search button");
-    await page.click(button, { timeout: 10_000 });
+    await clickShown(page, button, "header search button");
     await page.waitForSelector(".hera-hs:not([hidden])", { timeout: 5_000 }).catch(() => {
       throw new Error("clicking the header's search button did not open Hera's search field (.hera-hs)");
     });
@@ -57,7 +70,7 @@ const openControlCenter = {
   name: "profile menu",
   async run(page) {
     const button = await selectorFor(page, "profileButton", "the header's profile button");
-    await page.click(button, { timeout: 10_000 });
+    await clickShown(page, button, "profile button");
     await page.waitForSelector("dialog.hera-cc[open]", { timeout: 8_000 }).catch(() => {
       throw new Error("clicking the profile button did not open Hera's Control Center (dialog.hera-cc)");
     });
@@ -128,7 +141,7 @@ export const desktopPages = (data) => {
     { name: "films-library", hash: `#/movies?topParentId=${data.filmsLibrary}&collectionType=movies`, view: "moviesPage" },
     {
       name: "collections-library",
-      hash: `#/movies?topParentId=${data.collectionsLibrary}&collectionType=boxsets`,
+      hash: `#/boxsets?topParentId=${data.collectionsLibrary}&collectionType=boxsets`,
       view: "boxsetsPage",
       modules: ["collections-browse"],
       dom: [".hera-collections"],
@@ -142,7 +155,7 @@ export const desktopPages = (data) => {
       name: "person",
       hash: details(data.person?.Id),
       view: "itemDetailPage",
-      modules: ["core"],
+      modules: ["seerr"],
       warnInstead: data.person ? null : "Jellyfin made no person from the films' .nfo actors, so the person page was not visited",
     },
     { name: "search", hash: "#/search", view: "searchPage", modules: ["search"], dom: ["#searchPage.hera-search-page"] },
@@ -195,7 +208,7 @@ export const disabledPages = () => [
     name: "discover-disabled",
     hash: "#/home?hera=discover",
     view: "indexPage",
-    modules: ["core", "home", "search"],
+    modules: ["hero", "home", "search"],
     dom: [".hera-hero", { none: "html.hera-m-discover" }, { none: "html.hera-discover-on" }, { none: "[data-hera-discover]" }, { none: ".hera-discover-tab" }],
     checks: [
       async (page) => {
