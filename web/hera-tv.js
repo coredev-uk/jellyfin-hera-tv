@@ -2203,6 +2203,18 @@
     window.addEventListener("scroll", onScroll, { passive: true });
     state.cleanups.push(() => window.removeEventListener("scroll", onScroll));
     onScroll();
+    // Jellyfin's home is a "backdropPage": each time it shows, Jellyfin starts a rotation that
+    // downloads and decodes a full-width backdrop every ten seconds, behind the hero, where nothing
+    // shows it (html.hera-home .backdropContainer is hidden). Without the class it clears instead.
+    const onBeforeShow = (event) => {
+      if (event.target?.id === "indexPage") event.target.classList.remove("backdropPage");
+    };
+    document.addEventListener("viewbeforeshow", onBeforeShow, true);
+    document.getElementById("indexPage")?.classList.remove("backdropPage");
+    state.cleanups.push(() => {
+      document.removeEventListener("viewbeforeshow", onBeforeShow, true);
+      document.getElementById("indexPage")?.classList.add("backdropPage");
+    });
     try {
       const response = await fetch(new URL("../HeraTV/config", document.baseURI));
       if (response.ok) state.config = { ...state.config, ...(await response.json()) };
