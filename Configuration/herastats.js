@@ -169,7 +169,7 @@ const streamText = (s) => [resolution(s.width, s.height), hdrLabel(s.hdr), codec
 const DAY = 86400000;
 const parseDay = (value) => Date.parse(`${String(value).slice(0, 10)}T00:00:00Z`);
 const dayKey = (ms) => new Date(ms).toISOString().slice(0, 10);
-const utcFormat = (options) => new Intl.DateTimeFormat(undefined, { timeZone: "UTC", ...options });
+const utcFormat = (options) => new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options });
 const longDay = utcFormat({ weekday: "short", day: "numeric", month: "short" });
 const longDate = utcFormat({ day: "numeric", month: "long", year: "numeric" });
 const shortDate = utcFormat({ day: "numeric", month: "short" });
@@ -820,7 +820,7 @@ export default function (view) {
             el("th", { scope: "row" }, el("span", { class: "hera-stats-user" }, [avatar(u), el("span", { text: u.name })])),
             el("td", { class: "is-num", text: count.format(u.plays) }),
             el("td", { class: "is-num", text: duration(u.seconds) }),
-            el("td", {}, u.lastSeen ? el("time", { datetime: u.lastSeen, title: new Date(u.lastSeen).toLocaleString(), text: ago(u.lastSeen) }) : "Never"),
+            el("td", {}, u.lastSeen ? el("time", { datetime: u.lastSeen, title: new Date(u.lastSeen).toLocaleString("en-GB"), text: ago(u.lastSeen) }) : "Never"),
             el("td", { class: "hera-stats-table__title", text: u.lastTitle || "" }),
           ]))),
       ])),
