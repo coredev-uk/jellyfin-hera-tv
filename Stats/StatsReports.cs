@@ -17,8 +17,8 @@ public interface IStatsReports
 
 /// <summary>
 /// Shapes Playback Reporting's history and Hera's own samples into what the Statistics pages draw,
-/// and keeps each answer for a minute so a page that fetches it twice, or several admins looking at
-/// once, cost one read.
+/// and keeps each answer for a minute, or for ten while the databases it was read from haven't been
+/// written to, so a page that fetches it twice, or several admins looking at once, cost one read.
 /// </summary>
 /// <remarks>
 /// Days and hours are in the server's local time zone (<see cref="Clock"/>), so a household's evening
@@ -33,11 +33,18 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     /// <summary>A guard against a corrupt row claiming days of watching; no one watches for longer than this in one go.</summary>
     private const long LongestPlay = 24 * 3600;
 
-    private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(60);
+    /// <summary>How long an answer is reused whatever happens to the files it came from.</summary>
+    private static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How long an answer is reused while the files it came from are untouched. Bounded because it also
+    /// holds what the library said about each title, and who the users are, and those change without a write here.
+    /// </summary>
+    private static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(10);
 
     private static readonly string[] MethodLabels = ["Direct Play", "Direct Stream", "Transcode"];
 
-    private readonly ConcurrentDictionary<string, (DateTime Expires, object Value)> cache = new();
+    private readonly ConcurrentDictionary<string, (DateTime Fresh, DateTime Expires, string Stamp, object Value)> cache = new();
 
     private enum Kind
     {
@@ -47,15 +54,15 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     }
 
     /// <summary>Gets the admin history for the last <paramref name="days"/> days (today included).</summary>
-    public object History(int days) => Cached($"history:{days}", () =>
+    public object History(int days) => Cached($"history:{days}", source.Signature() + "|" + store.Signature(), () =>
     {
         var today = Clock.Today;
         var from = today.AddDays(1 - days);
-        return BuildHistory(source.Read(from, null), store.Read(from), today, days, catalogue, UserName);
+        return BuildHistory(source.Read(from, null), store.Read(from, today), today, days, catalogue, UserName);
     });
 
     /// <summary>Gets one person's history for the last <paramref name="days"/> days, or all of it when 0.</summary>
-    public object Me(Guid user, int days) => Cached($"me:{user:N}:{days}", () =>
+    public object Me(Guid user, int days) => Cached($"me:{user:N}:{days}", source.Signature(), () =>
     {
         var today = Clock.Today;
         var from = days == 0 ? DateTime.MinValue : today.AddDays(1 - days);
@@ -253,7 +260,6 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     /// </summary>
     private static List<Viewed> Classify(IReadOnlyList<Play> plays, IItemCatalogue catalogue)
     {
-        var facts = new Dictionary<string, ItemFacts?>(StringComparer.Ordinal);
         var named = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         var first = new List<(Play Play, Kind Kind, string Title, Guid? Id, ItemFacts? Facts)>(plays.Count);
 
@@ -266,12 +272,9 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
                 _ => Kind.Other,
             };
 
-            ItemFacts? found = null;
+            // The catalogue remembers what it has found, across requests, so a play costs a lookup, not a library read.
             Guid? item = Guid.TryParse(play.ItemId, out var parsed) ? parsed : null;
-            if (item is { } itemId && !facts.TryGetValue(play.ItemId, out found))
-            {
-                facts[play.ItemId] = found = catalogue.Find(itemId);
-            }
+            var found = item is { } itemId ? catalogue.Find(itemId) : null;
 
             var (title, id) = kind switch
             {
@@ -441,10 +444,16 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
     private string UserName(string id)
         => Guid.TryParse(id, out var guid) && users.GetUserById(guid) is { } user ? user.Username : "Deleted user";
 
-    private object Cached(string key, Func<object> build)
+    /// <summary>
+    /// Builds the answer, or reuses the last one: for a minute whatever changed, and for longer while
+    /// <paramref name="sources"/> (what the files it was read from look like) and the date are as they
+    /// were, since nothing it was made from has then been written to.
+    /// </summary>
+    private object Cached(string key, string sources, Func<object> build)
     {
         var now = DateTime.UtcNow;
-        if (cache.TryGetValue(key, out var hit) && hit.Expires > now)
+        var stamp = $"{sources}|{Clock.Today.Ticks}";
+        if (cache.TryGetValue(key, out var hit) && (hit.Fresh > now || (hit.Stamp == stamp && hit.Expires > now)))
         {
             return hit.Value;
         }
@@ -457,7 +466,7 @@ internal sealed partial class StatsReports(PlaybackReportingSource source, Stats
             cache.TryRemove(stale, out _);
         }
 
-        cache[key] = (now + CacheFor, value);
+        cache[key] = (now + FreshFor, now + CacheFor, stamp, value);
         return value;
     }
 

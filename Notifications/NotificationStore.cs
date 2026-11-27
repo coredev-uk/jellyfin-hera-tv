@@ -19,6 +19,9 @@ public sealed class NotificationStore
     /// <summary>How long a notice is kept, counted from when it was last written.</summary>
     public const int KeepDays = 60;
 
+    /// <summary>How long a request's recorded state is kept after it last changed; a request that old is long settled and Seerr's own history holds it.</summary>
+    public const int RequestKeepDays = 180;
+
     // The bell lists a screenful; this keeps "New" badges bounded however much has gone unread.
     private const int MaxNewItems = 500;
 
@@ -41,6 +44,7 @@ public sealed class NotificationStore
             UNIQUE (userId, dedupeKey)
         );
         CREATE INDEX IF NOT EXISTS notices_user ON notices (userId, createdAt);
+        CREATE INDEX IF NOT EXISTS notices_unread ON notices (userId, read, createdAt);
         CREATE TABLE IF NOT EXISTS prefs (
             userId TEXT PRIMARY KEY,
             requests INTEGER NOT NULL,
@@ -52,6 +56,7 @@ public sealed class NotificationStore
             key TEXT NOT NULL,
             state TEXT NOT NULL,
             requestedAt TEXT,
+            updatedAt TEXT,
             PRIMARY KEY (userId, key)
         );
         CREATE TABLE IF NOT EXISTS meta (
@@ -123,12 +128,13 @@ public sealed class NotificationStore
                     using var command = connection.CreateCommand();
                     command.Transaction = transaction;
                     command.CommandText =
-                        "INSERT INTO request_states (userId, key, state, requestedAt) VALUES ($user, $key, $state, $requested) " +
-                        "ON CONFLICT (userId, key) DO UPDATE SET state = excluded.state, requestedAt = excluded.requestedAt";
+                        "INSERT INTO request_states (userId, key, state, requestedAt, updatedAt) VALUES ($user, $key, $state, $requested, $now) " +
+                        "ON CONFLICT (userId, key) DO UPDATE SET state = excluded.state, requestedAt = excluded.requestedAt, updatedAt = excluded.updatedAt";
                     command.Parameters.AddWithValue("$user", userId);
                     command.Parameters.AddWithValue("$key", key);
                     command.Parameters.AddWithValue("$state", state.State);
                     command.Parameters.AddWithValue("$requested", Db(state.RequestedAt));
+                    command.Parameters.AddWithValue("$now", Clock.UtcString(nowUtc));
                     command.ExecuteNonQuery();
                 }
 
@@ -293,14 +299,36 @@ public sealed class NotificationStore
         },
         false);
 
-    /// <summary>Deletes notices not written for <see cref="KeepDays"/> days.</summary>
+    /// <summary>
+    /// Deletes notices not written for <see cref="KeepDays"/> days, and the recorded state of requests
+    /// that haven't changed for <see cref="RequestKeepDays"/>. A request seen again after that is only
+    /// announced if it is recent (<see cref="RequestTransitions.FreshFor"/>), so nothing old is replayed.
+    /// </summary>
     public bool Prune(DateTime nowUtc) => Run(
         connection =>
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM notices WHERE createdAt < $cutoff";
-            command.Parameters.AddWithValue("$cutoff", Clock.UtcString(nowUtc.AddDays(-KeepDays)));
-            command.ExecuteNonQuery();
+            using var transaction = connection.BeginTransaction();
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                command.CommandText = "DELETE FROM notices WHERE createdAt < $cutoff";
+                command.Parameters.AddWithValue("$cutoff", Clock.UtcString(nowUtc.AddDays(-KeepDays)));
+                command.ExecuteNonQuery();
+            }
+
+            using (var command = connection.CreateCommand())
+            {
+                command.Transaction = transaction;
+                // Rows written before the column existed start their clock now, not at once.
+                command.CommandText =
+                    "UPDATE request_states SET updatedAt = $now WHERE updatedAt IS NULL; " +
+                    "DELETE FROM request_states WHERE updatedAt < $cutoff";
+                command.Parameters.AddWithValue("$now", Clock.UtcString(nowUtc));
+                command.Parameters.AddWithValue("$cutoff", Clock.UtcString(nowUtc.AddDays(-RequestKeepDays)));
+                command.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
             return true;
         },
         false);
@@ -371,6 +399,7 @@ public sealed class NotificationStore
                     using var schema = connection.CreateCommand();
                     schema.CommandText = Schema;
                     schema.ExecuteNonQuery();
+                    AddMissingColumns(connection);
                     ready = true;
                 }
 
@@ -394,6 +423,19 @@ public sealed class NotificationStore
             }
 
             return fallback;
+        }
+    }
+
+    /// <summary>Brings a database made by an earlier version up to the current tables: <c>CREATE TABLE IF NOT EXISTS</c> leaves an old table as it was.</summary>
+    private static void AddMissingColumns(SqliteConnection connection)
+    {
+        using var check = connection.CreateCommand();
+        check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('request_states') WHERE name = 'updatedAt'";
+        if (Convert.ToInt32(check.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+        {
+            using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE request_states ADD COLUMN updatedAt TEXT";
+            alter.ExecuteNonQuery();
         }
     }
 

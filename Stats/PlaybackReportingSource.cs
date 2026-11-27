@@ -41,6 +41,11 @@ internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<P
 
     private int faulted;
 
+    private string DatabaseFile => Path.Combine(paths.DataPath, "playback_reporting.db");
+
+    /// <summary>Gets a string that changes whenever Playback Reporting's database does, for keeping what was built from it.</summary>
+    public string Signature() => StatsStore.FileSignature(DatabaseFile);
+
     /// <summary>Maps a recorded playback method to Direct Play, Direct Stream or Transcode.</summary>
     /// <remarks>
     /// Playback Reporting writes "Transcode (v:h264 a:aac)". When the video is "direct" only the audio
@@ -67,7 +72,7 @@ internal sealed class PlaybackReportingSource(IApplicationPaths paths, ILogger<P
     /// </summary>
     public IReadOnlyList<Play>? Read(DateTime from, string? user)
     {
-        var file = Path.Combine(paths.DataPath, "playback_reporting.db");
+        var file = DatabaseFile;
         if (!File.Exists(file))
         {
             return null;
