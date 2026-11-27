@@ -699,8 +699,10 @@
     return state.heroItems;
   };
 
-  // Only the first slide's art loads with the page; show() hands each further slide its src as it
-  // comes up next. Lazy loading can't defer them: the slides are stacked in the viewport.
+  // No slide's art loads with the page: the hero hands the slide showing and the next one their
+  // src once it is first on screen (Hero.reveal), and each further slide as it comes up next. Lazy
+  // loading can't defer them, as the slides are stacked in the viewport; and a page opened straight
+  // on Discover keeps the hero hidden, so its art waits until Home is shown.
   const heroSlide = (item, index, total) => {
     const isSeries = item.Type === "Series";
     const resumable = !isSeries && item.UserData?.PlaybackPositionTicks > 0;
@@ -712,7 +714,7 @@
     // Sized to the logo's tallest box (.hera-hero__logo max-height), not a guessed width.
     const logoSrc = item.ImageTags?.Logo ? imageUrl(item.Id, "Logo", { maxHeight: Math.round(170 * dpr), tag: item.ImageTags.Logo }) : null;
     const logo = logoSrc
-      ? el("img", { class: "hera-hero__logo", alt: item.Name, src: index ? null : logoSrc, "data-src": logoSrc, decoding: "async" })
+      ? el("img", { class: "hera-hero__logo", alt: item.Name, "data-src": logoSrc, decoding: "async" })
       : el("h2", { class: "hera-hero__title", text: item.Name });
 
     const meta = el("p", { class: "hera-hero__meta" }, [
@@ -752,7 +754,7 @@
         "data-index": index,
       },
       [
-        el("img", { class: "hera-hero__backdrop", src: index ? null : backdrop, "data-src": backdrop, alt: "", decoding: "async" }),
+        el("img", { class: "hera-hero__backdrop", "data-src": backdrop, alt: "", decoding: "async" }),
         el("div", { class: "hera-hero__content" }, [
           logo,
           meta,
@@ -965,13 +967,16 @@
       };
       document.addEventListener("keydown", this.onKeyUp, true);
       this.visibility = new IntersectionObserver(([entry]) => {
+        if (entry.isIntersecting) this.reveal();
         this.hold("offscreen", !(entry.isIntersecting && entry.intersectionRatio > 0.4));
       }, { threshold: [0, 0.4, 1] });
       this.visibility.observe(this.node);
       this.onVisibility = () => this.hold("hidden", document.hidden);
       document.addEventListener("visibilitychange", this.onVisibility);
 
-      this.ready = this.show(0, false);
+      // The first slide shows when the hero is first on screen (reveal), fading in once its art
+      // has decoded; `ready` settles then, so the TV layout's focus lands on a drawn Play.
+      this.ready = new Promise((resolve) => (this.onReveal = resolve));
       this.setUserPaused(reduceMotion.matches);
     }
 
@@ -982,12 +987,20 @@
       this.hold("user", paused);
     }
 
+    // The first time the hero is on screen: the slide showing and the next one get their art, and
+    // the slide fades in as show() would for any other.
+    reveal() {
+      if (this.seen) return;
+      this.seen = true;
+      this.onReveal(this.show(this.index, false));
+    }
+
     async show(index, fromUser, immediate = false) {
       const total = this.slides.length;
       const target = (index + total) % total;
       const token = (this.token = (this.token || 0) + 1);
       // Crossfade only to a decoded backdrop, so the fade never reveals a half-drawn image.
-      const img = wakeSlide(this.slides[target]);
+      const img = this.seen ? wakeSlide(this.slides[target]) : null;
       if (!immediate && img && !img.complete) {
         await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
         if (token !== this.token) return;
@@ -1021,7 +1034,7 @@
       if (heldSlide && heldSlide !== this.slides[this.index] && heldAt >= 0) {
         this.slides[this.index].querySelectorAll(".hera-hero__actions > *")[heldAt]?.focus({ preventScroll: true });
       }
-      wakeSlide(this.slides[(this.index + 1) % total]);
+      if (this.seen) wakeSlide(this.slides[(this.index + 1) % total]);
       this.paintAmbient();
     }
 

@@ -47,6 +47,8 @@
   };
 
   const fetchPerson = (tmdbId) => cached(`person:${tmdbId}`, () => kit.hera(`discover/person/${tmdbId}`), 2 * 60 * 1000);
+  const fetchPersonShelf = (tmdbId, shelf) =>
+    cached(`person:${tmdbId}:${shelf}`, () => kit.hera(`discover/person/${tmdbId}/shelf/${shelf}`), 2 * 60 * 1000);
   const fetchRelated = (type, tmdbId) =>
     cached(`related:${type}:${tmdbId}`, () => kit.hera(`discover/titles/${type}/${tmdbId}/related`), 5 * 60 * 1000);
   const fetchCollection = (id) => cached(`collection:${id}`, () => kit.hera(`discover/collections/${id}`), 60 * 1000);
@@ -90,65 +92,16 @@
 
   // ---------- filmography ---------------------------------------------------------------
 
-  // Crew jobs worth a row of their own; everything else (grips, gaffers, thanks) is left out.
-  const JOB_KIND = {
-    Director: "directed",
-    "Co-Director": "directed",
-    Creator: "created",
-    Writer: "written",
-    Screenplay: "written",
-    Story: "written",
-    Teleplay: "written",
-    Novel: "written",
-    "Original Story": "written",
-    Producer: "produced",
-    "Executive Producer": "produced",
-    "Original Music Composer": "composed",
-    Composer: "composed",
-  };
-  const SECTION_TITLE = {
-    films: "Films",
-    tv: "TV Shows",
-    acting: "Acting",
-    directed: "Directed",
-    created: "Created",
-    written: "Written",
-    produced: "Produced",
-    composed: "Composed",
-    appearances: "Appearances",
-  };
-  // What a person is known for decides which rows lead. An actor's producer credits are noise;
-  // for a producer they are the point.
-  const PRIMARY = { Acting: "acting", Directing: "directed", Writing: "written", Production: "produced", Sound: "composed", Creator: "created" };
-  const ORDER = {
-    acting: ["films", "tv", "directed", "created", "written"],
-    directed: ["directed", "created", "written", "produced", "acting"],
-    created: ["created", "directed", "written", "produced", "acting"],
-    written: ["written", "created", "directed", "produced", "acting"],
-    produced: ["produced", "directed", "created", "written", "acting"],
-    composed: ["composed", "acting"],
-  };
-  const MAX_CARDS = 80;
-  const SHELF_FIRST = 40; // cards a shelf draws before "Show all"
+  // The server decides which shelf a credit is on and what sits under its card, and sends each shelf's
+  // top SHELF_FIRST in either order; the rest of a shelf comes when "Show all" is pressed.
+  const SHELF_FIRST = 40; // cards a shelf draws before "Show all"; the server sends at least this many per order
 
   const SORTS = {
     popular: (a, b) => (b.popularity ?? 0) - (a.popularity ?? 0),
-    newest: (a, b) => (b.date || "").localeCompare(a.date || ""),
+    newest: (a, b) => (b.releaseDate || "").localeCompare(a.releaseDate || ""),
   };
 
   const creditKey = (credit) => `${credit.mediaType}:${credit.tmdbId}`;
-
-  const KIND_LABEL = { directed: "Director", created: "Creator", written: "Writer", produced: "Producer", composed: "Composer" };
-
-  // The kinds of work a crew credit stands for, most important first.
-  const crewKinds = (credit) => {
-    const kinds = new Set((credit.roles ?? []).map((role) => JOB_KIND[role]).filter(Boolean));
-    return Object.keys(KIND_LABEL).filter((kind) => kinds.has(kind));
-  };
-  const crewLabel = (credit) => {
-    const labels = crewKinds(credit).map((kind) => KIND_LABEL[kind]);
-    return labels.length ? labels.slice(0, 2).join(" & ") : credit.roles?.[0];
-  };
 
   /**
    * The filmography of a person: `data` is the server's person record, `extras` the Jellyfin
@@ -156,58 +109,27 @@
    * Returns `{ node, covers }`; `covers` is the set of Jellyfin ids the library row shows.
    */
   const buildFilms = (data, extras = []) => {
-    const cast = data.cast ?? [];
-    const crew = data.crew ?? [];
-    const primary = PRIMARY[data.knownFor] ?? "acting";
-
-    const library = new Map();
-    // On a crew person's page the job they are known for outranks a cameo.
-    for (const credit of primary === "acting" ? [...cast, ...crew] : [...crew, ...cast]) {
-      if (!credit.jellyfinId || library.has(creditKey(credit))) continue;
-      library.set(creditKey(credit), {
-        id: credit.jellyfinId,
-        mediaType: credit.mediaType,
-        title: credit.title,
-        year: credit.year,
-        date: credit.releaseDate,
-        popularity: credit.popularity,
-        role: crew.includes(credit) ? crewLabel(credit) : credit.roles?.[0],
-      });
-    }
-    const held = new Set([...library.values()].map((entry) => entry.id));
+    // The library row's entries all come with the page: they are the few titles the viewer holds.
+    const ranked = [...(data.library ?? [])];
+    const held = new Set(ranked.map((entry) => entry.jellyfinId));
+    const keys = new Set(ranked.map(creditKey));
     for (const item of extras) {
       if (held.has(item.Id)) continue;
       const mediaType = item.Type === "Series" ? "tv" : "movie";
       const key = item.ProviderIds?.Tmdb ? `${mediaType}:${item.ProviderIds.Tmdb}` : `jellyfin:${item.Id}`;
-      if (library.has(key)) continue;
-      library.set(key, {
-        id: item.Id,
+      if (keys.has(key)) continue;
+      keys.add(key);
+      const year = item.ProductionYear ? String(item.ProductionYear) : null;
+      ranked.push({
+        jellyfinId: item.Id,
         mediaType,
         title: item.Name,
-        year: item.ProductionYear ? String(item.ProductionYear) : null,
-        date: item.PremiereDate?.slice(0, 10),
+        year,
+        releaseDate: item.PremiereDate?.slice(0, 10),
         popularity: 0,
+        subtitle: [kindText({ mediaType }), year].filter(Boolean).join(" · "),
       });
     }
-
-    const rows = {};
-    const put = (section, credit) => (rows[section] ??= []).push(credit);
-    for (const credit of cast) {
-      if (library.has(creditKey(credit))) continue;
-      if (credit.appearance) put("appearances", credit);
-      else put(primary === "acting" ? (credit.mediaType === "tv" ? "tv" : "films") : "acting", credit);
-    }
-    for (const credit of crew) {
-      if (library.has(creditKey(credit))) continue;
-      for (const kind of crewKinds(credit)) put(kind, credit);
-    }
-    // A title shows once, in the first row that has it: a director's films are also the ones they wrote.
-    const seen = new Set();
-    const order = [...(ORDER[primary] ?? ORDER.acting), "appearances"].filter((section) => {
-      rows[section] = (rows[section] ?? []).filter((credit) => !seen.has(creditKey(credit)));
-      rows[section].forEach((credit) => seen.add(creditKey(credit)));
-      return rows[section].length > 0;
-    });
 
     const node = el("div", { class: "hera-films hera-seerr" });
     let sort = "popular";
@@ -235,30 +157,46 @@
       ),
     );
 
-    const creditSubtitle = (credit, section) => {
-      const crewRow = section !== "films" && section !== "tv" && section !== "acting" && section !== "appearances";
-      const label = crewRow ? crewLabel(credit) : section === "appearances" ? null : credit.roles?.[0];
-      // Mixed rows (Directed, Written) hold shows as well as films.
-      return [label || kindText(credit), credit.year, crewRow && credit.mediaType === "tv" ? "TV Show" : null].filter(Boolean).join(" · ");
-    };
-
     /**
-     * One shelf: the first `SHELF_FIRST` entries in the current order, all of them (up to `limit`)
-     * after "Show all". A card is built once, the first time its entry is drawn, and only moved after.
+     * One shelf: the first `SHELF_FIRST` entries in the current order, `total` of them after "Show all".
+     * `entries` is what the page came with; `load`, when there is more, fetches the rest of the shelf.
+     * A card is built once, the first time its entry is drawn, and only moved after.
      */
-    const filmShelf = ({ id, title, entries, limit, card }) => {
+    const filmShelf = ({ id, title, entries, total, card, load }) => {
       const cards = new Map();
       const row = kit.shelf({ id, title, cards: [] });
       const track = row.querySelector(".hera-shelf");
-      const count = Math.min(entries.length, limit);
+      let current = entries;
       let expanded = false;
+      let loading = false;
+      let loaded = !load;
       const all =
-        count > SHELF_FIRST
+        total > SHELF_FIRST
           ? el("button", {
               type: "button",
               class: "hera-films__all",
-              text: `Show all ${count}`,
-              onclick: () => {
+              text: `Show all ${total}`,
+              onclick: async () => {
+                if (loading) return;
+                if (!loaded) {
+                  loading = true;
+                  all.setAttribute("aria-busy", "true");
+                  all.textContent = "Loading…";
+                  try {
+                    const full = await load();
+                    // Entries the page already drew keep their cards.
+                    const known = new Map(current.map((entry) => [creditKey(entry), entry]));
+                    current = full.items.map((entry) => known.get(creditKey(entry)) ?? entry);
+                    loaded = true;
+                  } catch (error) {
+                    console.error("[Hera TV:seerr]", error);
+                    all.textContent = "Couldn't load. Try again";
+                    return;
+                  } finally {
+                    loading = false;
+                    all.removeAttribute("aria-busy");
+                  }
+                }
                 expanded = true;
                 all.remove();
                 paint();
@@ -269,7 +207,7 @@
           : null;
       if (all) row.querySelector(".hera-row__head").append(all);
       const paint = () => {
-        const ordered = [...entries].sort(SORTS[sort]).slice(0, expanded ? count : Math.min(count, SHELF_FIRST));
+        const ordered = [...current].sort(SORTS[sort]).slice(0, expanded ? total : Math.min(total, SHELF_FIRST));
         track.replaceChildren(
           ...ordered.map((entry) => {
             let node = cards.get(entry);
@@ -285,34 +223,33 @@
       return { row, paint };
     };
 
-    const ranked = [...library.values()];
     if (ranked.length) {
       shelves.push(
         filmShelf({
           id: "seerr-person-library",
           title: "In Your Library",
           entries: ranked,
-          limit: Infinity,
-          card: (entry) =>
-            libraryCard({ id: entry.id, title: entry.title, subtitle: [entry.role || kindText(entry), entry.year].filter(Boolean).join(" · "), series: entry.mediaType === "tv" }),
+          total: ranked.length,
+          card: (entry) => libraryCard({ id: entry.jellyfinId, title: entry.title, subtitle: entry.subtitle, series: entry.mediaType === "tv" }),
         }),
       );
     }
-    for (const section of order) {
+    for (const shelf of data.shelves ?? []) {
       shelves.push(
         filmShelf({
-          id: `seerr-person-${section}`,
-          title: SECTION_TITLE[section],
-          entries: rows[section].map((credit) => ({ ...credit, date: credit.releaseDate })),
-          limit: MAX_CARDS,
-          card: (credit) => discover().itemCard(credit, { subtitle: creditSubtitle(credit, section) }),
+          id: `seerr-person-${shelf.id}`,
+          title: shelf.title,
+          entries: shelf.items,
+          total: shelf.total,
+          load: () => fetchPersonShelf(data.tmdbId, shelf.id),
+          card: (credit) => discover().itemCard(credit, { subtitle: credit.subtitle }),
         }),
       );
     }
     node.replaceChildren(...shelves.map((shelf) => shelf.row));
-    const total = ranked.length + order.reduce((sum, section) => sum + rows[section].length, 0);
+    const total = ranked.length + (data.shelves ?? []).reduce((sum, shelf) => sum + shelf.total, 0);
     if (shelves.length && total > 6) shelves[0].row.querySelector(".hera-row__head").append(sortBar);
-    return { node, covers: new Set([...library.values()].map((entry) => entry.id)), empty: !node.children.length };
+    return { node, covers: new Set(ranked.map((entry) => entry.jellyfinId)), empty: !node.children.length };
   };
 
   // ---------- Jellyfin person pages -----------------------------------------------------

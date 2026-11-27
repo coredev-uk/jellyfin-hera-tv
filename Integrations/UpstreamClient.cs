@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,9 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
     // The most reads kept: searches make keys without bound, and a small household never needs more than this.
     private const int MaxCached = 500;
 
+    // Every Seerr read is keyed "seerr|{user}|{path}"; a write finds its reads by that prefix.
+    private const string SeerrKeyPrefix = "seerr|";
+
     // How long a read that came back empty (an error, a timeout, a 404) is remembered: long enough that a
     // page of cards asking for the same thing doesn't ask again for each, short enough that a blip heals.
     private static readonly TimeSpan EmptyFor = TimeSpan.FromSeconds(10);
@@ -31,11 +35,14 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
             return Task.FromResult<JsonNode?>(null);
         }
 
-        var key = $"seerr|{asUser}|{pathAndQuery}";
+        var key = $"{SeerrKeyPrefix}{asUser}|{pathAndQuery}";
         return Cached(key, cacheFor, () => SendAsync(HttpMethod.Get, new Uri(settings.SeerrUrl!, pathAndQuery), settings, asUser, null));
     }
 
-    /// <summary>Sends a write to Seerr as <paramref name="asUser"/>; never cached.</summary>
+    /// <summary>
+    /// Sends a write to Seerr as <paramref name="asUser"/>; never cached. It then drops the cached reads the
+    /// write can have changed, and keeps the rest (settings, profiles, other titles' records).
+    /// </summary>
     public async Task<(int Status, JsonNode? Body)> SeerrPostAsync(string path, JsonNode body, int asUser)
     {
         var settings = IntegrationSettings.Current;
@@ -47,9 +54,84 @@ public sealed class UpstreamClient(ILogger<UpstreamClient> logger)
         request.Headers.Add("X-Api-User", asUser.ToString(System.Globalization.CultureInfo.InvariantCulture));
         using var response = await Http.SendAsync(request).ConfigureAwait(false);
         var text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        // A write changes request and availability state: drop cached reads.
-        _cache.Clear();
+        ForgetAfterWrite(path, body);
         return ((int)response.StatusCode, string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text));
+    }
+
+    /// <summary>
+    /// A request changes the asker's request list and the status Seerr shows for that title, and the title
+    /// turns up inside every list of cards (discover, search, similar, collections, credits), each carrying
+    /// its own status. What cannot change is kept: the settings and server profiles, a person's biography,
+    /// an account's details, another title's own record, and everything that came from Maintainerr, Sonarr,
+    /// Radarr or SABnzbd (their reads live seconds, and Seerr hands a request on to them later anyway).
+    /// A write that isn't a request for a known title drops every Seerr read, as before.
+    /// </summary>
+    private void ForgetAfterWrite(string path, JsonNode body)
+    {
+        string? type = null;
+        var id = 0;
+        var known = path == "api/v1/request"
+            && body is JsonObject fields
+            && fields["mediaType"] is JsonValue mediaType && mediaType.TryGetValue(out type)
+            && fields["mediaId"] is JsonValue mediaId && mediaId.TryGetValue(out id);
+        foreach (var pair in _cache)
+        {
+            if (!pair.Key.StartsWith(SeerrKeyPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // The key is "seerr|{user}|{path}": the path starts after the second bar.
+            var start = pair.Key.IndexOf('|', SeerrKeyPrefix.Length) + 1;
+            if (!known || !SurvivesRequest(pair.Key.AsSpan(start), type, id))
+            {
+                _cache.TryRemove(pair);
+            }
+        }
+    }
+
+    private static bool SurvivesRequest(ReadOnlySpan<char> path, string? type, int id)
+    {
+        if (path.StartsWith("api/v1/settings/", StringComparison.Ordinal)
+            || path.StartsWith("api/v1/service/", StringComparison.Ordinal)
+            || path.StartsWith("api/v1/watchproviders", StringComparison.Ordinal)
+            || path.StartsWith("api/v1/network/", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (path.StartsWith("api/v1/person/", StringComparison.Ordinal))
+        {
+            // The biography stays; the credits carry a status for every title.
+            return !path.Contains("/combined_credits", StringComparison.Ordinal);
+        }
+
+        const string account = "api/v1/user/";
+        if (path.StartsWith(account, StringComparison.Ordinal))
+        {
+            // An account's own record stays; its request list ("/requests") does not.
+            return path[account.Length..].IndexOfAny('/', '?') < 0;
+        }
+
+        foreach (var kind in new[] { "movie", "tv" })
+        {
+            var prefix = $"api/v1/{kind}/";
+            if (!path.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // A title's own record (not its similar or recommended lists, which hold other titles' cards)
+            // only changes when that title is the one requested.
+            var rest = path[prefix.Length..];
+            var query = rest.IndexOf('?');
+            var title = query < 0 ? rest : rest[..query];
+            return title.Length > 0
+                && !title.ContainsAnyExceptInRange('0', '9')
+                && (kind != type || !int.TryParse(title, NumberStyles.None, CultureInfo.InvariantCulture, out var tmdb) || tmdb != id);
+        }
+
+        return false;
     }
 
     /// <summary>Reads JSON from Maintainerr, which this cluster serves without auth inside the cluster.</summary>

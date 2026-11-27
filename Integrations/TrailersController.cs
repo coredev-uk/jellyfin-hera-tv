@@ -18,6 +18,9 @@ namespace Jellyfin.Plugin.HeraTv.Integrations;
 [Route("HeraTV")]
 public partial class TrailersController(ILibraryManager libraryManager, IUserManager userManager) : ControllerBase
 {
+    // Ids come from the library's own trailer links, so this is bounded by the library; the cap only stops a runaway.
+    private const int MaxKept = 2000;
+
     private const int MaxChecked = 6;
 
     private static readonly TimeSpan Known = TimeSpan.FromDays(1);
@@ -28,7 +31,7 @@ public partial class TrailersController(ILibraryManager libraryManager, IUserMan
         Timeout = TimeSpan.FromSeconds(6),
     };
 
-    private static readonly ConcurrentDictionary<string, (DateTime Expires, Task<bool?> Embeddable)> Checked = new();
+    private static readonly ConcurrentDictionary<string, Verdict> Checked = new();
 
     [GeneratedRegex(@"(?:v=|youtu\.be/|embed/)([\w-]{11})")]
     private static partial Regex YouTubeId();
@@ -69,20 +72,15 @@ public partial class TrailersController(ILibraryManager libraryManager, IUserMan
             return held.Embeddable;
         }
 
-        var task = AskAsync(id);
-        Checked[id] = (now + Known, task);
-        _ = task.ContinueWith(
-            done =>
-            {
-                if (done.Result is null)
-                {
-                    Checked[id] = (DateTime.UtcNow + Unsure, done);
-                }
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnRanToCompletion,
-            TaskScheduler.Default);
-        return task;
+        // However many pages ask while the first answer is out, only the entry that wins the slot asks YouTube.
+        var created = new Verdict(id, now + Known);
+        var entry = Checked.AddOrUpdate(id, created, (_, old) => old.Expires > now ? old : created);
+        if (ReferenceEquals(entry, created))
+        {
+            CachePruning.Prune(Checked, MaxKept, e => e.Expires, id);
+        }
+
+        return entry.Embeddable;
     }
 
     private static async Task<bool?> AskAsync(string id)
@@ -114,5 +112,40 @@ public partial class TrailersController(ILibraryManager libraryManager, IUserMan
     {
         var claim = User.FindFirst("Jellyfin-UserId")?.Value;
         return Guid.TryParse(claim, out var id) ? userManager.GetUserById(id) : null;
+    }
+
+    /// <summary>One video's answer: asked for by whoever reads it first, shared by everyone after, and kept for less time when YouTube gave none.</summary>
+    private sealed class Verdict
+    {
+        private readonly Lazy<Task<bool?>> _ask;
+        private long _expires;
+
+        public Verdict(string id, DateTime expires)
+        {
+            _expires = expires.Ticks;
+            _ask = new Lazy<Task<bool?>>(() => AskAndStampAsync(id));
+        }
+
+        public Task<bool?> Embeddable => _ask.Value;
+
+        public DateTime Expires => new(Volatile.Read(ref _expires), DateTimeKind.Utc);
+
+        private async Task<bool?> AskAndStampAsync(string id)
+        {
+            bool? answer = null;
+            try
+            {
+                answer = await AskAsync(id).ConfigureAwait(false);
+                return answer;
+            }
+            finally
+            {
+                // No answer, or a failure, is worth asking again soon, not tomorrow.
+                if (answer is null)
+                {
+                    Volatile.Write(ref _expires, (DateTime.UtcNow + Unsure).Ticks);
+                }
+            }
+        }
     }
 }

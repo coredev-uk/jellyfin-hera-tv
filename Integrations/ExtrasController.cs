@@ -398,43 +398,59 @@ public static class HiddenStore
     private static readonly object Gate = new();
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
-    public static List<HiddenTitle> Read(Guid user)
+    // Each user's list after its first read. Lists are replaced whole, never edited in place, so a
+    // list handed out stays valid for whoever holds it; the file is only read once per user per process.
+    private static readonly Dictionary<Guid, IReadOnlyList<HiddenTitle>> Lists = [];
+
+    public static IReadOnlyList<HiddenTitle> Read(Guid user)
     {
         lock (Gate)
         {
-            return Load(user);
+            return Held(user);
         }
     }
 
-    public static List<HiddenTitle> Add(Guid user, HiddenTitle entry)
+    public static IReadOnlyList<HiddenTitle> Add(Guid user, HiddenTitle entry)
     {
         lock (Gate)
         {
-            var list = Load(user);
-            list.RemoveAll(t => t.Scope == entry.Scope && t.Key == entry.Key);
+            var list = Held(user).Where(t => t.Scope != entry.Scope || t.Key != entry.Key).ToList();
             list.Add(entry);
             if (list.Count > Limit)
             {
                 list = [.. list.OrderByDescending(t => t.At).Take(Limit)];
             }
 
+            // Saved before it is kept, so a write that fails leaves memory agreeing with the file.
             Save(user, list);
-            return list;
+            return Lists[user] = list;
         }
     }
 
-    public static List<HiddenTitle> Remove(Guid user, string scope, string key)
+    public static IReadOnlyList<HiddenTitle> Remove(Guid user, string scope, string key)
     {
         lock (Gate)
         {
-            var list = Load(user);
-            if (list.RemoveAll(t => t.Scope == scope && (t.Key == key || t.Aliases.Contains(key))) > 0)
+            var current = Held(user);
+            var list = current.Where(t => t.Scope != scope || (t.Key != key && !t.Aliases.Contains(key))).ToList();
+            if (list.Count == current.Count)
             {
-                Save(user, list);
+                return current;
             }
 
-            return list;
+            Save(user, list);
+            return Lists[user] = list;
         }
+    }
+
+    private static IReadOnlyList<HiddenTitle> Held(Guid user)
+    {
+        if (!Lists.TryGetValue(user, out var list))
+        {
+            Lists[user] = list = Load(user);
+        }
+
+        return list;
     }
 
     private static string FileOf(Guid user)

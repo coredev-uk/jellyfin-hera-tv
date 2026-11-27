@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "- Discover's Trending Now carousel loads the title on screen and the next one, instead of all six backdrops at once.",
+  "changelog": "- Hera's styles and scripts load as one stylesheet and one script, compressed once on the server: 3 requests instead of 28, and about a third fewer bytes.\n- The web client page can be revalidated instead of downloaded in full.\n- Person pages load the first 40 titles of each shelf and fetch the rest when you choose Show all.\n- Watch statistics are totalled in the database and remembered for days that have ended, so long ranges open much faster.\n- Opening Discover directly no longer loads the home hero's art behind it.\n- Hidden titles, trailer checks and request lists after a new request are cached more carefully; old request records are tidied away after 180 days.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-27T20:00:00.0000000Z",
-  "version": "1.12.2.0",
+  "timestamp": "2026-11-28T12:00:00.0000000Z",
+  "version": "1.13.0.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Jellyfin.Plugin.HeraTv;
 
@@ -22,7 +24,21 @@ public class HeraTvController : ControllerBase
         Response.Headers.CacheControl = Request.Query.ContainsKey("v")
             ? "public, max-age=31536000, immutable"
             : "public, max-age=86400";
-        return File(asset.Content, asset.ContentType);
+
+        // Compressed once at its best setting rather than by the server's quick one on every request.
+        // Naming the coding in the validator keeps a cache from matching one form against the other.
+        string? coding = null;
+        if (asset.Compressible)
+        {
+            Response.Headers.Append(HeaderNames.Vary, HeaderNames.AcceptEncoding);
+            coding = WebAssets.ChooseEncoding(Request);
+            if (coding is not null)
+            {
+                Response.Headers.ContentEncoding = coding;
+            }
+        }
+
+        return File(asset.Payload.Encoded(coding), asset.ContentType, null, new EntityTagHeaderValue(asset.Payload.ETag(coding)));
     }
 
     [HttpGet("config")]
