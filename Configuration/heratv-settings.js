@@ -929,7 +929,7 @@ export default function (view) {
       el("span", { class: "hera-set-row__value", text: value }),
     ]);
 
-  const when = (iso) => new Date(iso).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  const when = (iso) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 
   /** What a module's report means, in plain words. */
   const describeModule = (m) => {

@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "- A Jellyfin update can no longer take the server down through Hera: its background jobs and scheduled tasks are isolated, and a failure switches off only that feature.\n- Every part of Hera can be switched off on its own from its settings page (Switch off a part of Hera), styles included, and there is a master switch for the whole theme.\n- The Dashboard shows what is actually known: problems reported by each browser, server-side faults, and whether the web page was injected, instead of an unconditional all-clear.\n- The Jellyfin log gets a startup line with versions, and warnings and errors for Hera failures that used to be silent.\n- Hera's data files carry schema versions, unreadable files are kept aside instead of reset, and the settings file is backed up when a new version first starts.\n- Stricter compatibility checks run before every release and nightly against new Jellyfin builds.\n- Scrolling and remote navigation down the home page no longer stall on the first pass, most noticeably in the TV layout.",
+  "changelog": "- Dates and times on Hera TV's Dashboard pages read the British way (27 Nov, 21:48).",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-28T18:00:00.0000000Z",
-  "version": "1.14.0.0",
+  "timestamp": "2026-11-28T20:00:00.0000000Z",
+  "version": "1.14.1.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]
