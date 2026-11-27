@@ -90,8 +90,8 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
             return NotFound();
         }
 
-        node["mediaType"] = type;
-        var item = SeerrMapper.Item(node, user, library);
+        // The record is the cache's own, shared with every other reader: its media type is passed, not written into it.
+        var item = SeerrMapper.Item(node, type, user, library);
         var seasons = node["seasons"]?.AsArray()
             .Where(s => (s?["seasonNumber"]?.GetValue<int>() ?? 0) > 0)
             .Select(s => new
@@ -339,7 +339,7 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
         // Settings: Leaving Soon looks this many days ahead; 0 lists everything Maintainerr has queued.
         var window = Math.Max(0, Plugin.Instance?.Configuration.LeavingSoonDays ?? 0);
         var horizon = DateTime.UtcNow.Date.AddDays(window);
-        var leaving = new List<object>();
+        var leaving = new List<(string LeavesOn, object Entry)>();
         foreach (var collection in collections?.AsArray() ?? [])
         {
             if (collection?["isActive"]?.GetValue<bool>() != true)
@@ -360,17 +360,19 @@ public class DiscoverController(UpstreamClient upstream, LibraryLookup library, 
                     continue;
                 }
 
-                leaving.Add(new
+                var leavesOn = added.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                leaving.Add((leavesOn, new
                 {
                     jellyfinId = item.Id.ToString("N", CultureInfo.InvariantCulture),
                     name = item.Name,
                     type,
-                    leavesOn = added.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                });
+                    leavesOn,
+                }));
             }
         }
 
-        return Ok(leaving);
+        // Soonest first. Never capped: a title page finds its own "Leaving" date in this list.
+        return Ok(leaving.OrderBy(l => l.LeavesOn, StringComparer.Ordinal).Select(l => l.Entry).ToArray());
     }
 
     private async Task<IActionResult> Page(string pathAndQuery)

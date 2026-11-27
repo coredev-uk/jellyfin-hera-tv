@@ -64,6 +64,14 @@
     const hit = cache.get(key);
     return hit && Date.now() - hit.at < ttl ? hit.value : null;
   };
+  // Every typed term leaves an answer; expired ones go as new ones arrive, and the map stays small.
+  const TIMED_KEPT = 60;
+  const keep = (cache, key, value, ttl) => {
+    const now = Date.now();
+    for (const [k, v] of cache) if (now - v.at >= v.ttl) cache.delete(k);
+    while (cache.size >= TIMED_KEPT) cache.delete(cache.keys().next().value);
+    cache.set(key, { at: now, ttl, value });
+  };
 
   const ITEM_FIELDS = "PrimaryImageAspectRatio,ProductionYear";
 
@@ -173,7 +181,7 @@
           .then((lib) => {
             if (stale()) return;
             data.lib = lib;
-            timed.set(`lib:${key}`, { at: Date.now(), value: lib });
+            keep(timed, `lib:${key}`, lib, LIBRARY_TTL);
             hooks.onLibrary(data);
           })
           .catch((error) => {
@@ -188,7 +196,7 @@
             .then((items) => {
               if (stale()) return;
               data.seerr = items;
-              timed.set(`seerr:${key}`, { at: Date.now(), value: items });
+              keep(timed, `seerr:${key}`, items, SEERR_TTL);
               hooks.onSeerr(data);
             })
             .catch((error) => {

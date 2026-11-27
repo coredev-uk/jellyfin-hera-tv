@@ -204,6 +204,12 @@ html.hera-activity-on #slides-container {
 .hera-av__none {
   padding: 20px;
 }
+.hera-av__more {
+  margin: 14px 0 0;
+}
+.hera-av__more[hidden] {
+  display: none;
+}
 
 .hera-av__list {
   overflow: hidden;

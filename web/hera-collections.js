@@ -159,7 +159,7 @@
     const wordmark = !!logo.wordmark;
     const img = el("img", {
       class: wordmark ? "hera-collections__wordmark" : "hera-collections__icon",
-      src: wordmark ? `${TMDB}w500_filter(duotone,ffffff,bababa)${path}` : `${TMDB}w154${path}`,
+      src: wordmark ? `${TMDB}w300_filter(duotone,ffffff,bababa)${path}` : `${TMDB}w154${path}`,
       alt: "",
       decoding: "async",
       loading: "lazy",

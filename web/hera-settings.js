@@ -186,7 +186,7 @@
 
   const languages = () => {
     const seen = new Map();
-    for (const culture of ctx.cultures) {
+    for (const culture of ctx.cultures || []) {
       const code = culture.ThreeLetterISOLanguageName;
       if (code && culture.DisplayName && !seen.has(code)) seen.set(code, culture.DisplayName);
     }
@@ -822,6 +822,7 @@
       id: "profile",
       icon: "person",
       label: "Profile",
+      needs: ["letterboxd"],
       build() {
         const user = ctx.user;
         const head = el("header", { class: "hera-set-profile" }, [
@@ -926,6 +927,7 @@
       id: "playback",
       icon: "play_circle",
       label: "Playback",
+      needs: ["cultures"],
       title: "Playback",
       build() {
         const c = config();
@@ -1008,6 +1010,7 @@
       id: "subtitles",
       icon: "closed_caption",
       label: "Subtitles",
+      needs: ["cultures"],
       title: "Subtitles",
       build() {
         const c = config();
@@ -1179,15 +1182,57 @@
     ctx.nav.replaceChildren(...items);
   };
 
+  // What a section needs that costs a request is asked for when the section is first built, not on
+  // every mount: the language list for Playback and Subtitles, Letterboxd's state for Profile.
+  const LAZY = {
+    cultures: () => getJSON("Localization/Cultures").then((list) => list || []).catch(() => []),
+    // Only asked for when the server has Letterboxd set up; the group stays hidden without it.
+    letterboxd: () =>
+      kit
+        .integrations()
+        .then((ints) => (ints && ints.features && ints.features.letterboxd ? kit.hera("letterboxd") : null))
+        .catch(() => null)
+        .then((state) => (state && state.enabled ? state : null)),
+  };
+
+  /** A promise for what `section` still has to load, or null when it has all of it. */
+  const loadFor = (section) => {
+    const c = ctx;
+    const wanted = (section.needs || []).filter((name) => !c.ready.has(name));
+    if (!wanted.length) return null;
+    return Promise.all(
+      wanted.map((name) => {
+        c.lazy[name] ??= LAZY[name]().then((value) => {
+          c[name] = value;
+          c.ready.add(name);
+        });
+        return c.lazy[name];
+      }),
+    );
+  };
+
   const renderPane = () => {
-    const section = sections.find((s) => s.id === ctx.section) || sections[0];
-    const nodes = section.build().filter(Boolean);
-    const title = section.title ? el("h1", { class: "hera-set-title", text: section.title }) : null;
-    ctx.pane.replaceChildren(...[title, ...nodes].filter(Boolean));
-    // One authored moment: the pane settles in when the section changes.
-    ctx.pane.classList.remove("is-in");
-    void ctx.pane.offsetWidth;
-    ctx.pane.classList.add("is-in");
+    const c = ctx;
+    const section = sections.find((s) => s.id === c.section) || sections[0];
+    const draw = () => {
+      const nodes = section.build().filter(Boolean);
+      const title = section.title ? el("h1", { class: "hera-set-title", text: section.title }) : null;
+      c.pane.replaceChildren(...[title, ...nodes].filter(Boolean));
+      // One authored moment: the pane settles in when the section changes.
+      c.pane.classList.remove("is-in");
+      void c.pane.offsetWidth;
+      c.pane.classList.add("is-in");
+    };
+    // A section chosen while another is still loading takes over; the late one is not drawn.
+    const mine = ++c.paint;
+    const loading = loadFor(section);
+    if (!loading) {
+      draw();
+      return;
+    }
+    loading.then(() => {
+      if (ctx === c && c.paint === mine) draw();
+    });
   };
 
   const select = (id) => {
@@ -1224,24 +1269,25 @@
     const release = setTimeout(() => {
       if (token === mountToken && !(ctx && ctx.page === page && ctx.root.isConnected)) page.classList.remove("hera-set-page");
     }, HOLD_MS);
-    const [full, cultures, views, quickConnect, notifyPrefs, letterboxd, heraPrefs] = await Promise.all([
-      loadUser(user),
-      getJSON("Localization/Cultures").catch(() => []),
-      getJSON("UserViews", { userId: user }).then((r) => (r && r.Items) || []).catch(() => []),
-      getJSON("QuickConnect/Enabled").catch(() => false),
-      kit.hera("notifications/prefs").catch(() => null),
-      // Only asked for when the server has Letterboxd set up; the group stays hidden without it.
-      kit.integrations().then((ints) => (ints && ints.features && ints.features.letterboxd ? kit.hera("letterboxd") : null)).catch(() => null),
-      kit.prefs.load(),
-    ]).finally(() => clearTimeout(release));
-    if (token !== mountToken || !page.isConnected) return;
-    unmount();
     let remembered = null;
     try {
       remembered = sessionStorage.getItem(SECTION_KEY);
     } catch {
       /* default */
     }
+    // The section that opens first loads what it needs along with the rest.
+    const first = sections.find((s) => s.id === remembered) || sections[0];
+    const early = first.needs || [];
+    const [full, views, quickConnect, notifyPrefs, heraPrefs, ...lazy] = await Promise.all([
+      loadUser(user),
+      getJSON("UserViews", { userId: user }).then((r) => (r && r.Items) || []).catch(() => []),
+      getJSON("QuickConnect/Enabled").catch(() => false),
+      kit.hera("notifications/prefs").catch(() => null),
+      kit.prefs.load(),
+      ...early.map((name) => LAZY[name]()),
+    ]).finally(() => clearTimeout(release));
+    if (token !== mountToken || !page.isConnected) return;
+    unmount();
     const nav = el("nav", { class: "hera-set__nav", "aria-label": "Settings sections" });
     const pane = el("main", { class: "hera-set__pane" });
     const toast = el("div", { class: "hera-set__toast", role: "status", "aria-live": "polite" });
@@ -1253,15 +1299,21 @@
       pane,
       toast,
       user: full,
-      cultures: cultures || [],
+      cultures: null,
       views,
       quickConnect: quickConnect === true,
       notifyPrefs: notifyPrefs && typeof notifyPrefs === "object" ? notifyPrefs : null,
-      letterboxd: letterboxd && letterboxd.enabled ? letterboxd : null,
+      letterboxd: null,
       heraPrefs: heraPrefs || {},
-      section: sections.some((s) => s.id === remembered) ? remembered : "profile",
+      section: first.id,
+      ready: new Set(early),
+      lazy: {},
+      paint: 0,
       mountedAt: Date.now(),
     };
+    early.forEach((name, i) => {
+      ctx[name] = lazy[i];
+    });
     nav.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       const buttons = [...nav.querySelectorAll("button")];

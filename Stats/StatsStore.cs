@@ -68,6 +68,7 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
     private readonly Lock gate = new();
     private string? path;
     private int faulted;
+    private bool ready;
 
     /// <summary>Formats a sample time. One value per tick, so rows that share it were concurrent.</summary>
     public static string Stamp(DateTime utc) => utc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
@@ -254,10 +255,13 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
                 };
                 using var connection = new SqliteConnection(builder.ConnectionString);
                 connection.Open();
-                using (var schema = connection.CreateCommand())
+                // The tables are made once per process, not on every call.
+                if (!ready)
                 {
+                    using var schema = connection.CreateCommand();
                     schema.CommandText = Schema;
                     schema.ExecuteNonQuery();
+                    ready = true;
                 }
 
                 work(connection);
@@ -268,6 +272,8 @@ internal sealed class StatsStore(ILogger<StatsStore> logger)
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            // A database that went wrong may be gone or replaced: make the tables again next time.
+            ready = false;
             if (Interlocked.Exchange(ref faulted, 1) == 0)
             {
                 logger.LogWarning(ex, "Hera TV couldn't use its stats database; streams aren't being recorded until it can. Further failures are logged at debug level");

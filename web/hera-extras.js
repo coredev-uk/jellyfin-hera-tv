@@ -31,6 +31,8 @@
     ".hera-upnext > .hera-card",
   ].join(",");
   const BADGE_BATCH = 40;
+  const BADGE_KEPT = 1500;
+  const EXTRAS_KEPT = 40;
   const BADGE_TTL = 10 * 60 * 1000;
   const EXTRAS_TTL = 5 * 60 * 1000;
   const UNDO_MS = 6000;
@@ -50,6 +52,13 @@
   };
 
   const plainId = (id) => String(id || "").replace(/-/g, "").toLowerCase();
+
+  /** Drops what has expired from a Map of `{ at }` entries, then the oldest past `kept`. */
+  const trim = (map, ttl, kept) => {
+    const cutoff = Date.now() - ttl;
+    for (const [key, value] of map) if (value.at < cutoff) map.delete(key);
+    while (map.size >= kept) map.delete(map.keys().next().value);
+  };
   const features = async () => (await kit.integrations())?.features || {};
 
   // ---------- defaults ------------------------------------------------------------------------
@@ -72,18 +81,35 @@
 
   // ---------- hidden titles -------------------------------------------------------------------
 
-  const hidden = { user: null, list: null, loading: null };
+  const hidden = { user: null, list: null, index: null, loading: null };
+
+  // The list, and a lookup by "scope:key" (a title's key or any alias) so a card is judged in one
+  // read, not by walking the list.
+  const setList = (list) => {
+    hidden.list = list;
+    hidden.index = new Map();
+    if (!list) return;
+    for (const entry of list) {
+      for (const key of [entry.key, ...(entry.aliases || [])]) {
+        const id = `${entry.scope}:${key}`;
+        if (!hidden.index.has(id)) hidden.index.set(id, entry);
+      }
+    }
+  };
 
   const loadHidden = () => {
     const user = kit.userId();
     if (hidden.user !== user) {
       hidden.user = user;
-      hidden.list = null;
+      setList(null);
       hidden.loading = null;
     }
     if (!hidden.loading) {
       hidden.loading = Promise.resolve(kit.hera("hidden"))
-        .then((list) => (hidden.list = Array.isArray(list) ? list : []))
+        .then((list) => {
+          setList(Array.isArray(list) ? list : []);
+          return hidden.list;
+        })
         .catch((error) => {
           hidden.loading = null;
           console.warn("[Hera TV:extras] hidden titles", error);
@@ -95,15 +121,22 @@
 
   /** The saved entry that hides a title in this scope, matching any of its keys; null when it is shown. */
   const hiddenEntry = (scope, keys) => {
-    if (!hidden.list || !hidden.list.length) return null;
-    const wanted = keys.filter(Boolean);
-    return hidden.list.find((entry) => entry.scope === scope && (wanted.includes(entry.key) || entry.aliases?.some((alias) => wanted.includes(alias)))) || null;
+    if (!hidden.index?.size) return null;
+    for (const key of keys) {
+      if (!key) continue;
+      const entry = hidden.index.get(`${scope}:${key}`);
+      if (entry) return entry;
+    }
+    return null;
   };
 
   const writeHidden = (list) => {
-    hidden.list = list;
+    setList(list);
     hidden.loading = Promise.resolve(list);
   };
+
+  // The artwork is a 32 by 48 icon in Settings; a small size is all it takes (TMDB's w92, or a Jellyfin image at 96).
+  const thumb = (url) => (url ? url.replace(/(image\.tmdb\.org\/t\/p\/)w\d+/, "$1w92").replace(/([?&]maxWidth=)\d+/, (_, head) => `${head}96`) : url);
 
   const hide = async (descriptor) => {
     const entry = {
@@ -112,7 +145,7 @@
       title: descriptor.title,
       year: descriptor.year || null,
       kind: descriptor.kind || null,
-      image: descriptor.image || null,
+      image: thumb(descriptor.image) || null,
       aliases: descriptor.keys.slice(1),
       at: new Date().toISOString(),
     };
@@ -164,22 +197,37 @@
   // The element that leaves a row when its title is hidden: Up Next wraps its card.
   const cellOf = (card) => card.closest(".hera-upnext") || card;
 
-  const setCellHidden = (cell, off) => {
+  // A row with nothing left to show leaves with its last card. `rows` collects the rows a batch touched so each is judged once.
+  const syncRow = (row) => {
+    for (const card of row.querySelectorAll(".hera-card")) {
+      if (!cellOf(card).hidden) {
+        row.hidden = false;
+        return;
+      }
+    }
+    row.hidden = true;
+  };
+
+  const setCellHidden = (cell, off, rows) => {
     cell.hidden = off;
     cell.classList.toggle("hera-card--hidden", off);
     const row = cell.closest(".hera-row");
-    if (row) row.hidden = ![...row.querySelectorAll(".hera-card")].some((c) => !cellOf(c).hidden);
+    if (!row) return;
+    if (rows) rows.add(row);
+    else syncRow(row);
   };
 
   /** Hides what the person has already hidden: Discover and search build cards without asking. */
   const filterCards = (root) => {
     if (!hidden.list?.length) return;
     const cards = root.matches?.(".hera-card") ? [root] : [...(root.querySelectorAll?.(".hera-card") || [])];
+    const rows = new Set();
     for (const card of cards) {
       const descriptor = describe(card);
       if (!descriptor || descriptor.scope !== "interest") continue;
-      if (hiddenEntry("interest", descriptor.keys)) setCellHidden(cellOf(card), true);
+      if (hiddenEntry("interest", descriptor.keys)) setCellHidden(cellOf(card), true, rows);
     }
+    rows.forEach(syncRow);
   };
 
   // ---------- toast ---------------------------------------------------------------------------
@@ -358,9 +406,17 @@
       if (event.relatedTarget === more.node) return;
       hideMore();
     };
+    // A scroll event arrives for every scroller on the page, shelves included; the button is
+    // placed once a frame, and only while it is showing.
+    let moveQueued = false;
     const reposition = () => {
-      if (more.card?.isConnected) placeMore(more.card);
-      else hideMore();
+      if (moveQueued || !more.card) return;
+      moveQueued = true;
+      requestAnimationFrame(() => {
+        moveQueued = false;
+        if (more.card?.isConnected) placeMore(more.card);
+        else hideMore();
+      });
     };
     // The shelves scroll inside themselves; capture sees those scrolls too.
     document.addEventListener("pointerover", over, true);
@@ -441,6 +497,7 @@
   const flushBadges = async () => {
     state.badgeTimer = 0;
     const user = kit.userId();
+    trim(state.badges, BADGE_TTL, BADGE_KEPT);
     const ids = [...state.badgeQueue].filter((id) => !(state.badges.get(id)?.at > Date.now() - BADGE_TTL));
     state.badgeQueue.clear();
     if (!ids.length || (await features()).qualityBadges === false) return;
@@ -525,6 +582,7 @@
       console.warn("[Hera TV:extras] extras", error);
       return null;
     });
+    trim(state.extras, EXTRAS_TTL, EXTRAS_KEPT);
     state.extras.set(id, { at: Date.now(), promise });
     return promise;
   };
@@ -681,8 +739,9 @@
       list.replaceChildren(
         ...entries.map((entry) => {
           const detail = [SCOPE_TEXT[entry.scope]?.where, entry.kind, entry.year].filter(Boolean).join(" · ");
+          const art = thumb(entry.image);
           const row = el("button", { class: "hera-set-row hera-hidden-row", type: "button", "aria-label": `Unhide ${entry.title}` }, [
-            el("span", { class: "hera-set-row__icon" }, entry.image ? el("img", { class: "hera-hidden-row__art", src: entry.image, alt: "", loading: "lazy" }) : icon("visibility_off")),
+            el("span", { class: "hera-set-row__icon" }, art ? el("img", { class: "hera-hidden-row__art", src: art, alt: "", width: "32", height: "48", loading: "lazy", decoding: "async" }) : icon("visibility_off")),
             el("span", { class: "hera-set-row__text" }, [el("span", { class: "hera-set-row__label", text: entry.title }), el("span", { class: "hera-set-row__desc", text: detail })]),
             el("span", { class: "hera-set-row__value", text: "Unhide" }),
           ]);
@@ -690,7 +749,11 @@
             row.disabled = true;
             try {
               await unhide(entry);
-              render(hidden.list || []);
+              // Only this row goes; the others keep their images and their place.
+              const next = row.nextElementSibling || row.previousElementSibling;
+              row.remove();
+              if (!list.children.length) list.replaceChildren(empty());
+              else next?.focus({ preventScroll: true });
             } catch (error) {
               console.error("[Hera TV:extras]", error);
               row.disabled = false;

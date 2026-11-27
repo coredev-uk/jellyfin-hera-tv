@@ -437,6 +437,8 @@
 
     const level = levelsFor([...byDay.values()]);
     const visual = [];
+    // The table lists the days the calendar draws: all of them, or the last CALENDAR_YEARS years' worth.
+    let listFrom = "";
     if (days > 0 && days <= BARS_UP_TO_DAYS) {
       visual.push(bars(byDay, fromMs, toMs));
     } else if (span <= 400) {
@@ -452,13 +454,14 @@
         visual.push(el("div", { class: "hera-stats__year" }, [el("h3", { class: "hera-stats__year-name", text: String(year) }), grid]));
       }
       visual.push(legend());
+      listFrom = `${String(firstYear).padStart(4, "0")}-01-01`;
       if (new Date(fromMs).getUTCFullYear() < firstYear) visual.push(el("p", { class: "hera-stats__note", text: `Showing the last ${CALENDAR_YEARS} years.` }));
     }
 
     const table = textTable(
       "Time watched on each day",
       ["Date", "Time watched"],
-      [...keys].reverse().map((key) => [longDate(parseDay(key)), compact(byDay.get(key))]),
+      [...keys].filter((key) => key >= listFrom).reverse().map((key) => [longDate(parseDay(key)), compact(byDay.get(key))]),
     );
     return section("hera-stats-days", "Every Day", lead, ...visual, table);
   };

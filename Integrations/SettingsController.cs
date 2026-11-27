@@ -223,6 +223,7 @@ public class SettingsController(
         }
 
         plugin.SaveConfiguration();
+        IntegrationSettings.Invalidate();
         upstream.ClearCache();
         collectionsView.Clear();
         return Ok(Describe());

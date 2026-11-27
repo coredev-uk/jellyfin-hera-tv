@@ -12,13 +12,37 @@ public static class WebAssets
     /// <summary>Scripts in run order: modules register with the core, so it loads first.</summary>
     public static readonly string[] Scripts = ["hera-tv.js", "hera-home.js", "hera-discover.js", "hera-player.js", "hera-settings.js", "hera-login.js", "hera-search.js", "hera-seerr.js", "hera-extras.js", "hera-activity.js", "hera-stats.js", "hera-notify.js", "hera-collections.js"];
 
-    private static readonly FrozenDictionary<string, Asset> Assets = Load();
+    private static readonly FrozenDictionary<string, Asset> Embedded = Load();
 
     /// <summary>Gets the fingerprint of every asset together, used to bust caches.</summary>
     public static string Version { get; } = Convert.ToHexStringLower(
-        SHA256.HashData(Assets.Values.SelectMany(a => a.Content).ToArray()))[..12];
+        SHA256.HashData(Embedded.Values.SelectMany(a => a.Content).ToArray()))[..12];
+
+    // What is served: the embedded assets, with the stylesheet's font URL carrying the same ?v= the page
+    // puts on every other asset, so the font is cached for a year like them rather than for a day.
+    private static readonly FrozenDictionary<string, Asset> Assets = Fingerprinted();
 
     public static Asset? Get(string name) => Assets.GetValueOrDefault(name);
+
+    private static FrozenDictionary<string, Asset> Fingerprinted()
+    {
+        const string Font = "url(\"InterVariable.woff2\")";
+        var versioned = $"url(\"InterVariable.woff2?v={Version}\")";
+        return Embedded.ToFrozenDictionary(
+            a => a.Key,
+            a =>
+            {
+                if (!a.Value.ContentType.StartsWith("text/css", StringComparison.Ordinal))
+                {
+                    return a.Value;
+                }
+
+                var css = System.Text.Encoding.UTF8.GetString(a.Value.Content);
+                return css.Contains(Font, StringComparison.Ordinal)
+                    ? a.Value with { Content = System.Text.Encoding.UTF8.GetBytes(css.Replace(Font, versioned, StringComparison.Ordinal)) }
+                    : a.Value;
+            });
+    }
 
     private static FrozenDictionary<string, Asset> Load()
     {

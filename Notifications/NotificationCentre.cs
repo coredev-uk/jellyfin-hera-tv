@@ -171,7 +171,7 @@ internal sealed class NotificationCentre(
 
     private async Task PollUser(User user, int seerrUser)
     {
-        var result = await requests.LoadAsync(seerrUser, 60).ConfigureAwait(false);
+        var result = await requests.LoadAsync(seerrUser, 60, background: true).ConfigureAwait(false);
         if (result is null)
         {
             // Seerr didn't answer. That is not "no requests", so nothing is learnt or recorded.

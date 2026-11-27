@@ -193,6 +193,10 @@ html.hera-discover-on #slides-container {
     linear-gradient(90deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.7) 42%, rgba(0, 0, 0, 0) 80%),
     linear-gradient(0deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0) 60%);
 }
+/* The pager's timer is the selected dot's fill (hera-tv.css .hera-hero__dot); a held carousel stops it where it is. */
+.hera-discover__feature.is-held .hera-hero__dot[aria-selected="true"]::after {
+  animation-play-state: paused;
+}
 /* The home hero's pager, in the card's lower right corner. */
 .hera-hero__controls.hera-discover__controls {
   right: clamp(24px, 3vw, 44px);

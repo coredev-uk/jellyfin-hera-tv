@@ -160,7 +160,7 @@ public sealed class WebInjection(ILogger<WebInjection> logger) : IStartupFilter
         // in step afterwards (see `appearance` there). Without it a dark choice on a light-mode
         // device would flash white on every load.
         var head =
-            $"<link {Marker} rel=\"preload\" as=\"font\" type=\"font/woff2\" crossorigin href=\"../HeraTV/InterVariable.woff2\">" +
+            $"<link {Marker} rel=\"preload\" as=\"font\" type=\"font/woff2\" crossorigin href=\"../HeraTV/InterVariable.woff2?v={v}\">" +
             $"<script {Marker}>{SchemeScript}</script>" +
             string.Concat(WebAssets.Stylesheets.Select(name => $"<link {Marker} rel=\"stylesheet\" href=\"../HeraTV/{name}?v={v}\">"));
         var body = string.Concat(WebAssets.Scripts.Select(name => $"<script {Marker} src=\"../HeraTV/{name}?v={v}\" defer></script>"));

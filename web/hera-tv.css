@@ -699,15 +699,17 @@ h3 {
  * .cardImageContainer) over the poster for the click target; it must stay clear, or the card
  * turns into a flat tile. Only a card with something to do (a play disc) softens under a light
  * frost while it is hovered or focused, so the disc reads; cast, crew and other cards without an
- * action keep their artwork untouched.
+ * action keep their artwork untouched. Jellyfin writes data-mediatype only on playable items, so
+ * it marks those cards; a :has(.cardOverlayFab-primary) test did the same but re-ran on every
+ * hover change under the pointer and cost a second of style work per scroll down the home page.
  * Nothing on a card carries a standing backdrop-filter: Jellyfin keeps every card's overlay
  * laid out (at opacity 0), and dozens of idle blur layers halved the frame rate while scrolling. */
 .cardOverlayContainer {
   background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.45) 100%) !important;
   border-radius: inherit;
 }
-.card-hoverable:hover .cardOverlayContainer:has(.cardOverlayFab-primary),
-.card:focus-within .cardOverlayContainer:has(.cardOverlayFab-primary) {
+.card-hoverable[data-mediatype]:hover .cardOverlayContainer,
+.card[data-mediatype]:focus-within .cardOverlayContainer {
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.4) 100%) !important;
   backdrop-filter: blur(2.5px);
   -webkit-backdrop-filter: blur(2.5px);
@@ -718,8 +720,8 @@ h3 {
   filter: none !important;
 }
 @media (prefers-reduced-transparency: reduce) {
-  .card-hoverable:hover .cardOverlayContainer:has(.cardOverlayFab-primary),
-  .card:focus-within .cardOverlayContainer:has(.cardOverlayFab-primary) {
+  .card-hoverable[data-mediatype]:hover .cardOverlayContainer,
+  .card[data-mediatype]:focus-within .cardOverlayContainer {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -2047,6 +2049,8 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   width: 30px;
   background: var(--hera-track);
 }
+/* The selected dot's fill is the carousel's timer: hera-tv.js advances on its animationend, and
+ * .is-held (hover, focus, off-screen, hidden, paused) stops it where it is. */
 .hera-hero__dot[aria-selected="true"]::after {
   content: "";
   position: absolute;
@@ -2054,7 +2058,16 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   border-radius: inherit;
   background: var(--hera-select);
   transform-origin: left;
-  transform: scaleX(var(--hera-progress, 0));
+  transform: scaleX(0);
+  animation: hera-hero-progress var(--hera-hero-interval, 8s) linear forwards;
+}
+.hera-hero.is-held .hera-hero__dot[aria-selected="true"]::after {
+  animation-play-state: paused;
+}
+@keyframes hera-hero-progress {
+  to {
+    transform: scaleX(1);
+  }
 }
 .hera-hero__toggle {
   width: 36px;
@@ -3380,6 +3393,11 @@ progress[aria-valuenow]:before,
     transition-duration: 1ms !important;
     transition-delay: 0s !important;
     animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  /* The hero's timer, not a motion: it runs only when the viewer presses Play on the carousel. */
+  .hera-hero__dot[aria-selected="true"]::after {
+    animation-duration: var(--hera-hero-interval, 8s) !important;
     animation-iteration-count: 1 !important;
   }
   .hera-hero__backdrop,

@@ -71,8 +71,28 @@
 
   const getJSON = (path, params) => api().getJSON(api().getUrl(path, params));
 
+  // One fetch of an item, whoever asks: a title page's banner, overview, shelf and modules all
+  // want the same Users/{user}/Items/{id} at once. Kept for half a minute; a failure is forgotten
+  // at once, and expired entries go whenever the map grows past a screenful.
+  const ITEM_TTL = 30 * 1000;
+  const items = new Map(); // `${user}:${id}` -> { at, promise }
+  const fetchItem = (id) => {
+    const key = `${userId()}:${id}`;
+    const now = Date.now();
+    const held = items.get(key);
+    if (held && now - held.at < ITEM_TTL) return held.promise;
+    const promise = Promise.resolve(api().getItem(userId(), id));
+    promise.catch(() => {
+      if (items.get(key)?.promise === promise) items.delete(key);
+    });
+    items.set(key, { at: now, promise });
+    if (items.size > 100) for (const [k, v] of items) if (now - v.at >= ITEM_TTL) items.delete(k);
+    return promise;
+  };
+
+  // Quality 80: indistinguishable from 90 at card and banner sizes, about a third fewer bytes.
   const imageUrl = (itemId, type, opts = {}) =>
-    api().getScaledImageUrl(itemId, { type, quality: 90, ...opts });
+    api().getScaledImageUrl(itemId, { type, quality: 80, ...opts });
 
   const runtime = (ticks) => {
     if (!ticks) return null;
@@ -679,19 +699,20 @@
     return state.heroItems;
   };
 
+  // Only the first slide's art loads with the page; show() hands each further slide its src as it
+  // comes up next. Lazy loading can't defer them: the slides are stacked in the viewport.
   const heroSlide = (item, index, total) => {
     const isSeries = item.Type === "Series";
     const resumable = !isSeries && item.UserData?.PlaybackPositionTicks > 0;
+    const dpr = window.devicePixelRatio || 1;
     const backdrop = imageUrl(item.Id, "Backdrop", {
-      maxWidth: Math.min(2560, Math.round(window.innerWidth * (window.devicePixelRatio || 1))),
+      maxWidth: Math.min(2560, Math.round(window.innerWidth * dpr)),
       tag: item.BackdropImageTags?.[0],
     });
-    const logo = item.ImageTags?.Logo
-      ? el("img", {
-          class: "hera-hero__logo",
-          alt: item.Name,
-          src: imageUrl(item.Id, "Logo", { maxWidth: 900, tag: item.ImageTags.Logo }),
-        })
+    // Sized to the logo's tallest box (.hera-hero__logo max-height), not a guessed width.
+    const logoSrc = item.ImageTags?.Logo ? imageUrl(item.Id, "Logo", { maxHeight: Math.round(170 * dpr), tag: item.ImageTags.Logo }) : null;
+    const logo = logoSrc
+      ? el("img", { class: "hera-hero__logo", alt: item.Name, src: index ? null : logoSrc, "data-src": logoSrc, decoding: "async" })
       : el("h2", { class: "hera-hero__title", text: item.Name });
 
     const meta = el("p", { class: "hera-hero__meta" }, [
@@ -731,7 +752,7 @@
         "data-index": index,
       },
       [
-        el("img", { class: "hera-hero__backdrop", src: backdrop, alt: "", loading: index ? "lazy" : "eager", decoding: "async" }),
+        el("img", { class: "hera-hero__backdrop", src: index ? null : backdrop, "data-src": backdrop, alt: "", decoding: "async" }),
         el("div", { class: "hera-hero__content" }, [
           logo,
           meta,
@@ -797,17 +818,28 @@
     },
   };
 
+  // Wakes a slide's deferred art (heroSlide). Returns the backdrop.
+  const wakeSlide = (slide) => {
+    for (const img of slide?.querySelectorAll("img[data-src]:not([src])") ?? []) img.src = img.dataset.src;
+    return slide?.querySelector(".hera-hero__backdrop");
+  };
+
+  // The timer is the selected dot's fill (a CSS animation, hera-tv.css .hera-hero__dot): its
+  // animationend advances the slide, and holding the carousel pauses it. Nothing runs per frame.
   class Hero {
     constructor(items) {
       this.items = items;
       this.index = 0;
       this.userPaused = false;
       this.holds = new Set();
-      this.elapsed = 0;
-      this.last = 0;
-      this.frame = 0;
       this.interval = state.config.heroIntervalSeconds * 1000;
       this.build();
+    }
+
+    hold(reason, on) {
+      if (on) this.holds.add(reason);
+      else this.holds.delete(reason);
+      this.node.classList.toggle("is-held", this.userPaused || this.holds.size > 0);
     }
 
     build() {
@@ -871,17 +903,18 @@
         ],
       );
 
-      const hold = (reason) => () => this.holds.add(reason);
-      const release = (reason) => () => this.holds.delete(reason);
-      this.node.addEventListener("pointerenter", hold("hover"));
-      this.node.addEventListener("pointerleave", release("hover"));
+      this.node.style.setProperty("--hera-hero-interval", `${this.interval}ms`);
+      this.node.addEventListener("pointerenter", () => this.hold("hover", true));
+      this.node.addEventListener("pointerleave", () => this.hold("hover", false));
       // On a TV the remote rests on Play, so only focus on the pager holds the timer there.
       this.node.addEventListener("focusin", (e) => {
-        if (!root.classList.contains("layout-tv") || e.target.closest(".hera-hero__controls")) this.holds.add("focus");
-        else this.holds.delete("focus");
+        this.hold("focus", !root.classList.contains("layout-tv") || !!e.target.closest(".hera-hero__controls"));
       });
       this.node.addEventListener("focusout", (e) => {
-        if (!this.node.contains(e.relatedTarget)) this.holds.delete("focus");
+        if (!this.node.contains(e.relatedTarget)) this.hold("focus", false);
+      });
+      this.node.addEventListener("animationend", (e) => {
+        if (e.animationName === "hera-hero-progress" && e.target === this.dots[this.index]) this.show(this.index + 1, false);
       });
       this.node.addEventListener("keydown", (e) => {
         if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && e.target.closest(".hera-hero__pager")) {
@@ -932,34 +965,30 @@
       };
       document.addEventListener("keydown", this.onKeyUp, true);
       this.visibility = new IntersectionObserver(([entry]) => {
-        if (entry.isIntersecting && entry.intersectionRatio > 0.4) this.holds.delete("offscreen");
-        else this.holds.add("offscreen");
+        this.hold("offscreen", !(entry.isIntersecting && entry.intersectionRatio > 0.4));
       }, { threshold: [0, 0.4, 1] });
       this.visibility.observe(this.node);
-      this.onVisibility = () => (document.hidden ? this.holds.add("hidden") : this.holds.delete("hidden"));
+      this.onVisibility = () => this.hold("hidden", document.hidden);
       document.addEventListener("visibilitychange", this.onVisibility);
 
       this.ready = this.show(0, false);
-      if (reduceMotion.matches) this.setUserPaused(true);
-      this.tick = this.tick.bind(this);
-      this.frame = requestAnimationFrame(this.tick);
+      this.setUserPaused(reduceMotion.matches);
     }
 
     setUserPaused(paused) {
       this.userPaused = paused;
       this.toggle.setAttribute("aria-label", paused ? "Play featured titles" : "Pause featured titles");
       this.toggle.querySelector(".material-icons").textContent = paused ? "play_arrow" : "pause";
+      this.hold("user", paused);
     }
 
     async show(index, fromUser, immediate = false) {
       const total = this.slides.length;
       const target = (index + total) % total;
       const token = (this.token = (this.token || 0) + 1);
-      this.elapsed = 0;
       // Crossfade only to a decoded backdrop, so the fade never reveals a half-drawn image.
-      const img = this.slides[target].querySelector(".hera-hero__backdrop");
+      const img = wakeSlide(this.slides[target]);
       if (!immediate && img && !img.complete) {
-        img.loading = "eager";
         await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
         if (token !== this.token) return;
       }
@@ -979,16 +1008,20 @@
         // One Tab stop for the pager; the arrow keys step through it.
         dot.tabIndex = i === this.index ? 0 : -1;
       });
-      this.dots.forEach((dot) => dot.style.removeProperty("--hera-progress"));
-      this.elapsed = 0;
+      // Clicking the selected dot restarts its fill: deselect it for one style pass first.
+      const dot = this.dots[this.index];
+      if (dot) {
+        dot.setAttribute("aria-selected", "false");
+        void dot.offsetWidth;
+        dot.setAttribute("aria-selected", "true");
+      }
       if (fromUser && document.activeElement?.classList.contains("hera-hero__dot")) {
         this.dots[this.index].focus();
       }
       if (heldSlide && heldSlide !== this.slides[this.index] && heldAt >= 0) {
         this.slides[this.index].querySelectorAll(".hera-hero__actions > *")[heldAt]?.focus({ preventScroll: true });
       }
-      const next = this.slides[(this.index + 1) % total]?.querySelector(".hera-hero__backdrop");
-      if (next) next.loading = "eager";
+      wakeSlide(this.slides[(this.index + 1) % total]);
       this.paintAmbient();
     }
 
@@ -997,24 +1030,8 @@
       ambient.show(img?.currentSrc || img?.src);
     }
 
-    paint(progress) {
-      this.dots[this.index]?.style.setProperty("--hera-progress", progress.toFixed(4));
-    }
-
-    tick(now) {
-      const dt = this.last ? Math.min(now - this.last, 100) : 0;
-      this.last = now;
-      if (this.slides.length > 1 && !this.userPaused && this.holds.size === 0) {
-        this.elapsed += dt;
-        if (this.elapsed >= this.interval) this.show(this.index + 1, false);
-        else this.paint(this.elapsed / this.interval);
-      }
-      this.frame = requestAnimationFrame(this.tick);
-    }
-
     destroy() {
       this.guard?.disconnect();
-      cancelAnimationFrame(this.frame);
       this.visibility.disconnect();
       document.removeEventListener("visibilitychange", this.onVisibility);
       document.removeEventListener("keydown", this.onKeyUp, true);
@@ -1213,7 +1230,7 @@
     if (existing?.dataset.item === itemId) return;
     existing?.remove();
     page.classList.remove("hera-has-seasons");
-    const item = itemHints.get(itemId) ?? (await api().getItem(userId(), itemId));
+    const item = itemHints.get(itemId) ?? (await fetchItem(itemId));
     if (!item || !["Series", "Season", "Episode"].includes(item.Type)) return;
     const seriesId = item.Type === "Series" ? item.Id : item.SeriesId;
     if (!seriesId) return;
@@ -1429,7 +1446,7 @@
   };
 
   const buildBoxSet = async (page, itemId, previous) => {
-    const item = await api().getItem(userId(), itemId);
+    const item = await fetchItem(itemId);
     if (item?.Type !== "BoxSet") return null;
     const result = await getJSON(`Users/${userId()}/Items`, {
       ParentId: itemId,
@@ -1539,7 +1556,7 @@
   // prints the title twice, so episodes and seasons take their series' backdrop instead, and fall
   // back to their own only when the series has none.
   const bannerArt = async (item) => {
-    const series = item.SeriesId && (item.Type === "Episode" || item.Type === "Season") ? await api().getItem(userId(), item.SeriesId) : null;
+    const series = item.SeriesId && (item.Type === "Episode" || item.Type === "Season") ? await fetchItem(item.SeriesId) : null;
     if (series?.BackdropImageTags?.length) return { id: series.Id, tag: series.BackdropImageTags[0] };
     if (item.BackdropImageTags?.length) return { id: item.Id, tag: item.BackdropImageTags[0] };
     if (item.ParentBackdropImageTags?.length) return { id: item.ParentBackdropItemId, tag: item.ParentBackdropImageTags[0] };
@@ -1575,7 +1592,7 @@
     const hint = itemHints.get(itemId);
     const known = artCache.get(itemId) ?? (hint?.SeriesId ? artCache.get(hint.SeriesId) : null);
     if (known) paintBanner(page, banner, itemId, known);
-    const item = await api().getItem(userId(), itemId);
+    const item = await fetchItem(itemId);
     if (itemIdFromHash() !== itemId) return;
     page.classList.toggle("hera-person", item?.Type === "Person");
     const art = item ? await bannerArt(item) : null;
@@ -1679,7 +1696,7 @@
     if (existing?.dataset.item === itemId) return;
     dropOverview(info);
     page.classList.remove("hera-has-overview");
-    const item = await api().getItem(userId(), itemId);
+    const item = await fetchItem(itemId);
     if (!item?.Overview || itemIdFromHash() !== itemId) return;
     // A second call may have finished first while this one waited.
     dropOverview(info);
@@ -2146,10 +2163,20 @@
       if (next) node.textContent = next;
     }
   };
+  // Only a change that could carry one of those words queues a pass: new nodes anywhere but the
+  // player, or a text edit inside the few places localiseCopy rewrites. The player's clock and
+  // position ticks, and removals, cost nothing.
+  const COPY_HOSTS = ".MuiAppBar-root, #library-view-menu, h2.sectionTitle, .mediaInfoOfficialRating, .itemMiscInfo";
+  const copyRelevant = (record) => {
+    const host = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
+    if (!host || host.closest("#videoOsdPage")) return false;
+    if (record.type === "characterData") return !!host.closest(COPY_HOSTS);
+    return record.addedNodes.length > 0;
+  };
   const watchCopy = () => {
     let queued = false;
-    const observer = new MutationObserver(() => {
-      if (queued) return;
+    const observer = new MutationObserver((records) => {
+      if (queued || !records.some(copyRelevant)) return;
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
@@ -2221,6 +2248,8 @@
       el,
       icon,
       getJSON,
+      /** An item as the signed-in user sees it, fetched once per half a minute whoever asks. */
+      item: fetchItem,
       imageUrl,
       runtime,
       shuffle,

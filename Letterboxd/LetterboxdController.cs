@@ -163,19 +163,18 @@ public class LetterboxdController(
         });
         var data = userData.GetUserDataBatch(movies, user);
 
-        int found = 0, queued = 0;
+        // One transaction for the lot, not a connection per film.
+        var drafts = new List<WatchDraft>();
         foreach (var movie in movies)
         {
             if (data.TryGetValue(movie.Id, out var played) && played.LastPlayedDate is { } last && last >= cutoff)
             {
-                found++;
-                if (watcher.Enqueue(userId, movie, Clock.FromUtc(last)))
-                {
-                    queued++;
-                }
+                drafts.Add(LetterboxdWatcher.Draft(userId, movie, Clock.FromUtc(last)));
             }
         }
 
+        var found = drafts.Count;
+        var queued = watcher.EnqueueMany(drafts);
         if (queued > 0)
         {
             watcher.Schedule();
