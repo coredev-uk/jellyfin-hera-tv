@@ -144,7 +144,9 @@ export const desktopPages = (data) => {
       hash: `#/boxsets?topParentId=${data.collectionsLibrary}&collectionType=boxsets`,
       view: "boxsetsPage",
       modules: ["collections-browse"],
-      dom: [".hera-collections"],
+      // The run makes one collection, too few for Hera's grouped shelves, so Hera must leave
+      // Jellyfin's own grid showing rather than an empty view.
+      dom: [{ none: "html.hera-collections-on" }],
       skip: data.collectionsLibrary ? null : "Jellyfin made no Collections library for the collection the run created",
     },
     { name: "film", hash: details(film.Id), view: "itemDetailPage", modules: DETAIL_MODULES, dom: ["[data-hera-filled]", ".hera-detail-overview"] },
