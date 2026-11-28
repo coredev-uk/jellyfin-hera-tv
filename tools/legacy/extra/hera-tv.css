@@ -1,0 +1,11 @@
+/*
+ * Fallbacks for what the transforms can't know, written for the old engines and added at the end of
+ * the stylesheet of the same name by tools/legacy/build.mjs.
+ */
+
+/* A <button> before Chromium 83 keeps its children in one anonymous box that shrink-wraps them
+ * (the user agent's own `align-items: flex-start`), so a card that is a button, unlike one that is
+ * a link, would be as wide as its longest line of text and its art as wide as that. */
+.hera-card {
+  align-items: stretch;
+}

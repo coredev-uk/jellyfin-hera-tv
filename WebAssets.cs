@@ -8,11 +8,24 @@ using Microsoft.Net.Http.Headers;
 
 namespace Jellyfin.Plugin.HeraTv;
 
+/// <summary>Which build of the web assets a page gets: the one for current browsers, or the one lowered for Chromium before 85.</summary>
+public enum Variant
+{
+    Modern,
+    Legacy,
+}
+
 /// <summary>
 /// The stylesheets, scripts and font, read once from the assembly and fingerprinted. The page loads
 /// them as two bundles (every stylesheet, every script) rather than as 27 files, so a cold load is
 /// two requests, each precompressed; the files stay available one by one.
 /// </summary>
+/// <remarks>
+/// A build that had Node also carries the same files rewritten for older TV browsers (tools/legacy,
+/// embedded from web-legacy/), served as two bundles of their own, <c>hera-bundle-legacy.js</c> and
+/// <c>hera-bundle-legacy.css</c>, under a version of their own. The current bundles and their version
+/// are not touched by them.
+/// </remarks>
 public static class WebAssets
 {
     /// <summary>The URL name of every stylesheet, in cascade order, joined.</summary>
@@ -21,9 +34,19 @@ public static class WebAssets
     /// <summary>The URL name of every script, in run order, joined.</summary>
     public const string ScriptBundle = "hera-bundle.js";
 
+    /// <summary>The URL name of the stylesheets for older browsers.</summary>
+    public const string LegacyStylesheetBundle = "hera-bundle-legacy.css";
+
+    /// <summary>The URL name of the scripts for older browsers, behind the polyfills they need.</summary>
+    public const string LegacyScriptBundle = "hera-bundle-legacy.js";
+
     private const string StylesheetType = "text/css; charset=utf-8";
     private const string ScriptType = "text/javascript; charset=utf-8";
     private const string FontName = "InterVariable.woff2";
+
+    // Where the legacy build's files are embedded, and the script that goes in front of the others.
+    private const string LegacyFolder = "legacy/";
+    private const string LegacyPrelude = "legacy/hera-polyfills.js";
 
     // The one list of what the page is made of, in run order for the scripts and cascade order for
     // the stylesheets (the dashboard sheet undoes rules of the core one, so it comes after it and the
@@ -75,16 +98,30 @@ public static class WebAssets
 
     private static string ModuleEnd(string file) => $"}} catch (error) {{\n  window.HeraBundle.failed(\"{file}\", error);\n}}\n";
 
+    // The same wrapper written in ES5 for the legacy bundle: Chromium 53 reads neither `?.` nor method
+    // shorthand. `variant` says which bundle a page was given.
+    private const string LegacyPrologueHead = "window.HeraBundle = {\n  variant: \"legacy\",\n  version: \"";
+    private const string LegacyPrologueTail = ",\n  failed: function (file, error) {\n    if (window.HeraTV && window.HeraTV.loadFailed) {\n      window.HeraTV.loadFailed(file, error);\n    } else {\n      Array.prototype.forEach.call(document.querySelectorAll(\"link[data-hera-tv]\"), function (node) {\n        node.parentNode.removeChild(node);\n      });\n      document.documentElement.classList.remove(\"hera-on\");\n    }\n    setTimeout(function () {\n      throw error;\n    });\n  }\n};\n";
+
     private static readonly FrozenDictionary<string, byte[]> Embedded = Load();
 
     // Each stylesheet behind the class that switches it on (see CssGate), before the font URL is touched.
-    private static readonly Dictionary<string, string> GatedStyles = GateStyles();
+    private static readonly Dictionary<string, string> GatedStyles = GateStyles(Embedded);
 
     /// <summary>Gets the fingerprint of every asset together, used to bust caches.</summary>
     public static string Version { get; } = Fingerprint();
 
     // Set by Build, which must therefore come after this declaration.
     private static List<ScriptStart> scriptStarts = [];
+    private static List<ScriptStart> legacyScriptStarts = [];
+    private static string? legacyProblem;
+
+    // The scripts of the legacy bundle: the polyfills, then the same ones in the same order.
+    private static readonly string[] LegacyScripts = [LegacyPrelude[LegacyFolder.Length..], .. Scripts];
+
+    // The legacy files, or null where this build has none (it was built without Node) or they don't
+    // match the manifest; LegacyProblem says which.
+    private static readonly LegacySet? LegacySources = LoadLegacy();
 
     // What is served: the embedded assets, with the stylesheet's font URL carrying the same ?v= the page
     // puts on every other asset, so the font is cached for a year like them rather than for a day; and
@@ -93,6 +130,27 @@ public static class WebAssets
 
     /// <summary>Gets where each script starts in <c>hera-bundle.js</c> (1-based line of its first line).</summary>
     public static IReadOnlyList<ScriptStart> ScriptMap => scriptStarts;
+
+    /// <summary>Gets a value indicating whether this build carries the assets for older browsers.</summary>
+    public static bool LegacyAvailable => LegacySources is not null;
+
+    /// <summary>Gets why the assets for older browsers aren't served, when files for them are embedded but don't fit the manifest; null when there are none or they do.</summary>
+    public static string? LegacyProblem => legacyProblem;
+
+    /// <summary>Gets the fingerprint of the legacy assets, or null where there are none.</summary>
+    public static string? LegacyVersion => LegacySources?.Version;
+
+    /// <summary>Gets where each script starts in <c>hera-bundle-legacy.js</c>, the polyfills first.</summary>
+    public static IReadOnlyList<ScriptStart> LegacyScriptMap => legacyScriptStarts;
+
+    /// <summary>The variant to send a browser with this User-Agent: the legacy one when it is that old and this build has it.</summary>
+    public static Variant Choose(string? userAgent) => LegacyAvailable && LegacyBrowsers.IsLegacy(userAgent) ? Variant.Legacy : Variant.Modern;
+
+    public static string VersionOf(Variant variant) => variant == Variant.Legacy ? LegacyVersion ?? Version : Version;
+
+    public static string StylesheetOf(Variant variant) => variant == Variant.Legacy ? LegacyStylesheetBundle : StylesheetBundle;
+
+    public static string ScriptOf(Variant variant) => variant == Variant.Legacy ? LegacyScriptBundle : ScriptBundle;
 
     /// <summary>Gets the embedded web files (<c>hera-*.js</c>, <c>hera-*.css</c>) the manifest above doesn't list, which would otherwise be silently left out.</summary>
     public static IReadOnlyList<string> Unlisted { get; } = FindUnlisted();
@@ -171,13 +229,13 @@ public static class WebAssets
         return wildcard;
     }
 
-    private static Dictionary<string, string> GateStyles()
+    private static Dictionary<string, string> GateStyles(IReadOnlyDictionary<string, byte[]> source)
     {
         var gated = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var unit in Manifest.Where(u => u.Style is not null))
         {
             var gate = unit.Module is null ? "hera-on" : $"hera-m-{unit.Module}";
-            gated[unit.Style!] = CssGate.Apply(Encoding.UTF8.GetString(Embedded[unit.Style!]), gate);
+            gated[unit.Style!] = CssGate.Apply(Encoding.UTF8.GetString(source[unit.Style!]), gate);
         }
 
         return gated;
@@ -204,6 +262,25 @@ public static class WebAssets
         return Convert.ToHexStringLower(hash.GetHashAndReset())[..12];
     }
 
+    /// <summary>The legacy bundles' own fingerprint: its stylesheets, scripts (the polyfills among them), the font and the wrapping.</summary>
+    private static string LegacyFingerprint(Dictionary<string, string> gated, IReadOnlyDictionary<string, byte[]> files)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var name in Stylesheets)
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(gated[name]));
+        }
+
+        foreach (var name in LegacyScripts)
+        {
+            hash.AppendData(files[name]);
+        }
+
+        hash.AppendData(Embedded[FontName]);
+        hash.AppendData(Encoding.UTF8.GetBytes(ModuleStart + LegacyPrologueHead + PrologueMiddle + LegacyPrologueTail + ModuleEnd("*")));
+        return Convert.ToHexStringLower(hash.GetHashAndReset())[..12];
+    }
+
     private static FrozenDictionary<string, Asset> Build()
     {
         const string Font = $"url(\"{FontName}\")";
@@ -213,12 +290,13 @@ public static class WebAssets
             name => name,
             name => GatedStyles[name].Replace(Font, versioned, StringComparison.Ordinal));
         var scripts = Scripts.ToDictionary(name => name, name => Encoding.UTF8.GetString(Embedded[name]));
+        scriptStarts = [];
 
         var assets = new Dictionary<string, Asset>
         {
             [FontName] = new(new Payload(Embedded[FontName]), "font/woff2", Compressible: false),
             [StylesheetBundle] = StyleBundle(styles),
-            [ScriptBundle] = ScriptBundleOf(scripts),
+            [ScriptBundle] = BuildScriptBundle(Scripts, scripts, Prologue, scriptStarts),
         };
         foreach (var (name, css) in styles)
         {
@@ -228,6 +306,20 @@ public static class WebAssets
         foreach (var (name, js) in scripts)
         {
             assets[name] = new(new Payload(Encoding.UTF8.GetBytes(js)), ScriptType, Compressible: true);
+        }
+
+        // The legacy build is the same files lowered for older browsers: served only as its two bundles,
+        // each with the font URL of its own version.
+        if (LegacySources is { } legacy)
+        {
+            var legacyFont = $"url(\"{FontName}?v={legacy.Version}\")";
+            var legacyStyles = Stylesheets.ToDictionary(
+                name => name,
+                name => legacy.GatedStyles[name].Replace(Font, legacyFont, StringComparison.Ordinal));
+            var legacyScripts = LegacyScripts.ToDictionary(name => name, name => Encoding.UTF8.GetString(legacy.Files[name]));
+            legacyScriptStarts = [];
+            assets[LegacyStylesheetBundle] = StyleBundle(legacyStyles);
+            assets[LegacyScriptBundle] = BuildScriptBundle(LegacyScripts, legacyScripts, files => LegacyPrologue(legacy.Version, files), legacyScriptStarts);
         }
 
         return assets.ToFrozenDictionary();
@@ -254,15 +346,13 @@ public static class WebAssets
     /// <c>HeraBundle</c> prologue. The prologue carries the line each file's own first line lands on
     /// (also <see cref="ScriptMap"/>), for reading a stack frame back as a file and line.
     /// </summary>
-    private static Asset ScriptBundleOf(Dictionary<string, string> sources)
+    private static Asset BuildScriptBundle(IReadOnlyList<string> names, Dictionary<string, string> sources, Func<string, string> prologue, List<ScriptStart> map)
     {
         // The prologue's size in lines doesn't depend on the map it carries (one line of JSON), so
         // the lines can be counted before it is written.
-        var line = CountLines(Prologue("[]")) + 1;
-        var map = new List<ScriptStart>(Scripts.Length);
-        scriptStarts = map;
-        var bodies = new List<string>(Scripts.Length);
-        foreach (var name in Scripts)
+        var line = CountLines(prologue("[]")) + 1;
+        var bodies = new List<string>(names.Count);
+        foreach (var name in names)
         {
             var text = sources[name];
             if (text.Length > 0 && text[^1] != '\n')
@@ -276,17 +366,19 @@ public static class WebAssets
             bodies.Add(text);
         }
 
-        var joined = new StringBuilder(bodies.Sum(b => b.Length) + Scripts.Length * 160 + 1024);
-        joined.Append(Prologue("[" + string.Join(",", map.Select(f => $"[\"{f.File}\",{f.Line}]")) + "]"));
-        for (var i = 0; i < Scripts.Length; i++)
+        var joined = new StringBuilder(bodies.Sum(b => b.Length) + names.Count * 160 + 1024);
+        joined.Append(prologue("[" + string.Join(",", map.Select(f => $"[\"{f.File}\",{f.Line}]")) + "]"));
+        for (var i = 0; i < names.Count; i++)
         {
-            joined.Append("/* ").Append(Scripts[i]).Append(" */\n").Append(ModuleStart).Append(bodies[i]).Append(ModuleEnd(Scripts[i]));
+            joined.Append("/* ").Append(names[i]).Append(" */\n").Append(ModuleStart).Append(bodies[i]).Append(ModuleEnd(names[i]));
         }
 
         return new Asset(new Payload(Encoding.UTF8.GetBytes(joined.ToString())), ScriptType, Compressible: true);
     }
 
     private static string Prologue(string filesJson) => PrologueHead + Version + PrologueMiddle + filesJson + PrologueTail;
+
+    private static string LegacyPrologue(string version, string filesJson) => LegacyPrologueHead + version + PrologueMiddle + filesJson + LegacyPrologueTail;
 
     private static int CountLines(string text)
     {
@@ -317,6 +409,43 @@ public static class WebAssets
             });
     }
 
+    /// <summary>
+    /// Reads the files of the legacy build. Null when there are none (a build without Node: older browsers
+    /// then get the current assets, and the page's own check leaves them with Jellyfin's page), or when they
+    /// don't match the manifest, which <see cref="LegacyProblem"/> then says.
+    /// </summary>
+    private static LegacySet? LoadLegacy()
+    {
+        var assembly = typeof(WebAssets).Assembly;
+        if (assembly.GetManifestResourceInfo(LegacyPrelude) is null)
+        {
+            return null;
+        }
+
+        var names = Scripts.Concat(Stylesheets).Append(LegacyPrelude[LegacyFolder.Length..]).ToArray();
+        var missing = names.Where(name => assembly.GetManifestResourceInfo(LegacyFolder + name) is null).ToArray();
+        if (missing.Length > 0)
+        {
+            legacyProblem = $"the legacy assets lack {string.Join(", ", missing)}, which the manifest lists";
+            return null;
+        }
+
+        var files = names.ToFrozenDictionary(
+            name => name,
+            name =>
+            {
+                using var stream = assembly.GetManifestResourceStream(LegacyFolder + name)!;
+                using var memory = new MemoryStream();
+                stream.CopyTo(memory);
+                return memory.ToArray();
+            });
+        var gated = GateStyles(files);
+        return new LegacySet(files, gated, LegacyFingerprint(gated, files));
+    }
+
+    /// <summary>The legacy build's files by name (the prelude among them), its stylesheets behind their gate classes, and its fingerprint.</summary>
+    private sealed record LegacySet(FrozenDictionary<string, byte[]> Files, Dictionary<string, string> GatedStyles, string Version);
+
     private static string[] FindUnlisted()
         => [.. typeof(WebAssets).Assembly.GetManifestResourceNames()
             .Where(name => name.StartsWith("hera-", StringComparison.Ordinal)
@@ -341,10 +470,10 @@ public static class WebAssets
         private readonly Lazy<byte[]> gzip;
         private readonly string tag;
 
-        public Payload(byte[] content)
+        public Payload(byte[] content, string tagPrefix = "")
         {
             Content = content;
-            tag = Convert.ToHexStringLower(SHA256.HashData(content))[..16];
+            tag = tagPrefix + Convert.ToHexStringLower(SHA256.HashData(content))[..16];
             brotli = new Lazy<byte[]>(() => Brotli(content));
             gzip = new Lazy<byte[]>(() => Gzip(content));
         }

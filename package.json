@@ -1,16 +1,25 @@
 {
   "name": "hera-tv-tooling",
   "private": true,
-  "description": "Lint for the web layer's scripts. The plugin itself is built with dotnet; the compat run has its own package in tests/compat.",
+  "description": "Lint for the web layer's scripts, and the build of its copy for older TV browsers (tools/legacy). The plugin itself is built with dotnet; the compat run has its own package in tests/compat.",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "build:legacy": "node tools/legacy/build.mjs",
     "lint": "eslint",
     "test": "node --test \"tests/**/*.test.mjs\""
   },
   "devDependencies": {
+    "@babel/core": "8.1.4",
+    "@babel/preset-env": "8.1.4",
+    "acorn": "8.19.0",
+    "acorn-walk": "8.3.5",
+    "core-js": "3.51.0",
+    "core-js-compat": "3.51.0",
+    "esbuild": "0.28.2",
     "eslint": "10.16.0",
-    "globals": "17.14.0"
+    "globals": "17.14.0",
+    "lightningcss": "1.33.0"
   }
 }

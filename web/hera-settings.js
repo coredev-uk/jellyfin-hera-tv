@@ -239,7 +239,10 @@
   };
 
   /** One row of a grouped list. A link when `href` is given, a button otherwise. */
-  const row = ({ icon: iconName, label, description, value, chevron, href, onclick }) => {
+  // `external`: href leaves Jellyfin and opens in a new tab (kit.externalLink); in the TV layout,
+  // where there is no tab to open, the row is drawn as a plain, unpressable one.
+  const row = ({ icon: iconName, label, description, value, chevron, href, external, onclick }) => {
+    const stranded = Boolean(external && href && kit.isTv());
     const children = [
       iconName ? el("span", { class: "hera-set-row__icon" }, icon(iconName)) : null,
       el("span", { class: "hera-set-row__text" }, [
@@ -247,9 +250,14 @@
         description ? el("span", { class: "hera-set-row__desc", text: description }) : null,
       ]),
       value !== undefined ? el("span", { class: "hera-set-row__value", text: value }) : null,
-      chevron ? withClass(icon("chevron_right"), "hera-set-row__chev") : null,
+      chevron && !stranded ? withClass(icon("chevron_right"), "hera-set-row__chev") : null,
     ];
-    const node = href ? el("a", { class: "hera-set-row", href }, children) : el("button", { class: "hera-set-row", type: "button" }, children);
+    const node =
+      href && external
+        ? kit.externalLink({ class: stranded ? "hera-set-row hera-set-row--static" : "hera-set-row", href }, children, { fallback: "div" })
+        : href
+          ? el("a", { class: "hera-set-row", href }, children)
+          : el("button", { class: "hera-set-row", type: "button" }, children);
     if (onclick) node.addEventListener("click", onclick);
     return node;
   };
@@ -765,9 +773,7 @@
         rows: [row({ icon: "movie_filter", label: "Connect Letterboxd", description: "Add the films you finish to your diary.", chevron: true, onclick: () => openLetterboxdConnect() })],
       });
     }
-    const account = row({ icon: "movie_filter", label: `Connected as ${state.username}`, href: `https://letterboxd.com/${encodeURIComponent(state.username)}/`, chevron: true });
-    account.target = "_blank";
-    account.rel = "noopener noreferrer";
+    const account = row({ icon: "movie_filter", label: `Connected as ${state.username}`, href: `https://letterboxd.com/${encodeURIComponent(state.username)}/`, external: true, chevron: true });
 
     const last = (state.recent || []).find((w) => w.state === "logged");
     const status = state.lastError

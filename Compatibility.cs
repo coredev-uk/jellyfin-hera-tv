@@ -323,15 +323,27 @@ public class CompatibilityController(IServerApplicationHost applicationHost, IUs
             injection = new
             {
                 lastInjected = serverHealth.Injection.LastInjected is { } injected ? Stamp(injected) : null,
+                // Which build of the assets the latest page was given, and how many pages each has had since the
+                // server started: "legacy" is the one lowered for Chromium before 85 (Tizen 5, webOS 4).
+                lastVariant = serverHealth.Injection.LastVariant?.ToString().ToLowerInvariant(),
+                pages = new { modern = serverHealth.Injection.Modern, legacy = serverHealth.Injection.Legacy },
                 lastDecline = serverHealth.Injection.LastDecline is { } decline ? new { at = Stamp(decline.At), reason = decline.Reason } : null,
             },
             // Where each script starts in hera-bundle.js, so a frame in an error ("hera-bundle.js:4210:9")
-            // can be read as a file and line; and any web file missing from WebAssets's manifest.
+            // can be read as a file and line; and any web file missing from WebAssets's manifest. The legacy
+            // build has its own bundle, fingerprint and map; "problem" says why one that is embedded isn't served.
             bundle = new
             {
                 version = WebAssets.Version,
                 files = WebAssets.ScriptMap.Select(f => new { file = f.File, line = f.Line }),
                 unlisted = WebAssets.Unlisted,
+                legacy = new
+                {
+                    available = WebAssets.LegacyAvailable,
+                    version = WebAssets.LegacyVersion,
+                    files = WebAssets.LegacyScriptMap.Select(f => new { file = f.File, line = f.Line }),
+                    problem = WebAssets.LegacyProblem,
+                },
             },
         });
     }

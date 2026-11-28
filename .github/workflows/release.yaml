@@ -79,6 +79,11 @@ jobs:
           # --exit-status makes a failed or cancelled run fail this step.
           gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30 > /dev/null
 
+      # The web files lowered for older TV browsers (tools/legacy), embedded like the rest.
+      - name: Legacy web assets
+        if: ${{ steps.version.outputs.released == 'false' }}
+        uses: ./.github/actions/legacy-assets
+
       - name: Setup .NET
         if: ${{ steps.version.outputs.released == 'false' }}
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
@@ -88,6 +93,11 @@ jobs:
       - name: Build
         if: ${{ steps.version.outputs.released == 'false' }}
         run: dotnet build Jellyfin.Plugin.HeraTv.csproj -c Release -o out
+
+      # A release without them would serve older TV browsers Jellyfin's own page.
+      - name: Legacy assets are in the plugin
+        if: ${{ steps.version.outputs.released == 'false' }}
+        run: .github/scripts/legacy-embedded.sh out/Jellyfin.Plugin.HeraTv.dll
 
       - name: Package
         if: ${{ steps.version.outputs.released == 'false' }}

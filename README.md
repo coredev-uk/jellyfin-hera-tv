@@ -95,6 +95,14 @@ Requests go through the plugin's own endpoints, so no API key reaches the browse
 
 </details>
 
+## Older TVs
+
+Samsung's Tizen 5 browser (Chromium 63) and LG's webOS 4 (Chromium 53) can't read the scripts and stylesheets the rest of the world gets, so a build made with Node carries a second copy of them, lowered for Chromium 53 and up: syntax rewritten by Babel, the built-ins and DOM APIs the scripts use supplied by core-js and a few stand-ins of Hera's own (`replaceChildren`, `AbortController`, `ResizeObserver` and so on), and the stylesheets rewritten by lightningcss and a few transforms of Hera's own (`:focus-visible`, `:is()`, `:has()`, `inset`, `clamp()`, `color-mix()`, flex `gap`, `aspect-ratio`; the list, with counts, is in `web-legacy/legacy-report.txt` after a build). The page gets that copy, as `hera-bundle-legacy.js` and `hera-bundle-legacy.css`, when its User-Agent says Chromium before 85, Safari before 14, or a television (Tizen, webOS, `SMART-TV`, NetCast) with no Chromium 85 or later. Everything else gets the same bundles as before, byte for byte. The health report (`/HeraTV/health`) says which copy the latest page was given and how many pages each copy has had.
+
+It is a best effort, not the same page: what a browser that old can't draw is left as it is. On both, there is no blur behind glass (so the glass is made nearly opaque), no `display: contents` or container queries (the Dashboard's own pages), no scroll snapping, and `:has()` rules are dropped; `inert` does nothing and a request that is cancelled is only ignored, not stopped. Chromium 53 also has no CSS Grid, no `position: sticky` and no `:focus-within`, so layouts built on grid (the shelves and the header among them) fall back to ordinary block flow there.
+
+A build without Node (a plain `dotnet build`) has no legacy copy: the plugin works as before, and an older TV is left with Jellyfin's own page, with one line saying so in Jellyfin's log. To build it, run `npm ci && npm run build:legacy` first; CI does, and fails if the files are missing from the plugin.
+
 ## After a Jellyfin update
 
 Hera TV restyles and adds to Jellyfin's own web client, so a Jellyfin release can change something it leans on. The plugin is built so that costs a feature on one page, never a usable page, and so that someone hears about it.

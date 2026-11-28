@@ -1183,9 +1183,10 @@
     const still = tag ? imageUrl(item.Id, "Backdrop", { maxWidth: 1920, tag }) : null;
     const close = el("button", { class: "hera-trailer__close", type: "button", "aria-label": "Close trailer", title: "Close" }, icon("arrow_back"));
     const watch = item.RemoteTrailers?.[0]?.Url || `https://www.youtube.com/watch?v=${ids[0]}`;
+    // On a TV the YouTube link has nowhere to open, so the note just says the trailer can't play.
     const note = el("div", { class: "hera-trailer__note", hidden: true }, [
       el("p", { class: "hera-trailer__text", text: "This trailer can't be played here." }),
-      el("a", { class: "hera-btn hera-btn--glass hera-btn--text", href: watch, target: "_blank", rel: "noopener noreferrer" }, [icon("open_in_new"), "Watch on YouTube"]),
+      kit.externalLink({ class: "hera-btn hera-btn--glass hera-btn--text", href: watch }, [icon("open_in_new"), "Watch on YouTube"]),
     ]);
     const node = el("div", { class: "hera-trailer hera-dark", role: "dialog", "aria-modal": "true", "aria-label": `${item.Name} trailer` }, [
       still ? el("img", { class: "hera-trailer__still", src: still, alt: "" }) : null,

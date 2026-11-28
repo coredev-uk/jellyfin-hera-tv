@@ -81,6 +81,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # The web files lowered for older TV browsers (tools/legacy), which the build embeds when they are there.
+      - name: Legacy web assets
+        uses: ./.github/actions/legacy-assets
+
       - name: Setup .NET
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -88,3 +92,6 @@ jobs:
 
       - name: Build
         run: dotnet build Jellyfin.Plugin.HeraTv.csproj -c Release -o out
+
+      - name: Legacy assets are in the plugin
+        run: .github/scripts/legacy-embedded.sh out/Jellyfin.Plugin.HeraTv.dll

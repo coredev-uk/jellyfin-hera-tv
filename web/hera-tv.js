@@ -188,9 +188,10 @@
 
   // ---------- errors: where they came from -------------------------------------------------
   // The bundle is every script joined; its wrapper hands over each file's first line (HeraBundle),
-  // so a frame in hera-bundle.js reads as the file and line it came from.
+  // so a frame in hera-bundle.js (or the old-TV hera-bundle-legacy.js) reads as the file and line it
+  // came from.
   const bundleFiles = window.HeraBundle?.files ?? [];
-  const BUNDLE_FRAME = /hera-bundle\.js(?:\?[^:\s)]*)?:(\d+):(\d+)/;
+  const BUNDLE_FRAME = /hera-bundle(?:-legacy)?\.js(?:\?[^:\s)]*)?:(\d+):(\d+)/;
   const firstHeraFrame = (error) => {
     for (const line of String(error?.stack || "").split("\n")) {
       const hit = BUNDLE_FRAME.exec(line);
@@ -349,6 +350,20 @@
 
   // The material-icons class is the icon font's; hera-icon is how Hera finds its own icons again.
   const icon = (name) => el("span", { class: "material-icons hera-icon", "aria-hidden": "true", text: name });
+
+  // A link out of Jellyfin (Seerr, YouTube, a streaming service, Letterboxd) opens a new tab, and a
+  // TV has nowhere to open one: the Jellyfin apps for webOS, Android TV and the TV browsers either
+  // do nothing or strand the person outside Jellyfin. In the TV layout such a link is left out, or,
+  // with { fallback }, drawn as that element with the same class and content but nothing to press.
+  // Every external link goes through here (tests/lint checks no other code sets target="_blank").
+  const externalLink = (attrs, children = [], { fallback = null } = {}) => {
+    if (root.classList.contains("layout-tv")) {
+      if (!fallback) return null;
+      // Nothing to press: no address, no tooltip promising one, no label saying it opens a tab.
+      return el(fallback, { ...attrs, href: null, title: null, "aria-label": null }, children);
+    }
+    return el("a", { ...attrs, target: "_blank", rel: "noopener noreferrer" }, children);
+  };
 
   const getJSON = (path, params) => api().getJSON(api().getUrl(path, params));
 
@@ -2564,7 +2579,8 @@
     ["Favorites", "Favourites"],
   ]);
   const localiseCopy = () => {
-    for (const node of document.querySelectorAll(`${JF.appBarTitle}, ${JF.libraryMenu} li, ${JF.page} ${JF.sectionTitle}`)) {
+    // The TV layout's header is Jellyfin's older one, with its own tab buttons ("Favorites").
+    for (const node of document.querySelectorAll(`${JF.appBarTitle}, ${JF.libraryMenu} li, ${JF.page} ${JF.sectionTitle}, ${JF.headerTabButton}`)) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       for (let text = walker.nextNode(); text; text = walker.nextNode()) {
         const next = BRITISH.get(text.nodeValue.trim());
@@ -2595,7 +2611,7 @@
   // Only a change that could carry one of those words queues a pass: new nodes anywhere but the
   // player, or a text edit inside the few places localiseCopy rewrites. The player's clock and
   // position ticks, and removals, cost nothing.
-  const COPY_HOSTS = [JF.appBar, JF.libraryMenu, JF.sectionTitle, JF.homeOfficialRating, JF.miscInfo].join(", ");
+  const COPY_HOSTS = [JF.appBar, JF.libraryMenu, JF.sectionTitle, JF.homeOfficialRating, JF.miscInfo, JF.headerTabButton].join(", ");
   const copyRelevant = (record) => {
     const host = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
     if (!host || host.closest(JF.videoOsdPage)) return false;
@@ -2940,6 +2956,8 @@
       prefs,
       appearances: APPEARANCES,
       isTv: () => root.classList.contains("layout-tv"),
+      /** `kit.externalLink(attrs, children, { fallback })`: a link out of Jellyfin, or null (or the fallback element) in the TV layout. */
+      externalLink,
       /** `kit.jf(module, key, root = document)`: the first match of a Jellyfin piece, or null (a null for a required key marks `module` partial). */
       jf: jfFirst,
       /** All matches, as an array; an empty one is a miss the same way. */

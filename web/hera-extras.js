@@ -678,16 +678,19 @@
         )
       : null;
 
+  // The logos and the JustWatch credit link out to the services; in the TV layout the logos stay as
+  // plain pictures and the credit as plain text (kit.externalLink's fallback).
   const elsewhereNode = (providers) => {
     if (!providers?.streaming?.length) return null;
+    const href = providers.link || "https://www.themoviedb.org/";
     const logos = providers.streaming.map((provider) => {
       const logo = el("img", { src: provider.logo, alt: provider.name, loading: "lazy", decoding: "async" });
-      return el("li", {}, el("a", { class: "hera-provider", href: providers.link || "https://www.themoviedb.org/", target: "_blank", rel: "noopener noreferrer", title: `Watch on ${provider.name}`, "aria-label": `Watch on ${provider.name}` }, logo));
+      return el("li", {}, kit.externalLink({ class: "hera-provider", href, title: `Watch on ${provider.name}`, "aria-label": `Watch on ${provider.name}` }, logo, { fallback: "span" }));
     });
     return el("section", { class: "hera-elsewhere", "aria-label": "Also on" }, [
       el("h3", { class: "hera-elsewhere__title", text: "Also on" }),
       el("ul", { class: "hera-elsewhere__list" }, logos),
-      el("a", { class: "hera-elsewhere__source", href: providers.link || "https://www.themoviedb.org/", target: "_blank", rel: "noopener noreferrer", text: "Streaming data from JustWatch" }),
+      kit.externalLink({ class: "hera-elsewhere__source", href }, "Streaming data from JustWatch", { fallback: "span" }),
     ]);
   };
 
