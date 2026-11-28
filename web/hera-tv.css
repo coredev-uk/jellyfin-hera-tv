@@ -1364,6 +1364,11 @@ html[data-hera-view="itemDetailPage"] .backdropContainer {
   background: var(--hera-fill-strong);
   color: var(--hera-label) !important;
 }
+/* On a TV these open a new tab there is nowhere to show (IMDb, TMDB and the rest); Hera's own
+ * links out are left out the same way (kit.externalLink in hera-tv.js). */
+.layout-tv .itemExternalLinks {
+  display: none !important;
+}
 
 /* Tracks and credits are inset grouped lists, as in Settings: one label column, one value column,
  * hairline separators, so the rows line up whatever they hold. */

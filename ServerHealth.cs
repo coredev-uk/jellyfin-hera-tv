@@ -11,8 +11,8 @@ namespace Jellyfin.Plugin.HeraTv;
 /// <param name="Message">The latest failure's message.</param>
 public sealed record ServerFault(string Feature, string Status, DateTimeOffset Since, int Count, string Message);
 
-/// <summary>When the web client's page was last rewritten, and the latest time it wasn't, with why.</summary>
-public sealed record InjectionState(DateTimeOffset? LastInjected, InjectionDecline? LastDecline);
+/// <summary>When the web client's page was last rewritten (and for which build of the assets), how many pages each build has had since the server started, and the latest time it wasn't rewritten, with why.</summary>
+public sealed record InjectionState(DateTimeOffset? LastInjected, Variant? LastVariant, int Modern, int Legacy, InjectionDecline? LastDecline);
 
 /// <summary>One time the page went out as Jellyfin made it.</summary>
 public sealed record InjectionDecline(DateTimeOffset At, string Reason);
@@ -28,6 +28,9 @@ public sealed class ServerHealth(ILogger<ServerHealth> logger)
     private readonly Lock gate = new();
     private readonly Dictionary<string, Entry> faults = new(StringComparer.Ordinal);
     private DateTimeOffset? lastInjected;
+    private Variant lastVariant;
+    private int modernPages;
+    private int legacyPages;
     private InjectionDecline? lastDecline;
 
     /// <summary>
@@ -88,24 +91,33 @@ public sealed class ServerHealth(ILogger<ServerHealth> logger)
         }
     }
 
-    /// <summary>Gets when the page was last rewritten, and the latest time it wasn't.</summary>
+    /// <summary>Gets when the page was last rewritten, for which build of the assets and how many pages each has had, and the latest time it wasn't.</summary>
     public InjectionState Injection
     {
         get
         {
             lock (gate)
             {
-                return new InjectionState(lastInjected, lastDecline);
+                return new InjectionState(lastInjected, lastInjected is null ? null : lastVariant, modernPages, legacyPages, lastDecline);
             }
         }
     }
 
-    /// <summary>Notes that a page went out with Hera TV in it.</summary>
-    public void Injected()
+    /// <summary>Notes that a page went out with Hera TV in it, and which build of the assets it was given.</summary>
+    public void Injected(Variant variant)
     {
         lock (gate)
         {
             lastInjected = DateTimeOffset.UtcNow;
+            lastVariant = variant;
+            if (variant == Variant.Legacy)
+            {
+                legacyPages++;
+            }
+            else
+            {
+                modernPages++;
+            }
         }
 
         Recovered(InjectionFeature);

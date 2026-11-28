@@ -466,13 +466,7 @@
         el("p", {
           text: "Your Jellyfin account isn't linked to Seerr, so you can't request from here. Sign in to Seerr with your Jellyfin account once, then come back.",
         }),
-        ctx.seerrUrl
-          ? el(
-              "a",
-              { class: "hera-btn hera-btn--glass hera-btn--text", href: ctx.seerrUrl, target: "_blank", rel: "noopener noreferrer" },
-              [icon("open_in_new"), "Open Seerr"],
-            )
-          : null,
+        ctx.seerrUrl ? kit.externalLink({ class: "hera-btn hera-btn--glass hera-btn--text", href: ctx.seerrUrl }, [icon("open_in_new"), "Open Seerr"]) : null,
       ]);
 
     const paintActions = () => {
@@ -544,15 +538,11 @@
           }
         }
 
-        if (ctx.details.trailer) {
-          buttons.push(
-            el(
-              "a",
-              { class: "hera-btn hera-btn--glass hera-btn--text", href: ctx.details.trailer, target: "_blank", rel: "noopener noreferrer" },
-              [icon("smart_display"), "Trailer"],
-            ),
-          );
-        }
+        // A trailer here is YouTube in a new tab: a TV can't open one, so it gets none (kit.externalLink).
+        const trailerLink = ctx.details.trailer
+          ? kit.externalLink({ class: "hera-btn hera-btn--glass hera-btn--text", href: ctx.details.trailer }, [icon("smart_display"), "Trailer"])
+          : null;
+        if (trailerLink) buttons.push(trailerLink);
       }
 
       if (ctx.notice) {
@@ -781,10 +771,8 @@
   const featureSlide = (item) => {
     const when = unreleased(item) ? `Out ${kit.text.longDate(item.releaseDate)}` : item.year;
     const meta = ["Trending Now", kindOf(item), when, item.rating ? `${item.rating.toFixed(1)} rating` : null].filter(Boolean);
-    const trailer = el("a", { class: "hera-btn hera-btn--glass hera-btn--text", target: "_blank", rel: "noopener noreferrer", hidden: true }, [
-      icon("smart_display"),
-      "Trailer",
-    ]);
+    // Null in the TV layout, where the YouTube link has nowhere to open (loadTrailer then skips it).
+    const trailer = kit.externalLink({ class: "hera-btn hera-btn--glass hera-btn--text", hidden: true }, [icon("smart_display"), "Trailer"]);
     const slide = el("div", { class: "hera-discover__feature-slide", "aria-label": item.title, "data-hera-key": keyOf(item) }, [
       // No src yet: show() hands it over when the slide comes up next. Lazy loading can't defer
       // these, as the slides are stacked in the viewport, so all six would load at once.
@@ -848,7 +836,7 @@
     };
     // The trailer button appears once the title's details say it has one.
     const loadTrailer = (slide) => {
-      if (slide.heraTrailerLoaded) return;
+      if (slide.heraTrailerLoaded || !slide.heraTrailer) return;
       slide.heraTrailerLoaded = true;
       fetchTitle(slide.heraItem.mediaType, slide.heraItem.tmdbId)
         .then((details) => {

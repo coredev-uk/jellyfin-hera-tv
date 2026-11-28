@@ -16,7 +16,7 @@ const rules = {
 };
 
 export default [
-  { ignores: ["node_modules/**", "tests/**", "obj/**", "bin/**", "out/**", "assets/**"] },
+  { ignores: ["node_modules/**", "tests/**", "obj/**", "bin/**", "out/**", "assets/**", "web-legacy/**"] },
   {
     files: ["web/*.js"],
     plugins: { hera: { rules: { "jellyfin-selectors": jellyfinSelectors } } },

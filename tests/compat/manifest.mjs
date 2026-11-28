@@ -42,7 +42,7 @@ export const manifestEntries = (source) => {
   const entries = [];
   for (const line of source.split("\n")) {
     const literals = [...line.matchAll(/"([^"\\]*)"/g)].map((match) => match[1]);
-    const isHeraFile = (value) => /^hera-[\w-]+\.(css|js)$/.test(value) && !/-bundle\.(css|js)$/.test(value);
+    const isHeraFile = (value) => /^hera-[\w-]+\.(css|js)$/.test(value) && !/-bundle(-legacy)?\.(css|js)$/.test(value);
     const script = literals.find((value) => isHeraFile(value) && value.endsWith(".js")) ?? null;
     literals.forEach((literal, index) => {
       if (!isHeraFile(literal)) return;

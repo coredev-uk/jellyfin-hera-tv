@@ -296,25 +296,25 @@
 
   // ---------- "open in" links ---------------------------------------------------------------
   // The server names only the services this person may open: Seerr for everyone, Radarr, Sonarr
-  // and SABnzbd for administrators. Each opens in a new tab.
+  // and SABnzbd for administrators. Each opens in a new tab, so none is drawn in the TV layout
+  // (kit.externalLink).
 
   const EXTERNAL = [["seerr", "Seerr"], ["radarr", "Radarr"], ["sonarr", "Sonarr"], ["sabnzbd", "SABnzbd"]];
 
   const externalLinks = (links, { short = false } = {}) =>
-    EXTERNAL.filter(([key]) => links?.[key]).map(([key, name]) =>
-      el(
-        "a",
-        {
-          class: "hera-ext__link",
-          href: links[key],
-          target: "_blank",
-          rel: "noopener noreferrer",
-          title: `Open in ${name}`,
-          "aria-label": `Open in ${name}, opens in a new tab`,
-        },
-        [icon("open_in_new"), el("span", { text: short ? name : `Open in ${name}` })],
-      ),
-    );
+    EXTERNAL.filter(([key]) => links?.[key])
+      .map(([key, name]) =>
+        kit.externalLink(
+          {
+            class: "hera-ext__link",
+            href: links[key],
+            title: `Open in ${name}`,
+            "aria-label": `Open in ${name}, opens in a new tab`,
+          },
+          [icon("open_in_new"), el("span", { text: short ? name : `Open in ${name}` })],
+        ),
+      )
+      .filter(Boolean);
 
   /** Fills a `.hera-ext` host; unchanged links leave the nodes alone, so a focused one stays focused. */
   const paintLinks = (host, links, options) => {

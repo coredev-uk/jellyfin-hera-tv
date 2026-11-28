@@ -129,15 +129,14 @@
       ]),
       notice.read ? null : el("span", { class: "hera-nt__dot", "aria-hidden": "true" }),
     ];
+    // A notice that points out of Jellyfin (Seerr) opens in a new tab; a TV has nowhere to open it,
+    // so there it is a plain button that only marks the notice read (kit.externalLink's fallback).
     const external = href && !href.startsWith("#");
-    const main = el(href ? "a" : "button", {
-      class: "hera-nt__item",
-      href,
-      type: href ? null : "button",
-      target: external ? "_blank" : null,
-      rel: external ? "noopener noreferrer" : null,
-    }, children);
-    main.addEventListener("click", () => opts.onOpen?.(notice, { href }));
+    const main = external
+      ? kit.externalLink({ class: "hera-nt__item", href }, children, { fallback: "button" })
+      : el(href ? "a" : "button", { class: "hera-nt__item", href, type: href ? null : "button" }, children);
+    if (main.tagName === "BUTTON") main.type = "button";
+    main.addEventListener("click", () => opts.onOpen?.(notice, { href: main.tagName === "A" ? href : null }));
 
     const posters = (notice.items || []).slice(0, POSTERS);
     const more = (notice.items?.length || 0) - posters.length;
