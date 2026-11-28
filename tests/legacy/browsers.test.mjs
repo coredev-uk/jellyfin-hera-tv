@@ -58,6 +58,7 @@ const LEGACY = {
   "Android 6 WebView on Chrome 74": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.3729.136 Mobile Safari/537.36",
   "desktop Safari 13": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Safari/605.1.15",
   "iPhone Safari 12": "Mozilla/5.0 (iPhone; CPU iPhone OS 12_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1.2 Mobile/15E148 Safari/604.1",
+  "headless Chromium 63": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/63.0.3239.0 Safari/537.36",
 };
 
 test("the floors are Chromium 85 and Safari 14", () => {

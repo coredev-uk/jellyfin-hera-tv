@@ -1,14 +1,14 @@
 {
   "category": "General",
-  "changelog": "- Older TVs work: browsers on Chromium engines older than 85 (the browsers of Samsung TVs up to 2021 and the LG webOS app up to webOS 6) get a version of Hera built for them. Checked on Chromium 63, a 2019 Samsung's engine: it looks like Hera apart from the frosted glass. Engines older than Chromium 57 (2018 Samsungs, webOS 4) lay out some rows more plainly. Modern browsers get exactly what they did before.\n- A browser too old for the version it was sent shows Jellyfin's own pages instead of a half-styled one.\n- In the TV layout, links that would open another site (Seerr, YouTube trailers, streaming services, Letterboxd, IMDb) are left out; streaming logos stay as plain pictures.\n- The TV layout's header says Favourites.",
+  "changelog": "- Headless Chromium (HeadlessChrome/<n>) is recognised by its engine version, so an old one gets the build for older browsers.",
   "description": "Apple TV-style theme, home hero and season shelves for the web client.",
   "guid": "9718b214-55d6-4828-84c8-677f2a4a131b",
   "name": "Hera TV",
   "overview": "The Apple TV app's look for Jellyfin's web client",
   "owner": "coredev-uk",
   "targetAbi": "12.4.0.0",
-  "timestamp": "2026-11-28T21:00:00.0000000Z",
-  "version": "1.15.0.0",
+  "timestamp": "2026-11-28T22:00:00.0000000Z",
+  "version": "1.15.1.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": ["Jellyfin.Plugin.HeraTv.dll"]
