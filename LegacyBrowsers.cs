@@ -21,9 +21,10 @@ internal static partial class LegacyBrowsers
     internal const int SafariFloor = 14;
 
     // A browser's Chromium: the Chrome/<n> token that nearly all of them carry (Edge, Samsung Internet,
-    // Electron, Android's WebView and QtWebEngine as well), or, on Samsung's newer TVs, which name the
-    // engine by its bare version ("85.0.4183.93/6.0 TV Safari").
-    [GeneratedRegex(@"\b(?:Chrome|Chromium)/(\d+)")]
+    // Electron, Android's WebView and QtWebEngine as well, and headless Chromium as HeadlessChrome/<n>,
+    // which a bare \bChrome would miss), or, on Samsung's newer TVs, which name the engine by its bare
+    // version ("85.0.4183.93/6.0 TV Safari").
+    [GeneratedRegex(@"\b(?:HeadlessChrome|Chrome|Chromium)/(\d+)")]
     private static partial Regex ChromeToken();
 
     [GeneratedRegex(@"\b(\d+)(?:\.\d+){3}(?:\.\d+)?/\d+\.\d+ TV Safari/")]
