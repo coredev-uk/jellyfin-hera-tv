@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/coredev-uk/jellyfin-hera-tv/main/assets/plugin-banner.png",
     "versions": [
       {
+        "version": "1.15.1.0",
+        "changelog": "[What's new in 1.15.1.0, on GitHub](https://github.com/coredev-uk/jellyfin-hera-tv/releases/tag/v1.15.1.0)",
+        "targetAbi": "12.4.0.0",
+        "sourceUrl": "https://github.com/coredev-uk/jellyfin-hera-tv/releases/download/v1.15.1.0/hera-tv_1.15.1.0.zip",
+        "checksum": "12c27e5bf6a29a7a67d80e9f9543ad7d",
+        "timestamp": "2026-11-28T02:58:51Z"
+      },
+      {
         "version": "1.15.0.0",
         "changelog": "[What's new in 1.15.0.0, on GitHub](https://github.com/coredev-uk/jellyfin-hera-tv/releases/tag/v1.15.0.0)",
         "targetAbi": "12.4.0.0",
